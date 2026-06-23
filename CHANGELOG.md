@@ -3,6 +3,23 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.1.2] — 2026-06-23
+Silent-omission hardening — extends the gap-audit honesty guard to the other gate scripts
+(a self-audit found the same "passes because nothing was checked" pattern elsewhere).
+### Fixed
+- **verbatim_check: a missing source target no longer mislabels the matched source.**
+  `zip(targets, present-only-texts)` misaligned when an earlier target was missing, so a
+  quote could be reported as matching the wrong source. Each label now travels with its own
+  normalized text.
+### Added
+- **verbatim_check: vacuous-pass warning.** With 0 quotes or 0 readable sources, `MISS 0` /
+  passing `--strict` means "nothing was checked", not "all quotes match" — now surfaced in
+  the report and on stderr (also notes missing declared sources).
+- **score_report: vacuous-pass + incomplete-scoring warnings.** Passing `--strict` with 0
+  scored sections ("nothing scored"), or scored sections missing axes (an absent axis is
+  never counted as below-threshold), are now surfaced in the report and on stderr.
+- Existing `--strict` behavior is unchanged (warnings only); these mirror gap-audit's guard.
+
 ## [0.1.1] — 2026-06-23
 ### Fixed
 - **gap-audit coverage counts recognized schema keys only.** `_count_paths` used to

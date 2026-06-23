@@ -69,22 +69,25 @@ def main():
     rubric = (ra.get("priority_rubric") or {}).get("weights") or {}
 
     # Priority weighting: more failing axes and larger deficits increase weight + rubric bonus (axis name matches a weights key → added)
-    rows, below = [], []        # below: (sid, title, list of failing axes)
+    rows, below, incomplete = [], [], []   # below: failing axes · incomplete: scored but missing/non-int axes
+    total_secs = len(m.get("sections", []) or [])
     for s in m.get("sections", []) or []:
         sc = s.get("scores")
         if not isinstance(sc, dict) or not sc:
             continue
         sid = s["id"]; title = s.get("title", "")
         per_axis, deficit, weight = {}, 0, 0
-        miss_axes = []
+        miss_axes, absent_axes = [], []
         for ax in axes:
             v = sc.get(ax)
             per_axis[ax] = v
-            if isinstance(v, int):
+            if isinstance(v, int) and not isinstance(v, bool):
                 if v < thr:
                     deficit += (thr - v)
                     miss_axes.append(ax)
                     weight += int(rubric.get(ax, 1))
+            else:
+                absent_axes.append(ax)   # missing or non-int → this axis was never actually scored
         # non-axis rubric keys (regulatory, blocking, etc.) are added as section flags
         for k, w in rubric.items():
             if k not in axes and s.get(k):
@@ -93,15 +96,29 @@ def main():
         rows.append((sid, title, per_axis, deficit, prio))
         if miss_axes:
             below.append((sid, title, miss_axes))
+        if absent_axes:
+            incomplete.append((sid, title, absent_axes))
+
+    # honesty guard: a passing --strict is vacuous when nothing was scored, or when scored
+    # sections left axes unfilled (an absent axis is never counted as below-threshold).
+    scoring_blind = len(rows) == 0 and total_secs > 0
 
     rows.sort(key=lambda r: r[4], reverse=True)   # sort by priority weight descending
 
     title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     L = [f"# {esc(title)} — review/audit scoring report (internal, not for release)", "",
-         f"> Auto-generated: `score_report.py` · generated: **{gen_at}** · scale {smin}~{smax}, pass threshold **{thr}**. Not included in the release.", "",
-         f"- scored sections: **{len(rows)}**  ·  below-threshold sections: **{len(below)}**",
-         f"- axes: " + (", ".join(axes)), ""]
+         f"> Auto-generated: `score_report.py` · generated: **{gen_at}** · scale {smin}~{smax}, pass threshold **{thr}**. Not included in the release.", ""]
+    if scoring_blind:
+        L += [f"> ⚠️ **Nothing scored: 0 of {total_secs} section(s) have scores.** A passing "
+              "`--strict` here does NOT mean scoring passed — no section was scored. Add "
+              "`scores: {{…}}` to sections (filled by a verifier) and re-run.", ""]
+    elif incomplete:
+        L += [f"> ⚠️ **Incomplete scoring: {len(incomplete)} scored section(s) are missing one or "
+              "more axes** (shown as `—`). A missing axis is never counted as below-threshold, so "
+              "`--strict` can pass with axes that were never scored.", ""]
+    L += [f"- scored sections: **{len(rows)}**/{total_secs}  ·  below-threshold sections: **{len(below)}**  ·  incomplete (missing axes): **{len(incomplete)}**",
+          f"- axes: " + (", ".join(axes)), ""]
 
     L += ["## 1. Per-section scores (sorted by priority weight)", ""]
     if rows:
@@ -124,12 +141,25 @@ def main():
             L.append(f"| {esc(sid)} | {esc(t)} | {esc(', '.join(miss))} |")
     else:
         L.append("_None below threshold._")
+
+    L += ["", "## 3. Incomplete scoring (scored sections missing one or more axes)", ""]
+    if incomplete:
+        L += ["| section | title | missing axes |", "|------|------|------|"]
+        for sid, t, miss in incomplete:
+            L.append(f"| {esc(sid)} | {esc(t)} | {esc(', '.join(miss))} |")
+    else:
+        L.append("_None — every scored section has all axes._")
     L.append("")
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
     print(f"review-audit report: {out}  (scored {len(rows)} / below-threshold {len(below)} / threshold {thr})")
+    if scoring_blind:
+        print(f"[warn] scoring not run: 0 of {total_secs} section(s) scored "
+              "— a passing --strict does not imply scoring passed", file=sys.stderr)
+    elif incomplete:
+        print(f"[warn] {len(incomplete)} scored section(s) missing one or more axes (incomplete scoring)", file=sys.stderr)
 
     if a.strict and below:
         sys.exit(f"[scoring gate FAILED] {len(below)} section(s) below pass_threshold({thr})")
