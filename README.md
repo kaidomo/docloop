@@ -35,11 +35,14 @@ docloop의 해법은 문제를 둘로 쪼개는 것이다:
 
 - **What *can* be made convergent** — factual accuracy, internal/cross-document
   consistency, policy compliance — is driven by loops with real checks: gap-audit
-  (fan-out consistency), scripted release gates, and an **external model as a
-  stand-in oracle** (the review stage: Codex/Gemini/another Claude critiques the draft).
+  (fan-out consistency), scripted release gates, and an **external model as
+  independent pressure** (the review stage: Codex/Gemini/another Claude attacks the
+  draft — an *attention* test, not a *truth* test, since a second model shares the
+  first's blind spots).
   <br>**수렴시킬 수 있는 것**(사실 정확성, 문서 내·문서 간 정합, 정책 준수)은 실제 점검이 있는
-  루프로 돌린다: gap-audit(팬아웃 정합 점검), 스크립트 릴리스 게이트, 그리고 **외부 모델을 대리
-  Oracle로** 둔다(review 단계에서 Codex·Gemini·다른 Claude가 초안을 교차 검증).
+  루프로 돌린다: gap-audit(팬아웃 정합 점검), 스크립트 릴리스 게이트, 그리고 **외부 모델을 독립적
+  압력으로** 둔다(review 단계에서 Codex·Gemini·다른 Claude가 초안을 공격 — 두 번째 모델도 첫 모델의
+  맹점을 상당 부분 공유하므로 진짜 Oracle은 아니고, 정답 판정이 아니라 주의환기 점검).
 - **What can't** — voice, judgment, the actual decisions — stays **outside the loop,
   with the human.** The harness surfaces gaps and stops; it never manufactures consensus.
   <br>**수렴시킬 수 없는 것**(문체, 판단, 실제 의사결정)은 **루프 밖, 사람의 몫**으로 둔다.
@@ -89,7 +92,7 @@ orgs, swap that one file. See `templates/policy.example.yaml`.
 
 ```
 bin/docloop          thin launcher (wraps codex / claude -p)
-prompts/             the five stage prompts (plan/draft/gap-audit/review)
+prompts/             the four stage prompts (plan/draft/gap-audit/review); split is script-driven
 lib/                 python scripts: init, validate, gap_audit, split, approval_brief, stage, ...
 templates/           policy + manifest skeletons, review-brief template
 docs/design.md       why writing harnesses differ from coding harnesses
