@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# docloop — a thin writing harness.
+#
+# It does NOT add a runtime or an agent. It wraps the model CLI you already use
+# (codex or claude -p) and feeds it docloop's stage prompts + your work-folder
+# context. The IP is the prompts (prompts/), the scripts (lib/), and the loop
+# discipline — not this launcher.
+#
+# Model: set DOCLOOP_MODEL=codex (default) or DOCLOOP_MODEL=claude.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROMPTS="$ROOT/prompts"
+LIB="$ROOT/lib"
+MODEL="${DOCLOOP_MODEL:-codex}"
+
+die() { echo "docloop: $*" >&2; exit 1; }
+
+# run_model <prompt-text> <rw|ro>
+# Feeds the assembled prompt to the configured model CLI, in the current folder.
+run_model() {
+  local prompt="$1" mode="${2:-rw}"
+  case "$MODEL" in
+    codex)
+      if [ "$mode" = "ro" ]; then
+        codex exec --skip-git-repo-check --sandbox read-only "$prompt"
+      else
+        codex exec --skip-git-repo-check "$prompt"
+      fi ;;
+    claude)
+      # claude -p runs headless; permissions are governed by the user's settings.
+      claude -p "$prompt" ;;
+    *) die "unknown DOCLOOP_MODEL '$MODEL' (use codex or claude)" ;;
+  esac
+}
+
+# stage_prompt <stage-file> <extra user text...>
+# Assemble: the stage prompt + work-folder context + the user's request.
+stage_prompt() {
+  local file="$PROMPTS/$1"; shift
+  [ -f "$file" ] || die "no such stage prompt: $file"
+  cat "$file"
+  printf '\n\n---\n## Run context\n'
+  printf -- '- Work folder: %s\n' "$PWD"
+  printf -- '- docloop lib (scripts): %s\n' "$LIB"
+  [ -f "$PWD/manifest.yaml" ] && printf -- '- Manifest: %s/manifest.yaml\n' "$PWD"
+  [ "$#" -gt 0 ] && printf -- '- User request: %s\n' "$*"
+}
+
+usage() {
+  cat <<EOF
+docloop — a thin writing harness (wraps codex / claude -p)
+
+  docloop init <folder> [inputs...]   scaffold a work folder (inputs/ work/ outputs/ reports/)
+  docloop plan   [request...]         vague ask -> structured manifest (intake interview)
+  docloop draft  [notes...]           write sections from evidence (reconcile)
+  docloop audit                       gap-audit: find contradictions (fan-out) + report
+  docloop review <name> <target...>   the Oracle loop: external-model cross-review
+  docloop split  [manifest.yaml]      regenerate publish pages from the SSOT
+  docloop gate   [manifest.yaml]      release gate (gap_audit.py --strict)
+
+Env: DOCLOOP_MODEL=codex|claude (default codex)   DOCLOOP_REVIEW_DIR=~/.docloop/reviews
+Run plan/draft/audit from inside the work folder.
+EOF
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  init)
+    [ "$#" -ge 1 ] || die "usage: docloop init <folder> [inputs...]"
+    python3 "$LIB/init_workspace.py" "$@" ;;
+  plan)   run_model "$(stage_prompt plan.md "$@")"  rw ;;
+  draft)  run_model "$(stage_prompt draft.md "$@")" rw ;;
+  audit)  run_model "$(stage_prompt gap-audit.md "$@")" rw ;;
+  review)
+    [ "$#" -ge 2 ] || die "usage: docloop review <name> <target...>"
+    name="$1"; shift
+    python3 "$LIB/stage.py" "$name" "$@"
+    echo "docloop: review folder staged. Now fill REVIEW_BRIEF.md, then follow prompts/review.md." ;;
+  split)  python3 "$LIB/split.py" "${1:-manifest.yaml}" ;;
+  gate)   python3 "$LIB/gap_audit.py" "${1:-manifest.yaml}" --strict ;;
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command '$cmd' (try: docloop --help)" ;;
+esac

@@ -1,0 +1,87 @@
+# policy.example.yaml — generic example policy (the "house style" layer)
+#
+# This file is the part docloop keeps OUT of the engine: your org's section
+# order, required sections, glossary, forbidden words, tone, and Definition of
+# Done. The prompts and scripts never hardcode any of this — they read it here.
+# Swap orgs => swap this one file, leave everything else untouched.
+#
+# This example is intentionally generic (a fictional SaaS team). Copy it to your
+# project, rename to policy.yaml, and edit. Point manifest.project.policy at it.
+
+org:
+  name: Acme                      # your org name
+  product_default: "Acme Cloud"   # default product when manifest omits it
+
+# Guiding principles — the spirit gap-audit and DoD judge against.
+principles:
+  - "Share only what is decided — drafts/undecided stay out of the body (park them in open_questions)."
+  - "Broadcast every change immediately — a silent change is an incident."
+  - "Evidence is truth — write from sources (decisions, code, policy), not from plausible prose."
+
+# Waiver policy — a required section may legitimately not apply; if so, proceed
+# and justify it. gap-audit does NOT hard-fail a justified omission.
+waiver:
+  required_section_missing:
+    allowed_with_justification: true
+    mechanism: "record in open_questions as {status: deferred, note: <justification>}"
+    hard_fail_without: true       # a required section omitted with no justification fails the release gate
+
+# ── Document types: required sections and order ───────────────────────────
+# manifest.project.doc_type must be one of these keys.
+# Per-section fields: id / title / required.
+doc_types:
+
+  PRD:
+    title_pattern: "{product} - {feature} PRD"
+    sections:
+      - {id: overview,     title: "Overview / Background",                 required: true}
+      - {id: problem,      title: "Problem (with data/qualitative evidence)", required: true}
+      - {id: users-jtbd,   title: "Target Users / Jobs-To-Be-Done",       required: true}
+      - {id: goals,        title: "Goals / Success Metrics",              required: true}
+      - {id: scope,        title: "In Scope",                            required: true}
+      - {id: non-goals,    title: "Non-Goals (explicit)",                required: true}
+      - {id: requirements, title: "Requirements + Acceptance Criteria",  required: true}
+      - {id: edge-cases,   title: "Edge Cases / Error Handling",         required: true}
+      - {id: assumptions,  title: "Assumptions / Constraints",           required: true}
+      - {id: open,         title: "Open Questions / Decision Log",        required: true}
+
+  policy_doc:
+    title_pattern: "{feature} Policy"
+    sections:
+      - {id: purpose,      title: "Purpose / Scope",  required: true}
+      - {id: rules,        title: "Policy Rules",     required: true}
+      - {id: exceptions,   title: "Exceptions",       required: true}
+
+# ── Tone / glossary ───────────────────────────────────────────────────────
+tone:
+  voice: plain            # plain | formal | conversational
+  callouts: ["🚨 Warning", "ℹ️ Note", "📝 Decision"]
+  glossary:               # prefer `use`, avoid the listed alternatives
+    - {use: "case",   avoid: ["ticket", "item"]}
+    - {use: "submit", avoid: ["send in", "file"]}
+  forbidden:
+    - {term: "etc.",          why: "scope ambiguous — enumerate or cut"}
+    - {term: "later",         why: "no deadline → move to open_questions"}
+    - {term: "appropriately", why: "no criterion stated"}
+
+# ── Approval line (informational — docloop does NOT verify signatures) ─────
+approval:
+  lines:
+    - {role: "Product Lead",     required: true}
+    - {role: "Engineering Lead", required: true}
+    - {role: "Design",           required: false, when: "screen/flow changes"}
+    - {role: "QA",               required: false, when: "AC/edge-case changes"}
+
+# ── Output / publishing ───────────────────────────────────────────────────
+output:
+  platform: markdown         # split produces plain markdown pages; a human imports them
+  page_pattern: "{feature} PRD"
+  approval_brief: true       # auto-extract a reviewer one-pager (purpose/scope/open/decisions)
+
+# ── Definition of Done (release gate) ─────────────────────────────────────
+# Enforcement split: [machine] = a script blocks it; [human/fan-out] = an agent
+# must reflect it into the manifest, then a script gate closes it.
+definition_of_done:
+  required_sections_approved: true   # [human/fan-out] applicable required sections status=approved
+  open_questions_zero: true          # [machine] gap_audit.py --strict — unresolved open_questions == 0 (deferred/resolved pass)
+  gaps_zero: true                    # [machine] gap_audit.py --strict — gaps == 0 (accept by moving to decisions[] with reason)

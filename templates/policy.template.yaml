@@ -1,0 +1,39 @@
+# policy.template.yaml — blank skeleton. Copy to policy.yaml and fill in.
+# See policy.example.yaml for a worked example and field docs.
+
+org:
+  name:                       # your org name
+  product_default:            # default product name
+
+principles: []                # guiding principles gap-audit/DoD judge against
+
+waiver:
+  required_section_missing:
+    allowed_with_justification: true
+    mechanism: "record in open_questions as {status: deferred, note: <justification>}"
+    hard_fail_without: true
+
+doc_types:
+  PRD:
+    title_pattern: "{product} - {feature} PRD"
+    sections:
+      - {id: , title: , required: true}
+
+tone:
+  voice: plain
+  callouts: []
+  glossary: []
+  forbidden: []
+
+approval:
+  lines: []
+
+output:
+  platform: markdown
+  page_pattern: "{feature}"
+  approval_brief: true
+
+definition_of_done:
+  required_sections_approved: true
+  open_questions_zero: true
+  gaps_zero: true

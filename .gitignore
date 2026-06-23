@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# docloop runtime artifacts (never commit a user's work folder or reviews)
+/.docloop/
+*.work/
+work/
+outputs/
+reports/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# session/tooling artifacts
+.omc/

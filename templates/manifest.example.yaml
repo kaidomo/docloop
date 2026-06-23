@@ -1,0 +1,57 @@
+# manifest.yaml — the state backbone (single source of truth for doc state).
+# Lives at the root of your work folder (init_workspace.py creates the layout:
+# inputs/ outputs/ work/ reports/). docloop reconciles this against reality.
+project:
+  doc_type: PRD                      # ★ one of the keys in policy.yaml doc_types
+  product: Acme Cloud
+  title: Case Submission PRD
+  ssot: PRD_case-submission.md       # the unified body (edit ONLY here) — work-folder root
+  policy: ./policy.yaml              # ★ your house-style file (the variable layer)
+  output_dir: outputs                # split output folder (derived, regenerated)
+
+  # Cross-audit targets — if set, gap-audit checks PRD ↔ downstream consistency.
+  # Omit to check internal consistency only. Use placeholder paths for your repo/design.
+  downstream:
+    storyboard: ../storyboard/case-submit.html
+    policy_docs: ["./inputs/submission-policy.md"]
+
+  # Fan-out input roots for gap-audit (product-specific; not hardcoded in the engine).
+  sources:
+    code_roots: ["~/code/your-frontend/src", "~/code/your-backend"]
+    design: ["~/design/figma-export"]
+    prototypes: ["~/proto/case-submit.html"]
+
+# Section state — status: draft | review | approved | pending
+# Keep id/title aligned with policy.yaml doc_types[doc_type].sections.
+sections:
+  # (A) evidence secured, written into the body
+  - id: goals
+    title: "Goals / Success Metrics"
+    status: approved
+    sources: ["JIRA TICKET-1544", "kickoff decision d1"]
+
+  # (B) drafting — where evidence and body diverge, record as gaps (don't write it into the body)
+  - id: requirements
+    title: "Requirements"
+    status: draft
+    sources: ["CaseSubmitForm REQUIRED_FIELDS", "submission-policy.md §3"]
+    gaps:
+      - "PRD says '5 required fields' vs code REQUIRED_FIELDS has 4 (phone is optional)"   # evidence↔body (D)
+      - "Storyboard case-submit.html has no 'Viewer' role screen vs PRD §4"                # cross (D)
+
+  # (C) undecided — leave pending, don't write into the body (no fake confirmation)
+  - id: edge-cases
+    title: "Edge Cases / Error Handling"
+    status: pending
+    sources: []
+
+# Open questions (E) — ambiguity-gate hits. A human must resolve before proceeding.
+# status: open | resolved | deferred. deferred passes the gate but needs a note.
+open_questions:
+  - {id: q1, topic: "Concurrent submission conflict", reason: "policy undecided", owner: "Product Lead", status: open}
+  - {id: q2, topic: "Viewer role scope", reason: "awaiting security sign-off", owner: "Security", status: deferred, note: "deferred to R2 (agreed 2025-xx-xx)"}
+
+# Decision log — traceability. Only a human records confirmed decisions (no auto-confirm).
+decisions:
+  - {id: d1, date: 2025-01-01, decision: "Three roles: Admin/Editor/Viewer", by: "Product Lead"}
+  - {id: d2, date: 2025-01-02, decision: "Phone field is optional", by: "Engineering Lead"}
