@@ -81,13 +81,14 @@ def main():
         for ax in axes:
             v = sc.get(ax)
             per_axis[ax] = v
-            if isinstance(v, int) and not isinstance(v, bool):
+            if v is None:                # axis not scored at all → incomplete (additive; never feeds `below`)
+                absent_axes.append(ax)
+                continue
+            if isinstance(v, int):       # threshold logic unchanged (validate_manifest already rejects non-int/bool scores)
                 if v < thr:
                     deficit += (thr - v)
                     miss_axes.append(ax)
                     weight += int(rubric.get(ax, 1))
-            else:
-                absent_axes.append(ax)   # missing or non-int → this axis was never actually scored
         # non-axis rubric keys (regulatory, blocking, etc.) are added as section flags
         for k, w in rubric.items():
             if k not in axes and s.get(k):
