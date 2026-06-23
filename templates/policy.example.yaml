@@ -16,7 +16,7 @@ org:
 principles:
   - "Share only what is decided — drafts/undecided stay out of the body (park them in open_questions)."
   - "Broadcast every change immediately — a silent change is an incident."
-  - "Evidence is truth — write from sources (decisions, code, policy), not from plausible prose."
+  - "Evidence over assertion — write from sources (decisions, code, policy), not from plausible prose."
 
 # Waiver policy — a required section may legitimately not apply; if so, proceed
 # and justify it. gap-audit does NOT hard-fail a justified omission.

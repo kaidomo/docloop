@@ -33,8 +33,10 @@ what is decided vs. what is still open.
    manufactures false consensus.
 
 ## Hard rules
-- Evidence is truth. A claim with no source does not go in the body — it goes in
-  `open_questions` (undecided) or `gaps` (evidence contradicts the draft).
+- Evidence over assertion. A claim with no source does not go in the body — it
+  goes in `open_questions` (undecided) or `gaps` (evidence contradicts the draft).
+  Evidence isn't *truth*, though: sources are what the org committed to, not proof
+  it's right. Surface conflicts; don't adjudicate which reality wins.
 - House-style (section order, glossary, forbidden words, tone) comes from
   `policy.yaml`. Never hardcode it.
 - Idempotent: if a manifest already exists, only update sections that got new
