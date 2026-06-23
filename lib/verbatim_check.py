@@ -134,17 +134,19 @@ def main():
     if proj.get("ssot") and os.path.exists(ssot_path):
         body = open(ssot_path, encoding="utf-8").read()
 
-    # load source targets + SHA
+    # load source targets + SHA. Keep each label paired with its own normalized text so a
+    # missing target can't shift the matched-source label (a plain zip(targets, present-only
+    # texts) would misalign when an earlier target is missing).
     targets = load_targets(m, base, proj)
-    src_texts, src_rows = [], []
+    present_sources, src_rows, n_missing = [], [], 0   # present_sources: (label, normalized text)
     for label, path in targets:
         if os.path.exists(path):
             txt = open(path, encoding="utf-8").read()
-            src_texts.append(txt)
+            present_sources.append((label, _norm_ws(txt)))
             src_rows.append((label, sha16(txt), "OK"))
         else:
+            n_missing += 1
             src_rows.append((label, "—", "missing"))
-    norm_sources = [_norm_ws(t) for t in src_texts]
 
     quotes = collect_quotes(m, body)
     results = []   # (quote excerpt, verdict, matched source label)
@@ -152,15 +154,15 @@ def main():
     for q in quotes:
         nq = _norm_ws(q)
         verdict, where = "MISS", ""
-        # FULL: exact-substring (after normalization) against any source
-        for (label, _p), ns in zip(targets, norm_sources):
+        # FULL: exact-substring (after normalization) against any present source
+        for label, ns in present_sources:
             if nq and nq in ns:
                 verdict, where = "FULL", label
                 break
         if verdict == "MISS" and nq:
-            # PARTIAL: check if at least a leading 60% chunk of the quote appears in any source
+            # PARTIAL: check if at least a leading 60% chunk of the quote appears in any present source
             cut = nq[: max(8, int(len(nq) * 0.6))]
-            for (label, _p), ns in zip(targets, norm_sources):
+            for label, ns in present_sources:
                 if cut and cut in ns:
                     verdict, where = "PARTIAL", label
                     break
@@ -172,12 +174,22 @@ def main():
             n_miss += 1
         results.append((q, verdict, where))
 
+    # honesty guard: a passing --strict is vacuous if there were no quotes or no readable
+    # source to check them against — "MISS 0" then means "nothing checked", not "all match".
+    verify_blind = not quotes or not present_sources
+
     title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     L = [f"# {esc(title)} — verbatim check report (internal, not for release)", "",
-         f"> Auto-generated: `verbatim_check.py` · generated: **{gen_at}** · exact-substring (whitespace-normalized). Not included in the release.", "",
-         f"- quotes: **{len(quotes)}**  ·  exact (FULL) **{n_full}** · partial (PARTIAL) {n_partial} · no match (MISS) **{n_miss}**",
-         f"- sources (targets): **{len(targets)}**", ""]
+         f"> Auto-generated: `verbatim_check.py` · generated: **{gen_at}** · exact-substring (whitespace-normalized). Not included in the release.", ""]
+    if verify_blind:
+        L += [f"> ⚠️ **Nothing verified: {len(quotes)} quote(s), {len(present_sources)} readable source(s)"
+              + (f", {n_missing} declared source(s) missing" if n_missing else "")
+              + ".** A passing `--strict` here does NOT mean the body's quotes match a source — there was "
+              "nothing to check. Add `>` blockquotes and register a readable source.", ""]
+    L += [f"- quotes: **{len(quotes)}**  ·  exact (FULL) **{n_full}** · partial (PARTIAL) {n_partial} · no match (MISS) **{n_miss}**",
+          f"- sources (targets): **{len(targets)}** declared, **{len(present_sources)}** readable"
+          + (f", **{n_missing}** missing" if n_missing else ""), ""]
 
     L += ["## 1. Sources (targets) SHA256", ""]
     if src_rows:
@@ -199,7 +211,13 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
-    print(f"verbatim report: {out}  (FULL {n_full} / PARTIAL {n_partial} / MISS {n_miss} / sources {len(targets)})")
+    print(f"verbatim report: {out}  (FULL {n_full} / PARTIAL {n_partial} / MISS {n_miss} / sources {len(present_sources)}/{len(targets)} readable/declared)")
+    if verify_blind:
+        print(f"[warn] verbatim verified nothing: {len(quotes)} quote(s), {len(present_sources)} readable source(s)"
+              " — a passing --strict does not imply the quotes match a source", file=sys.stderr)
+    elif n_missing:
+        print(f"[warn] {n_missing} declared verbatim source(s) missing — checked against "
+              f"{len(present_sources)} readable source(s) only", file=sys.stderr)
 
     if a.strict and n_miss:
         sys.exit(f"[verbatim gate FAILED] {n_miss} quote(s) with no match (MISS)")
