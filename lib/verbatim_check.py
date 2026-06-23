@@ -20,32 +20,32 @@ import sys, os, re, argparse, hashlib
 from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from validate_manifest import load_validated
-from split import split_h1   # 본문 H1 분할(인용 위치 표시용 — 보조)
+from split import split_h1   # body H1 split (for quote location display — auxiliary)
 
 KST = timezone(timedelta(hours=9))
 
 
 def esc(s):
-    """마크다운 표 cell 안전화: None→빈칸, |·줄바꿈·역슬래시 깨짐 방지."""
+    """Sanitize a markdown table cell: None → empty string; escape |, newlines, and backslashes."""
     if s is None:
         return ""
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
 def _norm_ws(s):
-    """공백 정규화: 모든 공백류(개행·탭·연속공백)를 단일 스페이스로 접고 양끝 trim.
-    verbatim exact-substring 대조 기준 — 줄바꿈/들여쓰기 차이는 무시하되 글자는 그대로."""
+    """Normalize whitespace: collapse all whitespace (newlines, tabs, runs) to a single space and strip both ends.
+    Comparison baseline for verbatim exact-substring — differences in line breaks / indentation are ignored, characters are not."""
     return re.sub(r"\s+", " ", str(s)).strip()
 
 
 def sha16(text):
-    """원문 SHA256 앞 16자(원문 동일성 기록용)."""
+    """First 16 hex chars of the source's SHA256 (for source identity tracking)."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def extract_blockquotes(md):
-    """본문에서 `>` 인용 블록을 추출 → 인용문 리스트(연속된 `>` 줄은 한 인용으로 묶음).
-    split.split_h1과 같은 코드펜스 인식: ``` ~~~ 안의 `>`는 인용으로 보지 않음."""
+    """Extract `>` blockquotes from the body → list of quote strings (consecutive `>` lines merged into one quote).
+    Code-fence awareness same as split.split_h1: `>` inside ``` or ~~~ fences is not treated as a blockquote."""
     quotes, cur, fence = [], [], False
     for line in md.splitlines():
         st = line.lstrip()
@@ -65,10 +65,10 @@ def extract_blockquotes(md):
 
 
 def load_targets(m, base, proj):
-    """대조할 (label, 원문경로) 목록. 우선순위:
-    1) manifest 문서레벨 verbatim: [{source, quotes?}] 의 source
+    """Build the list of (label, source-path) pairs to check against. Priority:
+    1) manifest document-level verbatim: [{source, quotes?}] — the source field
     2) pm-policy review_audit.verbatim.targets
-    경로는 manifest 폴더 기준 상대(절대면 그대로). ~ 확장."""
+    Paths are relative to the manifest directory (absolute paths used as-is). ~ is expanded."""
     targets = []
     for v in (m.get("verbatim") or []):
         if isinstance(v, dict) and v.get("source"):
@@ -89,7 +89,7 @@ def load_targets(m, base, proj):
 
 
 def _load_policy(proj, base):
-    """manifest.project.policy 의 pm-policy.yaml 로드(없으면 None)."""
+    """Load the pm-policy.yaml referenced by manifest.project.policy (returns None if absent)."""
     try:
         import yaml
     except ImportError:
@@ -105,7 +105,7 @@ def _load_policy(proj, base):
 
 
 def collect_quotes(m, body):
-    """대조할 인용 목록. manifest verbatim[].quotes 가 명시되면 그것, 없으면 본문 `>` 인용 전체."""
+    """Collect the list of quotes to check. Uses manifest verbatim[].quotes if explicitly specified; otherwise all `>` blockquotes in the body."""
     explicit = []
     for v in (m.get("verbatim") or []):
         if isinstance(v, dict):
@@ -128,13 +128,13 @@ def main():
     proj = m["project"]
     out = a.out or os.path.join(base, "reports", "_verbatim_report.md")
 
-    # 본문(SSOT)
+    # body (SSOT)
     ssot_path = os.path.join(base, proj.get("ssot", ""))
     body = ""
     if proj.get("ssot") and os.path.exists(ssot_path):
         body = open(ssot_path, encoding="utf-8").read()
 
-    # 원문 targets 로드 + SHA
+    # load source targets + SHA
     targets = load_targets(m, base, proj)
     src_texts, src_rows = [], []
     for label, path in targets:
@@ -147,18 +147,18 @@ def main():
     norm_sources = [_norm_ws(t) for t in src_texts]
 
     quotes = collect_quotes(m, body)
-    results = []   # (인용요약, 판정, 매칭원문 라벨)
+    results = []   # (quote excerpt, verdict, matched source label)
     n_full = n_partial = n_miss = 0
     for q in quotes:
         nq = _norm_ws(q)
         verdict, where = "MISS", ""
-        # FULL: 어느 원문에든 정규화 후 exact-substring
+        # FULL: exact-substring (after normalization) against any source
         for (label, _p), ns in zip(targets, norm_sources):
             if nq and nq in ns:
                 verdict, where = "FULL", label
                 break
         if verdict == "MISS" and nq:
-            # PARTIAL: 인용을 절반 이상(긴 토막)이라도 원문에 포함하는지(앞 60% 토막)
+            # PARTIAL: check if at least a leading 60% chunk of the quote appears in any source
             cut = nq[: max(8, int(len(nq) * 0.6))]
             for (label, _p), ns in zip(targets, norm_sources):
                 if cut and cut in ns:

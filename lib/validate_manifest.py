@@ -6,11 +6,11 @@ Other scripts: from validate_manifest import load_validated
 import sys, os, yaml
 
 STATUS = {"draft", "review", "approved", "pending"}
-SCORE_AXES = {"completeness", "coherence", "clarity", "depth"}   # 재검토/감사 모드 섹션 scores 키(없으면 통과)
+SCORE_AXES = {"completeness", "coherence", "clarity", "depth"}   # review/audit mode section scores keys (absent = pass)
 
 
 def _pathish(v):
-    """경로(str) 또는 경로 목록(list[str])인가 — downstream/sources 값 검증용."""
+    """Whether the value is a path (str) or list of paths (list[str]) — used to validate downstream/sources values."""
     return isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))
 
 
@@ -83,7 +83,7 @@ def validate(m):
                     E.append(f"{tag}: {listk}[{j}] must be a non-empty string ({item!r})")
         if st == "approved" and not s.get("sources"):
             W.append(f"{tag}: status=approved but sources is empty (confirmed without evidence?)")
-        # 재검토/감사 모드: optional scores(없으면 통과, 있으면 형식만 검증)
+        # review/audit mode: optional scores (absent = pass; present = format-only validation)
         sc = s.get("scores")
         if sc is not None:
             if not isinstance(sc, dict):
@@ -98,7 +98,7 @@ def validate(m):
         if c > 1:
             E.append(f"duplicate section id: '{sid}' ×{c}")
 
-    REQUIRED = {"open_questions": "topic", "decisions": "decision"}   # 사람 게이트 리포트용 최소 필드
+    REQUIRED = {"open_questions": "topic", "decisions": "decision"}   # minimum required fields for human-gate report
     OQ_STATUS = {"open", "resolved", "deferred"}
     for listk in ("open_questions", "decisions"):
         v = m.get(listk, [])
@@ -126,7 +126,7 @@ def validate(m):
                 if not item.get("owner"):
                     W.append(f"open_questions '{iid}': owner recommended (gate owner unclear)")
 
-    # 재검토/감사 모드: optional 문서레벨 verbatim(없으면 통과, 있으면 형식만 검증)
+    # review/audit mode: optional document-level verbatim (absent = pass; present = format-only validation)
     vb = m.get("verbatim")
     if vb is not None:
         if not isinstance(vb, list):
@@ -150,16 +150,16 @@ def validate(m):
                             if not isinstance(q, str) or not q.strip():
                                 E.append(f"{tag}: quotes[{j}] must be a non-empty string ({q!r})")
 
-    # 재검토/감사 모드: optional review_audit 적용추적(없으면 통과·하위호환). pending_apply/applied = decision_id로 decisions[](SSOT) 연결(Codex#5).
+    # review/audit mode: optional review_audit apply-tracking (absent = pass; backward-compatible). pending_apply/applied link to decisions[] (SSOT) via decision_id (Codex#5).
     ra = m.get("review_audit")
     if ra is not None:
         if not isinstance(ra, dict):
             E.append("review_audit must be a mapping")
         else:
-            # decisions[](권위) id 집합 — decision_id 참조 무결성 검증용(dangling 차단, peer r1#1)
+            # set of authoritative decisions[] ids — for decision_id referential integrity check (blocks dangling refs, peer r1#1)
             dec_ids = {d.get("id") for d in (m.get("decisions") or [])
                        if isinstance(d, dict) and isinstance(d.get("id"), str)}
-            cross = {}   # decision_id → 등장한 리스트들(pending_apply↔applied 교집합 경고용, peer r1#4)
+            cross = {}   # decision_id → lists it appears in (warn if present in both pending_apply and applied, peer r1#4)
             for listk in ("pending_apply", "applied"):
                 v = ra.get(listk)
                 if v is None:

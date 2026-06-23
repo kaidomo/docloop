@@ -26,23 +26,23 @@ MARKER = ".docloop_output"   # marker for docloop-created output folder (rmtree 
 
 
 def safe_filename(name):
-    """파일명 성분에서 경로 구분자·상위참조 제거(outputs/ 경계 밖 쓰기 방지)."""
+    """Strip path separators and parent-directory references from a filename component (prevents writes outside the outputs/ boundary)."""
     s = str(name).replace("/", "_").replace("\\", "_").replace("\x00", "").strip()
     s = s.lstrip(".")
     return s or "untitled"
 
 
 def split_h1(md):
-    """H1(# ) 단위 (제목, 블록) 리스트. 코드펜스(``` ~~~) 안의 #는 무시."""
+    """Return a list of (title, block) pairs split at H1 (# ) boundaries. Ignores # inside code fences (``` ~~~)."""
     blocks, cur_title, cur, fence = [], None, [], False
     for line in md.splitlines(keepends=True):
         st = line.lstrip()
         if st.startswith("```") or st.startswith("~~~"):
             fence = not fence
-        if not fence and re.match(r" {0,3}#\s+\S", line):   # ATX: 들여쓰기 0~3칸만(4칸+ = 코드 블록)
+        if not fence and re.match(r" {0,3}#\s+\S", line):   # ATX: 0–3 spaces of indent only (4+ spaces = code block)
             if cur_title is not None or cur:
                 blocks.append((cur_title, "".join(cur)))
-            title = re.sub(r"\s+#+\s*$", "", line.strip().lstrip("#").strip())  # 닫는 '#'는 앞 공백 있을 때만(‘C#’ 보존)
+            title = re.sub(r"\s+#+\s*$", "", line.strip().lstrip("#").strip())  # closing ‘#’ stripped only when preceded by space (preserves ‘C#’)
             cur_title, cur = title, [line]
         else:
             cur.append(line)
@@ -52,7 +52,7 @@ def split_h1(md):
 
 
 def load_policy(proj, base):
-    """manifest.project.policy 경로의 pm-policy.yaml 로드(없으면 None)."""
+    """Load pm-policy.yaml from the path given in manifest.project.policy (returns None if absent)."""
     pol_path = proj.get("policy")
     if not pol_path or yaml is None:
         return None
@@ -64,7 +64,7 @@ def load_policy(proj, base):
 
 
 def page_title(proj, policy):
-    """output.page_pattern 치환 → 배포 페이지 제목(없으면 manifest title/product)."""
+    """Substitute output.page_pattern to produce the publish page title (falls back to manifest title/product)."""
     pat = None
     if policy:
         pat = (policy.get("output", {}) or {}).get("page_pattern")
@@ -96,13 +96,13 @@ def main():
     if not os.path.exists(ssot_path):
         sys.exit(f"[abort] SSOT body not found: {ssot_path}")
     body = open(ssot_path, encoding="utf-8").read()
-    blocks, dup_h1 = {}, []            # 제목→블록 (중복 H1은 앞 블록 유지 + 기록)
+    blocks, dup_h1 = {}, []            # title→block (duplicate H1: keep first block + record)
     for t, b in split_h1(body):
         if not t:
             continue
         t = t.strip()
         if t in blocks:
-            dup_h1.append(t)           # 조용한 덮어쓰기 방지 — 경고/strict로 노출
+            dup_h1.append(t)           # prevent silent overwrite — surfaced via warning/strict
         else:
             blocks[t] = b
 
@@ -111,7 +111,7 @@ def main():
         sys.exit("[abort] project.output_dir not set — the work-folder standard is 'outputs'. Specify it in the manifest.")
     out_dir = os.path.join(base, od)
 
-    # 섹션 순서: 정책 doc_types[doc_type].sections → 없으면 manifest sections 순
+    # Section order: policy doc_types[doc_type].sections → fall back to manifest sections order
     man_secs = {s["id"]: s for s in m.get("sections", []) or []}
     pol_secs = []
     if policy and proj.get("doc_type"):
@@ -120,7 +120,7 @@ def main():
             pol_secs = dt.get("sections", []) or []
     if pol_secs:
         order = [(p["id"], p.get("title", ""), bool(p.get("required"))) for p in pol_secs]
-        # manifest에만 있고 정책에 없는 섹션은 뒤에 덧붙임(누락 방지)
+        # Sections present in the manifest but absent from the policy are appended at the end (prevents omission)
         for sid, s in man_secs.items():
             if sid not in {p["id"] for p in pol_secs}:
                 order.append((sid, s.get("title", ""), False))
@@ -133,14 +133,14 @@ def main():
         s = man_secs.get(sid)
         st = s.get("status") if s else "(undefined)"
         title = (s.get("title") if s else None) or pol_title or sid
-        # 릴리스 게이트용: 정책 required 섹션이 approved 아님
+        # For the release gate: a policy-required section is not approved
         if required and st != "approved":
             req_unmet.append((sid, title, st))
         if st not in include:
             excluded.append((sid, title, st))
             continue
         blk = blocks.get(title)
-        if blk is None:   # 제목 정확매칭 실패 → 공백 정규화 재시도
+        if blk is None:   # exact title match failed → retry with whitespace normalization
             for bt, bb in blocks.items():
                 if bt.strip() == title.strip():
                     blk = bb; break
@@ -148,14 +148,14 @@ def main():
             no_body.append((sid, title)); continue
         pages.append((sid, title, blk))
 
-    # 본문에만 있고 manifest에 없는 H1(고아 섹션)
+    # H1 blocks present in the body but absent from the manifest (orphan sections)
     man_titles = {(man_secs[sid].get("title") or "") for sid in man_secs}
     orphan = [t for t in blocks if t not in man_titles and t != page_title(proj, policy)]
 
     ptitle = page_title(proj, policy)
     out_name = f"{safe_filename(ptitle)}.md"
 
-    # 경고(항상). strict 실패는 '배포 완전성'(보내는 본문)만 — required 완전성 게이트는 gap_audit 담당(역할 분리).
+    # Warnings always emitted. --strict failures cover 'publish completeness' (outgoing body) only — required-section completeness gate belongs to gap_audit (separation of concerns).
     warns = []
     if excluded:
         warns.append("excluded (unconfirmed/pending): " + ", ".join(f"{i}({st})" for i, _, st in excluded))
@@ -165,13 +165,13 @@ def main():
         warns.append("duplicate H1 in SSOT (first block kept, rest ignored): " + ", ".join(sorted(set(dup_h1))))
     if orphan:
         warns.append("orphan H1 (not a manifest section): " + ", ".join(orphan))
-    if req_unmet:   # 항상 경고(참고). 차단은 gap_audit.py --strict — 정책상 required는 소명(deferred)으로 생략 가능
+    if req_unmet:   # always a warning (informational). blocking is gap_audit.py --strict — policy required sections may be omitted with a justification (deferred)
         warns.append("policy required not approved (FYI — completeness gate is gap_audit): " + ", ".join(f"{i}({st})" for i, _, st in req_unmet))
     if re.search(r"\{[^}]+\}", ptitle):
         warns.append(f"unsubstituted page_pattern token left: '{ptitle}' (check pm-policy output.page_pattern)")
     for w in warns:
         print(f"  ⚠ {w}")
-    # strict 실패: 배포 완전성 — 포함 섹션 본문 없음 / SSOT 중복 H1(조용한 유실)
+    # strict failure: publish completeness — included section has no body / duplicate H1 in SSOT (silent loss)
     if a.strict and (no_body or dup_h1):
         fails = []
         if no_body:
@@ -191,8 +191,8 @@ def main():
             print(f"excluded {len(excluded)}: " + ", ".join(i for i, _, _ in excluded))
         return
 
-    # 쓰기 경로: rmtree 안전 가드(바로 아래 전용 폴더 + 생성 마커, realpath 기준)
-    abs_out, abs_base = os.path.realpath(out_dir), os.path.realpath(base)   # output_dir 존재는 위에서 확인
+    # Write path: rmtree safety guard (dedicated direct subfolder + generation marker, realpath-based)
+    abs_out, abs_base = os.path.realpath(out_dir), os.path.realpath(base)   # output_dir existence already checked above
     if (os.path.dirname(abs_out) != abs_base
             or os.path.basename(abs_out) in ("", ".", "..")):
         sys.exit(f"[abort] output_dir safety check failed: '{out_dir}' — must be a dedicated subfolder directly under the manifest folder (symlinks checked by real path).")
@@ -204,7 +204,7 @@ def main():
         elif os.listdir(abs_out):
             sys.exit(f"[abort] '{out_dir}' has no generation marker ({MARKER}) and is not empty (including hidden files — e.g. .DS_Store) — "
                      f"may not be a folder this tool created, so deletion is refused. Empty the folder or point output_dir at another empty folder.")
-        # else: 빈 폴더(init_workspace가 만든 outputs/) → 입양
+        # else: empty folder (outputs/ created by init_workspace) → adopt it
     os.makedirs(abs_out, exist_ok=True)
     open(os.path.join(abs_out, MARKER), "w").close()
 

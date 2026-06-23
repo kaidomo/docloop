@@ -25,14 +25,14 @@ DEFAULT_AXES = ["completeness", "coherence", "clarity", "depth"]
 
 
 def esc(s):
-    """마크다운 표 cell 안전화: None→빈칸, |·줄바꿈·역슬래시 깨짐 방지."""
+    """Sanitize a markdown table cell: None→empty string; escape |, newlines, and backslashes to prevent table breakage."""
     if s is None:
         return ""
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
 def _load_policy(proj, base):
-    """manifest.project.policy 의 pm-policy.yaml 로드(없으면 None)."""
+    """Load the pm-policy.yaml referenced by manifest.project.policy (returns None if absent)."""
     try:
         import yaml
     except ImportError:
@@ -68,8 +68,8 @@ def main():
     thr = scale.get("pass_threshold", 3)
     rubric = (ra.get("priority_rubric") or {}).get("weights") or {}
 
-    # 우선순위 가중: 미달 축이 많을수록·미달폭이 클수록 + rubric 가중(축 이름이 weights 키와 겹치면 가산)
-    rows, below = [], []        # below: (sid, title, 미달축 리스트)
+    # Priority weighting: more failing axes and larger deficits increase weight + rubric bonus (axis name matches a weights key → added)
+    rows, below = [], []        # below: (sid, title, list of failing axes)
     for s in m.get("sections", []) or []:
         sc = s.get("scores")
         if not isinstance(sc, dict) or not sc:
@@ -85,16 +85,16 @@ def main():
                     deficit += (thr - v)
                     miss_axes.append(ax)
                     weight += int(rubric.get(ax, 1))
-        # rubric의 비-축 키(regulatory·blocking 등)는 섹션 flag로 가산
+        # non-axis rubric keys (regulatory, blocking, etc.) are added as section flags
         for k, w in rubric.items():
             if k not in axes and s.get(k):
                 weight += int(w)
-        prio = weight * 10 + deficit       # 가중 우선 → 미달폭 tiebreak
+        prio = weight * 10 + deficit       # weighted priority → deficit as tiebreak
         rows.append((sid, title, per_axis, deficit, prio))
         if miss_axes:
             below.append((sid, title, miss_axes))
 
-    rows.sort(key=lambda r: r[4], reverse=True)   # 우선순위 가중 정렬
+    rows.sort(key=lambda r: r[4], reverse=True)   # sort by priority weight descending
 
     title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")

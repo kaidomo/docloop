@@ -16,7 +16,7 @@ MANIFEST_NAME = "STAGE_MANIFEST.md"
 
 
 def _ignore(src, names):
-    """copytree 필터: 내부 symlink 제외(외부 내용 읽기/복사 둘 다 차단) + 잡파일 제외."""
+    """copytree filter: exclude internal symlinks (blocks both reading and copying external content) + exclude noise files."""
     skip = set()
     for n in names:
         if os.path.islink(os.path.join(src, n)):
@@ -27,7 +27,7 @@ def _ignore(src, names):
 
 
 def _clean(dst):
-    """dst를 타입 무관 정리(symlink는 링크만 제거 — 외부 내용 보존)."""
+    """Remove dst regardless of type (symlinks: remove the link only — external content is preserved)."""
     if os.path.islink(dst):
         os.unlink(dst)
     elif os.path.isdir(dst):
@@ -43,22 +43,22 @@ def main():
     ap.add_argument("--dest", default=DEFAULT_DEST)
     a = ap.parse_args()
 
-    # name 정제: 폴더명 한 토막만(경로 traversal·절대경로 차단)
+    # Sanitize name: must be a single folder-name token (blocks path traversal and absolute paths)
     name = a.name
     if name in ("", ".", "..") or "/" in name or "\\" in name or os.path.isabs(name):
         sys.exit(f"[abort] name '{name}' invalid — no path separators, '..', or absolute paths (a single review-folder name).")
 
     dest = os.path.realpath(os.path.expanduser(a.dest))
     review_dir = os.path.join(dest, name)
-    # r2-B1: review_dir이 symlink면 중단(외부 디렉터리 삭제/탈출 방지)
+    # r2-B1: abort if review_dir is a symlink (prevents deleting or escaping to an external directory)
     if os.path.islink(review_dir):
         sys.exit(f"[abort] '{review_dir}' is a symlink — the review folder must be a real directory.")
-    if os.path.exists(review_dir) and not os.path.isdir(review_dir):   # r6-R1: 파일이면 명시적 실패
+    if os.path.exists(review_dir) and not os.path.isdir(review_dir):   # r6-R1: explicit failure if it's a plain file
         sys.exit(f"[abort] '{review_dir}' is not a directory (it's a file) — clear or change the review-folder path.")
     created = not os.path.exists(review_dir)
     os.makedirs(review_dir, exist_ok=True)
     review_real = os.path.realpath(review_dir)
-    if os.path.commonpath([dest, review_real]) != dest:   # review_dir이 dest 하위인지 확정
+    if os.path.commonpath([dest, review_real]) != dest:   # confirm review_dir is actually under dest
         if created:
             try: os.rmdir(review_dir)
             except OSError: pass
@@ -69,48 +69,49 @@ def main():
         t = os.path.abspath(os.path.expanduser(t))
         if not os.path.exists(t):
             print(f"  ! target not found (skipped): {t}"); continue
-        # r4-R1: top-level symlink target은 역참조 위험 → 거부(외부 내용 유입 방지)
+        # r4-R1: top-level symlink targets are risky to dereference → reject (prevents pulling in external content)
         if os.path.islink(t):
             print(f"  ! target is a symlink — rejected (prevents pulling in external content): {t}"); continue
-        # r4-R2/r5-B1: target과 review_dir이 서로의 내부면(조상·자기·자손) 거부 — 자기복사/원본삭제 방지(양방향)
+        # r4-R2/r5-B1: reject if target and review_dir overlap (ancestor/self/descendant) — prevents self-copy or deletion of the original (both directions)
         t_real = os.path.realpath(t)
         cp = os.path.commonpath([t_real, review_real])
         if cp == t_real or cp == review_real:
             print(f"  ! target overlaps the review folder (ancestor/self/descendant) — rejected: {t}"); continue
         base = os.path.basename(t.rstrip("/"))
-        # r4-B1: 빈 basename(루트 등)은 dst==review_dir이 되어 리뷰 폴더 삭제 위험 → 거부
+        # r4-B1: empty basename (e.g. root path) would make dst==review_dir, risking deletion of the review folder → reject
         if not base or os.path.realpath(os.path.join(review_real, base)) == review_real:
             print(f"  ! target basename is empty or is the review folder itself — rejected: {t}"); continue
-        if base in (BRIEF_NAME, MANIFEST_NAME):      # 누적 브리프·매니페스트 보호
+        if base in (BRIEF_NAME, MANIFEST_NAME):      # protect the accumulated brief and manifest
             print(f"  ! '{base}' is a reserved file — copy skipped"); continue
-        if base in seen:                             # 같은 basename 충돌
+        if base in seen:                             # basename collision
             print(f"  ! basename clash '{base}' — keeping the first target, skipped: {t}"); continue
         dst = os.path.join(review_real, base)
         if os.path.commonpath([review_real, os.path.realpath(dst)]) != review_real:
             print(f"  ! dst is outside the review folder — skipped: {dst}"); continue
-        # temp에 먼저 복사 → 성공 시에만 기존 dst 교체. 디렉터리는 기존 dst를 지운 뒤 rename하므로
-        # 그 짧은 구간까지 완전 원자적이진 않다(중단 시 staged 사본이 빌 수 있음 — 원본은 항상 안전, 재스테이지로 복구).
+        # Copy to temp first → replace the existing dst only on success. For directories, the existing dst
+        # is removed before rename, so that brief window is not fully atomic (an interrupted run may leave
+        # an empty staged copy — the original is always safe; re-stage to recover).
         tmp_dst = dst + ".tmp-stage"
         try:
-            _clean(tmp_dst)                          # 잔여 temp 정리
+            _clean(tmp_dst)                          # remove any leftover temp
             if os.path.isdir(t):
-                shutil.copytree(t, tmp_dst, symlinks=False,   # 내부 symlink는 _ignore로 제외(외부 내용 차단)
+                shutil.copytree(t, tmp_dst, symlinks=False,   # internal symlinks excluded via _ignore (blocks external content)
                                 ignore=_ignore)
             else:
                 shutil.copy(t, tmp_dst)
-            _clean(dst)                              # 성공 후에만 기존 dst 정리(dir↔file 스왑 안전)
-            os.replace(tmp_dst, dst)                 # 거의 원자적 교체(같은 FS)
-        except (OSError, shutil.Error) as e:         # 권한·긴경로·깨진 symlink·중간실패·정리실패 → traceback 대신 건너뜀
-            try: _clean(tmp_dst)                     # temp 잔존 제거(이중 실패는 무시)
+            _clean(dst)                              # clean existing dst only after success (safe dir↔file swap)
+            os.replace(tmp_dst, dst)                 # near-atomic replace (same filesystem)
+        except (OSError, shutil.Error) as e:         # permission error, long path, broken symlink, mid-copy failure, cleanup failure → skip instead of traceback
+            try: _clean(tmp_dst)                     # remove leftover temp (double-failure is ignored)
             except OSError: pass
             print(f"  ! copy failed (skipped): {t} — {e}"); continue
         seen.add(base); copied.append(base); manifest_pairs.append((base, t_real))
 
-    if not copied:                                   # 0건 → 실패 + 새로 만든 빈 폴더 정리(r2-R3)
+    if not copied:                                   # 0 targets copied → fail + clean up any newly created empty folder (r2-R3)
         if created:
             try: os.rmdir(review_dir)
             except OSError: pass
-        elif os.path.exists(os.path.join(review_dir, MANIFEST_NAME)):  # 기존 폴더는 보존(이전 라운드 훼손 방지)
+        elif os.path.exists(os.path.join(review_dir, MANIFEST_NAME)):  # preserve existing folder (prevent damaging a previous round)
             print("  ! existing copies/STAGE_MANIFEST.md are from the previous stage and were NOT updated by this run (aborting below).")
         sys.exit("[abort] 0 targets copied — could not build the review folder (check target paths).")
 
@@ -121,7 +122,7 @@ def main():
         shutil.copy(TEMPLATE, brief)
         brief_status = "created from template — the authoring model/user fills it"
 
-    # 매니페스트: staged basename ← 원본 절대경로 (원본 오적용 방지 — 반영은 원본에)
+    # Manifest: staged basename ← original absolute path (prevents misapplying changes — apply to the original)
     with open(os.path.join(review_dir, MANIFEST_NAME), "w") as mf:
         mf.write("# Stage manifest — `staged copy` ← `original absolute path`\n")
         mf.write("# Apply changes to the original path. Confirm the approval table's 'original apply path' against this mapping. (regenerated each stage)\n\n")

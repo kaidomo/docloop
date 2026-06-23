@@ -9,9 +9,9 @@ Usage: python3 approval_brief.py <manifest.yaml> [--out report.md] [--include-re
 import sys, os, re, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from validate_manifest import load_validated
-from split import split_h1   # SSOT 본문 H1 분할(목적/범위 본문 추출용)
+from split import split_h1   # SSOT body H1 split (for extracting purpose/scope body text)
 
-# 목적/목표·범위 섹션 식별(doc_type 무관 휴리스틱: id 또는 title 키워드)
+# Identify purpose/goal and scope sections (doc_type-agnostic heuristic: match by id or title keyword)
 GOAL_IDS = {"purpose", "goals", "goal", "overview", "background", "problem", "objective"}
 GOAL_KW = ["목적", "목표", "배경", "문제"]
 SCOPE_IDS = {"scope", "oos", "out-of-scope", "outofscope"}
@@ -19,15 +19,15 @@ SCOPE_KW = ["범위", "scope", "out of scope"]
 
 
 def esc(s):
-    """마크다운 표 cell 안전화."""
+    """Sanitize a markdown table cell."""
     if s is None:
         return ""
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
 def _strip_h1(blk):
-    """블록 선두의 자체 H1(# title) 한 줄 제거 — approval brief가 ### 제목을 따로 붙이므로 중복 방지.
-    split_h1과 동일한 ATX 기준(0~3칸 들여쓰기 + '# ' + 내용)일 때만 제거(소제목/코드 오제거 방지)."""
+    """Strip a leading H1 line (# title) from the block — prevents duplication since approval_brief adds its own ### heading.
+    Only removes the line when it matches the same ATX rule as split_h1 (0–3 spaces indent + '# ' + content), to avoid stripping subheadings or code."""
     if not blk:
         return ""
     lines = blk.splitlines(keepends=True)
@@ -37,20 +37,20 @@ def _strip_h1(blk):
 
 
 def _norm(t):
-    """제목 매칭 정규화: 선행 번호(`1.`·`2)`)·공백 제거 + 소문자 — SSOT H1 변형 흡수."""
+    """Normalize a title for matching: strip leading numbering (`1.`, `2)`) and spaces, then lowercase — absorbs SSOT H1 variations."""
     return re.sub(r"^\s*\d+[.)]\s*", "", str(t)).replace(" ", "").lower()
 
 
 def _match(sec, ids, kws):
-    """섹션이 목적/범위류인가 — id 정확매칭 또는 title이 키워드로 *시작*(중간 등장 오탐 방지)."""
+    """Return True if the section is a purpose/scope type — exact id match, or title *starts with* a keyword (to avoid mid-string false positives)."""
     sid = (sec.get("id") or "").lower()
     t = (sec.get("title") or "").strip().lower()
     return sid in ids or any(t.startswith(k) for k in kws)
 
 
 def _bodies(secs, nblocks, ids, kws, exclude=None):
-    """매칭 섹션들의 (id, title, status, 본문블록) 추출. 본문은 SSOT H1(정규화) 블록에서 찾음.
-    exclude: 이미 다른 분류(목적)에 쓰인 섹션 id — 중복 노출 방지."""
+    """Extract (id, title, status, body_block) for matching sections. Body text is looked up from the normalized SSOT H1 block map.
+    exclude: set of section ids already used by another category (e.g. purpose) — prevents duplicate output."""
     exclude = exclude or set()
     out = []
     for s in secs:
@@ -72,9 +72,9 @@ def main():
     m = load_validated(a.manifest)
     base = os.path.dirname(os.path.abspath(a.manifest))
     proj = m["project"]
-    out = a.out or os.path.join(base, "reports", "_approval_brief.md")   # reports/ 계열(작업폴더 표준)
+    out = a.out or os.path.join(base, "reports", "_approval_brief.md")   # reports/ family (workspace standard)
 
-    # SSOT 본문(있으면 목적/범위 본문 채움). 키는 정규화 제목(공백·번호 변형 흡수)
+    # SSOT body (fills purpose/scope text when present). Keys are normalized titles (absorbs spacing and numbering variants)
     nblocks = {}
     ssot_path = os.path.join(base, proj.get("ssot", ""))
     if proj.get("ssot") and os.path.exists(ssot_path):
