@@ -507,5 +507,16 @@ r = run_gate(gw, "manifest.yaml", "--strict-cross-audit")
 check("docloop gate: explicit manifest + flag → cross-blind exit 1",
       r.returncode != 0 and "cross-audit not run" in (r.stdout + r.stderr))
 
+# typo/unknown source key → NOT counted as coverage → cross-blind still warns (v0.1.1)
+ga_typo = tempfile.mkdtemp()
+open(os.path.join(ga_typo, "manifest.yaml"), "w").write(
+    "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+    "  sources: {code_root: [\"~/code/src\"]}\n"   # typo: code_root (not code_roots)
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_typo)
+rep = open(os.path.join(ga_typo, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: typo'd source key not counted (coverage 0, cross-blind warns)",
+      "**0** source path(s)" in rep and "Cross-consistency not run" in rep)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

@@ -30,12 +30,16 @@ def esc(s):
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
-def _count_paths(d):
-    """Count registered path entries in a sources/downstream mapping (str or list[str] values)."""
+def _count_paths(d, known):
+    """Count registered path entries under recognized keys only (str or list[str] values).
+    Unknown/typo'd keys are ignored — they aren't real cross-audit targets (validate_manifest
+    only warns on them), so counting them would inflate coverage and hide a cross-blind doc."""
     if not isinstance(d, dict):
         return 0
     n = 0
-    for v in d.values():
+    for k, v in d.items():
+        if k not in known:
+            continue
         if isinstance(v, str):
             n += 1
         elif isinstance(v, list):
@@ -79,8 +83,9 @@ def main():
     # against; if there are none but sections are drafted, "gaps: 0" reflects
     # INTERNAL consistency only — surface that instead of letting it read as "clean".
     proj = m["project"]
-    n_src = _count_paths(proj.get("sources"))
-    n_ds = _count_paths(proj.get("downstream"))
+    # known keys mirror validate_manifest's KNOWN_SRC / KNOWN_DS
+    n_src = _count_paths(proj.get("sources"), {"code_roots", "design", "prototypes"})
+    n_ds = _count_paths(proj.get("downstream"), {"storyboard", "manual_manifest", "policy_docs"})
     n_cross = n_src + n_ds
     grounded = sum(v for k, v in status_count.items() if k != "pending")
     cross_blind = n_cross == 0 and grounded > 0
