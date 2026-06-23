@@ -3,8 +3,9 @@
 You are running the **review** stage. Code has compilers and tests as its oracle;
 writing has none. docloop's substitute is an **external model** (Codex, Gemini, or
 another Claude) reviewing the draft — and a disciplined loop around that review.
-Calls and capture are automatic; **applying feedback is a human gate**, so a wrong
-critique is never blindly applied.
+Staging is automatic (`docloop review` scaffolds the folder + brief); the reviewer
+is invoked by the command in step 2; **applying feedback is a human gate**, so a
+wrong critique is never blindly applied.
 
 ## The loop
 
@@ -18,7 +19,7 @@ used/verified, **decisions already made** (so the reviewer won't relitigate them
 **what to look at (prioritized)**, caveats. Never overwrite an existing brief —
 rounds accumulate.
 
-### 2) Invoke — call the external reviewer (automatic)
+### 2) Invoke — run the reviewer command (you or the launcher run it)
 From the review folder:
 ```
 codex exec --skip-git-repo-check --sandbox read-only - > REVIEW_r<N>.md <<'PEER_REVIEW_PROMPT'

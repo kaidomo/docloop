@@ -18,3 +18,9 @@ reports/
 
 # session/tooling artifacts
 .omc/
+
+# peer-review staging artifacts (should never be in the repo)
+STAGE_MANIFEST.md
+REVIEW_r*.md
+REVIEW_*.err
+.omx/

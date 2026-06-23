@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""verbatim 검증 (재검토/감사 모드 ⑥): 본문의 인용 블록이 원문과 **글자 그대로** 일치하는지
-기계적으로 대조한다. LLM이 아니라 스크립트가 한다 — '인용'이라 적힌 게 실제로 원문과 같은지는
-판정이 아니라 exact-substring 사실 문제이기 때문(가짜 확정 방지 하드룰).
+"""verbatim check (review/audit mode ⑥): mechanically checks whether the body's
+blockquotes match the source **character-for-character**. A script does this, not an LLM —
+whether something labeled a 'quote' really matches the source is an exact-substring fact,
+not a judgment (hard rule against fake confirmation).
 
-원문 = manifest.project.ssot 가 아니라 **인용의 출처(targets)**:
-  pm-policy review_audit.verbatim.targets, 또는 manifest의 문서레벨 `verbatim:` 항목(source).
-대조 = 본문(SSOT)의 `>` 인용 블록(또는 verbatim.quotes에 지정한 인용)을 원문에서
-       **공백정규화 후 exact-substring**으로 찾는다.
+Source = NOT manifest.project.ssot but the **quote's origin (targets)**:
+  pm-policy review_audit.verbatim.targets, or the manifest's document-level `verbatim:` items (source).
+Check = looks up the body's (SSOT) `>` blockquotes (or quotes named in verbatim.quotes)
+       in the source via **exact-substring after whitespace normalization**.
 
-산출: reports/_verbatim_report.md (원문 SHA256 16자 · 일치/부분/불일치 집계).
-사용: python3 verbatim_check.py <manifest.yaml> [--out report.md] [--strict]
-  --strict: 불일치(MISS) 인용이 하나라도 있으면 exit 1.
-(gap_audit.py 패턴 이식 — load_validated·esc·KST·--strict 게이트. split.split_h1 재사용.)
+Output: reports/_verbatim_report.md (source SHA256 16 chars · full/partial/miss counts).
+Usage: python3 verbatim_check.py <manifest.yaml> [--out report.md] [--strict]
+  --strict: exit 1 if any quote has no match (MISS).
+(ported from the gap_audit.py pattern — load_validated · esc · KST · --strict gate. reuses split.split_h1.)
 
-강제 모델: 이 스크립트는 **기계 차단** 축이다(SHA·exact-substring). 축 채점·반영은 fan-out/사람."""
+Enforcement model: this script is a **mechanical block** axis (SHA · exact-substring).
+Axis scoring and applying changes are done by fan-out / a human."""
 import sys, os, re, argparse, hashlib
 from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -116,7 +118,7 @@ def collect_quotes(m, body):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="verbatim 인용 ↔ 원문 exact-substring 대조")
+    ap = argparse.ArgumentParser(description="verbatim quote ↔ source exact-substring check")
     ap.add_argument("manifest")
     ap.add_argument("--out", default="")
     ap.add_argument("--strict", action="store_true")
@@ -141,7 +143,7 @@ def main():
             src_texts.append(txt)
             src_rows.append((label, sha16(txt), "OK"))
         else:
-            src_rows.append((label, "—", "없음"))
+            src_rows.append((label, "—", "missing"))
     norm_sources = [_norm_ws(t) for t in src_texts]
 
     quotes = collect_quotes(m, body)
@@ -170,37 +172,37 @@ def main():
             n_miss += 1
         results.append((q, verdict, where))
 
-    title = proj.get("title") or proj.get("product", "PM 문서")
+    title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
-    L = [f"# {esc(title)} — verbatim 검증 리포트 (내부 비공개)", "",
-         f"> 자동 생성: `verbatim_check.py` · 생성: **{gen_at}** · exact-substring(공백정규화). 배포본 미포함.", "",
-         f"- 인용: **{len(quotes)}건**  ·  일치(FULL) **{n_full}** · 부분(PARTIAL) {n_partial} · 불일치(MISS) **{n_miss}**",
-         f"- 원문(targets): **{len(targets)}개**", ""]
+    L = [f"# {esc(title)} — verbatim check report (internal, not for release)", "",
+         f"> Auto-generated: `verbatim_check.py` · generated: **{gen_at}** · exact-substring (whitespace-normalized). Not included in the release.", "",
+         f"- quotes: **{len(quotes)}**  ·  exact (FULL) **{n_full}** · partial (PARTIAL) {n_partial} · no match (MISS) **{n_miss}**",
+         f"- sources (targets): **{len(targets)}**", ""]
 
-    L += ["## 1. 원문(targets) SHA256", ""]
+    L += ["## 1. Sources (targets) SHA256", ""]
     if src_rows:
-        L += ["| 원문 | SHA256(16) | 상태 |", "|------|------|------|"]
+        L += ["| source | SHA256(16) | status |", "|------|------|------|"]
         L += [f"| {esc(lbl)} | {esc(sha)} | {esc(stt)} |" for lbl, sha, stt in src_rows]
     else:
-        L.append("_지정된 원문 없음 (manifest verbatim[].source 또는 pm-policy review_audit.verbatim.targets)._")
+        L.append("_No sources specified (manifest verbatim[].source or pm-policy review_audit.verbatim.targets)._")
 
-    L += ["", "## 2. 인용 대조 (FULL=원문과 글자 일치 / PARTIAL=일부 / MISS=불일치)", ""]
+    L += ["", "## 2. Quote check (FULL=exact match to source / PARTIAL=partial / MISS=no match)", ""]
     if quotes:
-        L += ["| 판정 | 매칭 원문 | 인용(요약) |", "|------|------|------|"]
+        L += ["| verdict | matched source | quote (excerpt) |", "|------|------|------|"]
         for q, v, where in results:
             short = q if len(q) <= 80 else q[:77] + "…"
             L.append(f"| {esc(v)} | {esc(where)} | {esc(short)} |")
     else:
-        L.append("_본문에 인용 블록 없음 (또는 verbatim.quotes 미지정)._")
+        L.append("_No blockquotes in the body (or verbatim.quotes not specified)._")
     L.append("")
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
-    print(f"verbatim report: {out}  (FULL {n_full} / PARTIAL {n_partial} / MISS {n_miss} / 원문 {len(targets)})")
+    print(f"verbatim report: {out}  (FULL {n_full} / PARTIAL {n_partial} / MISS {n_miss} / sources {len(targets)})")
 
     if a.strict and n_miss:
-        sys.exit(f"[verbatim 게이트 실패] 불일치(MISS) 인용 {n_miss}건")
+        sys.exit(f"[verbatim gate FAILED] {n_miss} quote(s) with no match (MISS)")
 
 
 if __name__ == "__main__":

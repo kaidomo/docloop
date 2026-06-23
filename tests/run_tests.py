@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pm-authoring 회귀 테스트 — split.py(배포 분할) + approval_brief.py + validate_manifest sanity.
+"""docloop 회귀 테스트 — split.py(배포 분할) + approval_brief.py + validate_manifest sanity.
 사용: python3 tests/run_tests.py"""
 import sys, os, tempfile, subprocess
 
@@ -78,7 +78,7 @@ check("split: page_pattern 치환 파일명", outs == ["제품X - 케이스제�
 body = open(os.path.join(tmp, "outputs", outs[0])).read() if outs else ""
 check("split: approved 본문 포함, draft/pending 제외",
       "배경" in body and "목표본문" in body and "범위초안" not in body)
-check("split: 마커 생성", os.path.exists(os.path.join(tmp, "outputs", ".pm_authoring_output")))
+check("split: 마커 생성", os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
 check("split: SSOT 무손상", open(os.path.join(tmp, "PRD.md")).read() == ORIG_SSOT)
 
 # strict 역할 분리: 포함 섹션(approved overview·goals) 본문 있음 → strict 통과.
@@ -86,7 +86,7 @@ check("split: SSOT 무손상", open(os.path.join(tmp, "PRD.md")).read() == ORIG_
 r = run(tmp, "--strict")
 check("split: --strict 배포완전성 통과(포함 본문 OK)", r.returncode == 0)
 r = run(tmp, "--dry-run")
-check("split: required 미승인 경고는 항상 출력(strict 아님)", "required 미승인" in r.stdout)
+check("split: required 미승인 경고는 항상 출력(strict 아님)", "required not approved" in r.stdout)
 
 # include-draft: scope(draft) 포함
 r = run(tmp, "--include-draft")
@@ -104,7 +104,7 @@ open(os.path.join(nb, "manifest.yaml"), "w").write(
     "  - {id: b, title: \"목표\", status: approved, sources: [k]}\n")
 os.makedirs(os.path.join(nb, "outputs"))
 r = run(nb, "--strict")
-check("split: --strict 본문 없음 실패", r.returncode != 0 and "본문 없음" in (r.stdout + r.stderr))
+check("split: --strict 본문 없음 실패", r.returncode != 0 and "no body" in (r.stdout + r.stderr))
 
 # strict 실패 2: SSOT 중복 H1 → 조용한 유실 방지로 실패 (#r1-1)
 du = tempfile.mkdtemp()
@@ -114,7 +114,7 @@ open(os.path.join(du, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"개요\", status: approved, sources: [k]}\n")
 os.makedirs(os.path.join(du, "outputs"))
 r = run(du, "--strict")
-check("split: --strict 중복 H1 실패(#r1-1)", r.returncode != 0 and "중복 H1" in (r.stdout + r.stderr))
+check("split: --strict 중복 H1 실패(#r1-1)", r.returncode != 0 and "duplicate H1" in (r.stdout + r.stderr))
 r = run(du)   # 비-strict는 경고만, 앞 블록 유지
 check("split: 중복 H1 비-strict 경고+앞블록 유지", r.returncode == 0
       and "첫번째" in open(os.path.join(du, "outputs", "P.md")).read())
@@ -122,7 +122,7 @@ check("split: 중복 H1 비-strict 경고+앞블록 유지", r.returncode == 0
 # 빈 무마커 outputs 입양
 shutil.rmtree(os.path.join(tmp, "outputs")); os.makedirs(os.path.join(tmp, "outputs"))
 r = run(tmp)
-check("split: 빈 무마커 폴더 입양", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", ".pm_authoring_output")))
+check("split: 빈 무마커 폴더 입양", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
 
 # marker 있는 폴더 rmtree 후 재생성(멱등) (#r1-9)
 r = run(tmp)
@@ -132,7 +132,7 @@ check("split: 마커 폴더 멱등 재생성", r.returncode == 0 and os.path.exi
 shutil.rmtree(os.path.join(tmp, "outputs")); os.makedirs(os.path.join(tmp, "outputs"))
 open(os.path.join(tmp, "outputs", "user.txt"), "w").write("x")
 r = run(tmp)
-check("split: 비어있지 않은 무마커 거부", r.returncode != 0 and "마커" in (r.stdout + r.stderr))
+check("split: 비어있지 않은 무마커 거부", r.returncode != 0 and "marker" in (r.stdout + r.stderr))
 
 # symlink output_dir 거부 (#r1-9)
 sl = tempfile.mkdtemp()
@@ -266,11 +266,11 @@ def run_sr(cwd, *args):
 r = run_sr(sc)
 srep = open(os.path.join(sc, "reports", "_review_audit.md"), encoding="utf-8").read()
 check("score_report: 리포트 생성", r.returncode == 0 and os.path.exists(os.path.join(sc, "reports", "_review_audit.md")))
-check("score_report: 두 섹션 채점 집계", "채점된 섹션: **2개**" in srep)
+check("score_report: 두 섹션 채점 집계", "scored sections: **2**" in srep)
 check("score_report: 임계 미달 섹션 b 표기(completeness)",
-      "임계 미달 섹션: **1개**" in srep and "| b |" in srep.split("임계 미달 섹션")[1])
+      "below-threshold sections: **1**" in srep and "| b |" in srep.split("Below-threshold sections")[1])
 r = run_sr(sc, "--strict")
-check("score_report: --strict 임계 미달 시 exit 1", r.returncode != 0 and "미달" in (r.stdout + r.stderr))
+check("score_report: --strict 임계 미달 시 exit 1", r.returncode != 0 and "below" in (r.stdout + r.stderr))
 
 # 전부 임계 이상이면 --strict 통과
 sc2 = tempfile.mkdtemp()
@@ -307,7 +307,7 @@ m_bad2 = {"project": {"product": "P", "ssot": "x.md"},
           "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
           "verbatim": [{"quotes": ["x"]}]}
 E, W = V.validate(m_bad2)
-check("validate: verbatim source 누락 오류", any("source 누락" in e for e in E))
+check("validate: verbatim source 누락 오류", any("source missing" in e for e in E))
 
 # scores/verbatim 없으면 통과(하위호환)
 m_none = {"project": {"product": "P", "ssot": "x.md"},
@@ -330,7 +330,7 @@ m_ra_bad = {"project": {"product": "P", "ssot": "x.md"},
             "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
             "review_audit": {"pending_apply": [{"doc": "P.md"}]}}
 E, W = V.validate(m_ra_bad)
-check("validate: pending_apply decision_id 누락 오류", any("decision_id 필수" in e for e in E))
+check("validate: pending_apply decision_id 누락 오류", any("decision_id required" in e for e in E))
 
 # decision_id 공백문자만 → 오류(peer r1#1 strip)
 m_ra_blank = {"project": {"product": "P", "ssot": "x.md"},
@@ -338,7 +338,7 @@ m_ra_blank = {"project": {"product": "P", "ssot": "x.md"},
               "decisions": [{"id": "d1", "decision": "x"}],
               "review_audit": {"applied": [{"decision_id": "  "}]}}
 E, W = V.validate(m_ra_blank)
-check("validate: decision_id 공백만 오류", any("decision_id 필수" in e for e in E))
+check("validate: decision_id 공백만 오류", any("decision_id required" in e for e in E))
 
 # dangling: decision_id가 decisions[]에 없음 → 오류(peer r1#1 참조무결성)
 m_ra_dangling = {"project": {"product": "P", "ssot": "x.md"},
@@ -354,7 +354,7 @@ m_ra_dup = {"project": {"product": "P", "ssot": "x.md"},
             "decisions": [{"id": "d1", "decision": "x"}],
             "review_audit": {"applied": [{"decision_id": "d1"}, {"decision_id": "d1"}]}}
 E, W = V.validate(m_ra_dup)
-check("validate: applied 내 decision_id 중복 오류", any("중복" in e for e in E))
+check("validate: applied 내 decision_id 중복 오류", any("duplicate" in e for e in E))
 
 # pending_apply ↔ applied 교집합 → 경고(peer r1#4, 오류 아님)
 m_ra_cross = {"project": {"product": "P", "ssot": "x.md"},
@@ -363,7 +363,7 @@ m_ra_cross = {"project": {"product": "P", "ssot": "x.md"},
               "review_audit": {"pending_apply": [{"decision_id": "d1"}], "applied": [{"decision_id": "d1"}]}}
 E, W = V.validate(m_ra_cross)
 check("validate: pending_apply↔applied 교집합 경고(오류 아님)",
-      E == [] and any("양쪽" in w or "동시 존재" in w for w in W))
+      E == [] and any("both" in w for w in W))
 
 # review_audit 없으면 통과(하위호환)
 E, W = V.validate(m_none)
@@ -383,8 +383,8 @@ open(os.path.join(ga, "manifest.yaml"), "w").write(
     "decisions:\n  - {id: d2, date: 2026-06-02, decision: \"전화번호 optional\", by: \"리드\"}\n"
     "review_audit:\n  pending_apply:\n    - {decision_id: d2, doc: PRD.md, note: \"본문 미반영\"}\n")
 r = run_ga(ga)
-grep = open(os.path.join(ga, "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: pending_apply 리포트 표기", r.returncode == 0 and "| d2 |" in grep and "미반영 적용(pending_apply): **1건**" in grep)
+grep = open(os.path.join(ga, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: pending_apply 리포트 표기", r.returncode == 0 and "| d2 |" in grep and "pending_apply (unapplied): **1**" in grep)
 r = run_ga(ga, "--strict")
 check("gap_audit: --strict pending_apply 있으면 exit 1", r.returncode != 0 and "pending_apply" in (r.stdout + r.stderr))
 

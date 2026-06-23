@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""채점 리포트 (재검토/감사 모드 ①②⑦): manifest 섹션의 선택적 `scores`(4축)와
-pm-policy `review_audit`(척도·pass_threshold·priority_rubric)를 읽어 섹션별 점수표 +
-우선순위 가중 정렬 + 임계 미달 표시를 `reports/_review_audit.md`로 출력.
+"""Scoring report (review/audit mode ①②⑦): reads each manifest section's optional
+`scores` (4 axes) and pm-policy `review_audit` (scale · pass_threshold · priority_rubric)
+and emits a per-section score table + priority-weighted sort + below-threshold markers
+to `reports/_review_audit.md`.
 
-판정 라벨(점수)은 **검증자(사람/검증 에이전트)**가 manifest에 채워 넣는다 — 이 스크립트는
-그걸 집계·정렬·게이트하는 스캐폴딩이다(생성 에이전트가 자기 점수 매기지 않음 — 하드룰).
+The verdict labels (scores) are filled into the manifest by a **verifier (human/verification
+agent)** — this script only aggregates, sorts, and gates them (the authoring agent does not
+score its own work — hard rule).
 
-사용: python3 score_report.py <manifest.yaml> [--out report.md] [--strict]
-  --strict: pass_threshold 미달 축이 있는 섹션이 하나라도 있으면 exit 1.
-(gap_audit.py 패턴 이식 — load_validated·esc·KST·--strict 게이트.)
+Usage: python3 score_report.py <manifest.yaml> [--out report.md] [--strict]
+  --strict: exit 1 if any section has an axis below pass_threshold.
+(ported from the gap_audit.py pattern — load_validated · esc · KST · --strict gate.)
 
-강제 모델: 점수 임계(pass_threshold)는 **기계 차단**(--strict). 축 채점 자체는 fan-out/사람."""
+Enforcement model: the score threshold (pass_threshold) is a **mechanical block** (--strict).
+The axis scoring itself is done by fan-out / a human."""
 import sys, os, argparse
 from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +48,7 @@ def _load_policy(proj, base):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="재검토/감사 모드 채점 리포트")
+    ap = argparse.ArgumentParser(description="review/audit-mode scoring report")
     ap.add_argument("manifest")
     ap.add_argument("--out", default="")
     ap.add_argument("--strict", action="store_true")
@@ -93,16 +96,16 @@ def main():
 
     rows.sort(key=lambda r: r[4], reverse=True)   # 우선순위 가중 정렬
 
-    title = proj.get("title") or proj.get("product", "PM 문서")
+    title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
-    L = [f"# {esc(title)} — 재검토/감사 채점 리포트 (내부 비공개)", "",
-         f"> 자동 생성: `score_report.py` · 생성: **{gen_at}** · 척도 {smin}~{smax}, 통과 임계 **{thr}**. 배포본 미포함.", "",
-         f"- 채점된 섹션: **{len(rows)}개**  ·  임계 미달 섹션: **{len(below)}개**",
-         f"- 축: " + (", ".join(axes)), ""]
+    L = [f"# {esc(title)} — review/audit scoring report (internal, not for release)", "",
+         f"> Auto-generated: `score_report.py` · generated: **{gen_at}** · scale {smin}~{smax}, pass threshold **{thr}**. Not included in the release.", "",
+         f"- scored sections: **{len(rows)}**  ·  below-threshold sections: **{len(below)}**",
+         f"- axes: " + (", ".join(axes)), ""]
 
-    L += ["## 1. 섹션별 점수 (우선순위 가중 정렬)", ""]
+    L += ["## 1. Per-section scores (sorted by priority weight)", ""]
     if rows:
-        hdr = "| 섹션 | 제목 | " + " | ".join(axes) + " | 미달폭 | 우선순위 |"
+        hdr = "| section | title | " + " | ".join(axes) + " | deficit | priority |"
         sep = "|------|------|" + "------|" * len(axes) + "------|------|"
         L += [hdr, sep]
         for sid, t, per_axis, deficit, prio in rows:
@@ -112,24 +115,24 @@ def main():
                 cells.append("—" if v is None else (f"**{v}**⚠" if isinstance(v, int) and v < thr else str(v)))
             L.append(f"| {esc(sid)} | {esc(t)} | " + " | ".join(cells) + f" | {deficit} | {prio} |")
     else:
-        L.append("_채점된 섹션 없음 (섹션에 scores: {completeness,…} 추가 후 재실행)._")
+        L.append("_No scored sections (add scores: {completeness,…} to sections and re-run)._")
 
-    L += ["", "## 2. 임계 미달 섹션 (pass_threshold 미만 축)", ""]
+    L += ["", "## 2. Below-threshold sections (axes under pass_threshold)", ""]
     if below:
-        L += ["| 섹션 | 제목 | 미달 축 |", "|------|------|------|"]
+        L += ["| section | title | failing axes |", "|------|------|------|"]
         for sid, t, miss in below:
             L.append(f"| {esc(sid)} | {esc(t)} | {esc(', '.join(miss))} |")
     else:
-        L.append("_임계 미달 없음._")
+        L.append("_None below threshold._")
     L.append("")
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
-    print(f"review-audit report: {out}  (채점 {len(rows)} / 임계미달 {len(below)} / 임계 {thr})")
+    print(f"review-audit report: {out}  (scored {len(rows)} / below-threshold {len(below)} / threshold {thr})")
 
     if a.strict and below:
-        sys.exit(f"[채점 게이트 실패] pass_threshold({thr}) 미달 섹션 {len(below)}건")
+        sys.exit(f"[scoring gate FAILED] {len(below)} section(s) below pass_threshold({thr})")
 
 
 if __name__ == "__main__":

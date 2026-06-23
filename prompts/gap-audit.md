@@ -48,7 +48,12 @@ source. This is how you audit big inputs without a token blowout.
 - **D/E ambiguous:** default to E (open_questions). No fake confirmation.
 
 ## Output
-Run `python3 lib/gap_audit.py <manifest.yaml> --out reports/_gap_report.md`
-(add `--strict` before release: unresolved gaps / open open_questions / pending
-sections → exit 1). Then stop at the human gate. The script scaffolds the report;
+Run the report script (it lives in the docloop install, NOT in the work folder —
+use the lib path given in this prompt's "Run context", e.g.
+`python3 <docloop-lib>/gap_audit.py manifest.yaml`). It writes
+`reports/_gap_report.md` by default. Equivalently, the launcher wraps this as
+`docloop gate` (which runs it with `--strict`).
+
+Add `--strict` before release: unresolved gaps / open open_questions / pending
+sections → exit 1. Then stop at the human gate. The script scaffolds the report;
 *you* fill gaps/open_questions via the fan-out above.

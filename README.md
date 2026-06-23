@@ -36,12 +36,14 @@ See [`docs/design.md`](docs/design.md) for the full argument.
 
 ```bash
 git clone https://github.com/<you>/docloop && cd docloop
+pip install -r requirements.txt       # PyYAML (used by the lib/ scripts)
 chmod +x bin/docloop
 export PATH="$PWD/bin:$PATH"          # or symlink bin/docloop onto your PATH
 export DOCLOOP_MODEL=codex            # or: claude   (default: codex)
 ```
 
-Requirements: Python 3, and one of the `codex` or `claude` CLIs on your PATH.
+Requirements: Python 3 + PyYAML (`pip install -r requirements.txt`), and one of
+the `codex` or `claude` CLIs on your PATH.
 
 ## Quick start
 

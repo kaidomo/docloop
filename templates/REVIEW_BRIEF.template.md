@@ -1,33 +1,35 @@
-# 리뷰 브리프 — <대상명>
+# Review brief — <target>
 
-> Claude가 작성. 리뷰어(Codex)가 이 문서를 먼저 읽고 동봉 산출물을 검토한다.
-> 리뷰·반영은 아래에 **라운드별로 누적**한다(덮어쓰지 않음).
+> Filled by the authoring model. The reviewer reads this first, then reviews the
+> enclosed artifact. Reviews and applied-changes **accumulate by round** below
+> (never overwrite).
 
-## 무엇인가
-<1~3줄: 이게 뭐고 어떤 설계 철학인지>
+## What it is
+<1-3 lines: what this is and its design philosophy>
 
-## 실행 흐름 / 사용법 (검증된 것)
-<핵심 진입점·명령·동작. 어떻게 돌려서 확인했는지>
+## How it runs / usage (verified)
+<key entry points, commands, behavior. How you ran it to confirm.>
 
-## 이미 내린 설계 결정 (재논의 불필요 — 맥락 공유용)
-- <리뷰어가 다시 들추지 않아야 할 결정들. 예: "X는 의도적으로 사람 게이트로 둠">
+## Design decisions already made (do NOT relitigate — context only)
+- <decisions the reviewer should not reopen. e.g. "X is intentionally a human gate">
 
-## 봐줬으면 하는 것 (우선순위)
-1. <가장 보고 싶은 것>
+## What to look at (priority order)
+1. <the thing you most want reviewed>
 2. <...>
 
-## 비고 / 제약
-- 의존성 / 알려진 한계 / 사본 위치(리뷰 반영은 원본에) 등
+## Caveats / constraints
+- <dependencies / known limits / copy location (apply fixes to the original)>
 
 ---
-<!-- 이하 라운드 누적 구역. 헤더에 시:분:초 타임스탬프 필수: date "+%Y-%m-%d %H:%M:%S %Z"
-     아래 placeholder는 실제 리뷰/반영을 채운 뒤 교체할 것(빈 채로 남기지 말 것). -->
-## Codex 리뷰 (r1 — YYYY-MM-DD HH:MM:SS KST)
-<codex exec 결과 또는 사람이 붙여넣은 리뷰>
+<!-- Round-accumulation zone below. Each header needs an HH:MM:SS timestamp:
+     date "+%Y-%m-%d %H:%M:%S %Z". Replace the placeholders with the real
+     review/applied content — don't leave them blank. -->
+## Review (r1 — YYYY-MM-DD HH:MM:SS TZ)
+<reviewer output, or a human-pasted review>
 
-## 반영 내역 (v1 — YYYY-MM-DD HH:MM:SS KST)
-| 지적 | 분류 | 상태(적용완료/승인대기/보류/거절) | 원본 적용경로 | 이유·테스트 |
-|------|------|------|------|------|
+## Applied (v1 — YYYY-MM-DD HH:MM:SS TZ)
+| finding | class | status (applied/pending/hold/rejected) | path | reason / test |
+|---------|-------|------|------|------|
 | | | | | |
 
-**의도적 미적용**: <항목 + 이유>
+**Intentionally not applied**: <item + reason>

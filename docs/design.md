@@ -61,8 +61,8 @@ part that can be made convergent and the part that can't.
 - **The variable layer is a file.** Section order, glossary, tone, and Definition
   of Done live in `policy.yaml`, never in the engine — so the same harness serves
   any org.
-- **Semi-automatic by construction.** Model calls and capture are automatic;
-  *applying* a critique is a human gate. A wrong critique applied blindly is a
-  regression, and there's no test to catch it.
+- **Semi-automatic by construction.** Staging and the model invocation are
+  scripted; *applying* a critique is a human gate. A wrong critique applied blindly
+  is a regression, and there's no test to catch it.
 
 The summary: **convergence where there's a check, a human where there isn't.**
