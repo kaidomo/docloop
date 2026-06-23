@@ -27,6 +27,19 @@ def esc(s):
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
+def _count_paths(d):
+    """Count registered path entries in a sources/downstream mapping (str or list[str] values)."""
+    if not isinstance(d, dict):
+        return 0
+    n = 0
+    for v in d.values():
+        if isinstance(v, str):
+            n += 1
+        elif isinstance(v, list):
+            n += sum(1 for x in v if isinstance(x, str))
+    return n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("manifest")
@@ -56,12 +69,30 @@ def main():
     pa = ra.get("pending_apply")
     pending_apply = pa if isinstance(pa, list) else []
 
-    title = m["project"].get("title") or m["project"].get("product", "PM doc")
+    # cross-audit coverage (honesty guard): gaps==0 is meaningless if nothing was
+    # cross-checked. Count the source/downstream paths the fan-out had to check
+    # against; if there are none but sections are drafted, "gaps: 0" reflects
+    # INTERNAL consistency only — surface that instead of letting it read as "clean".
+    proj = m["project"]
+    n_src = _count_paths(proj.get("sources"))
+    n_ds = _count_paths(proj.get("downstream"))
+    n_cross = n_src + n_ds
+    grounded = sum(v for k, v in status_count.items() if k != "pending")
+    cross_blind = n_cross == 0 and grounded > 0
+
+    title = proj.get("title") or proj.get("product", "PM doc")
     gen_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     L = [f"# {esc(title)} — gap audit report (internal, not for release)", "",
-         f"> Auto-generated: `gap_audit.py` · generated: **{gen_at}** · evidence=SSOT. Not included in the release.", "",
-         f"- gaps: **{len(gaps)}**  ·  open_questions: **{len(oq)}**(open {len(open_oq)})  ·  pending sections: **{len(pend)}**  ·  pending_apply (unapplied): **{len(pending_apply)}**",
-         "- section status: " + (", ".join(f"{k} {v}" for k, v in sorted(status_count.items())) or "_none_"), ""]
+         f"> Auto-generated: `gap_audit.py` · generated: **{gen_at}** · evidence=SSOT. Not included in the release.", ""]
+    if cross_blind:
+        L += [f"> ⚠️ **Cross-consistency not run: 0 sources/downstream registered.** "
+              f"{grounded} non-pending section(s) (draft/review/approved) were checked for *internal* consistency "
+              "only — `gaps: 0` here does NOT mean the document agrees with code, design, or "
+              "downstream docs. Register `project.sources`/`downstream` to cross-audit, or omit "
+              "deliberately for an internal-only doc.", ""]
+    L += [f"- gaps: **{len(gaps)}**  ·  open_questions: **{len(oq)}**(open {len(open_oq)})  ·  pending sections: **{len(pend)}**  ·  pending_apply (unapplied): **{len(pending_apply)}**",
+          f"- cross-audit coverage: **{n_src}** source path(s) + **{n_ds}** downstream target(s)" + ("  ·  ⚠️ none registered" if n_cross == 0 else ""),
+          "- section status: " + (", ".join(f"{k} {v}" for k, v in sorted(status_count.items())) or "_none_"), ""]
 
     L += ["## 1. Gaps (D — evidence↔body or PRD↔downstream)", ""]
     if gaps:
@@ -102,6 +133,9 @@ def main():
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
     print(f"gap report: {out}  (gaps {len(gaps)} / open_questions {len(oq)} / pending {len(pend)} / pending_apply {len(pending_apply)})")
+    if cross_blind:
+        print(f"[warn] cross-consistency not run: 0 sources/downstream registered "
+              f"({grounded} grounded section(s)) — 'gaps' reflects internal checks only", file=sys.stderr)
 
     if a.strict:
         fails = []

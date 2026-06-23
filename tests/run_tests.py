@@ -406,5 +406,62 @@ open(os.path.join(ga3, "manifest.yaml"), "w").write(
 r = run_ga(ga3, "--strict")
 check("gap_audit: review_audit 없으면 --strict 통과(하위호환)", r.returncode == 0)
 
+# ── gap_audit.py: cross-audit coverage honesty guard (silent-omission fix) ──
+# 0 sources/downstream + drafted section → warn that gaps==0 is internal-only, NOT clean.
+ga_blind = tempfile.mkdtemp()
+open(os.path.join(ga_blind, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_blind)
+rep = open(os.path.join(ga_blind, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: 0 소스+drafted → 리포트에 cross-blind 경고",
+      "Cross-consistency not run" in rep and "**0** source path(s) + **0** downstream target(s)" in rep)
+check("gap_audit: cross-blind 경고 stderr 출력", "cross-consistency not run" in r.stderr)
+r = run_ga(ga_blind, "--strict")
+check("gap_audit: cross-blind은 --strict 실패 아님(internal-only 정당)", r.returncode == 0)
+
+# sources 등록됨 → 경고 없음
+ga_src = tempfile.mkdtemp()
+open(os.path.join(ga_src, "manifest.yaml"), "w").write(
+    "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+    "  sources: {code_roots: [\"~/code/src\"]}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_src)
+rep = open(os.path.join(ga_src, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: 소스 등록 시 cross-blind 경고 없음 + coverage 1",
+      "Cross-consistency not run" not in rep and "**1** source path(s)" in rep)
+
+# 0 소스지만 전부 pending(grounded 0) → 오해 소지 없음 → 경고 없음
+ga_pend = tempfile.mkdtemp()
+open(os.path.join(ga_pend, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: pending}\n")
+r = run_ga(ga_pend)
+rep = open(os.path.join(ga_pend, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: 0 소스+전부 pending → cross-blind 경고 없음(오해 소지 없음)",
+      "Cross-consistency not run" not in rep)
+
+# downstream만 등록(소스 0) + draft 섹션 → 경고 없음, coverage가 downstream 카운트(peer r1 test-gap)
+ga_ds = tempfile.mkdtemp()
+open(os.path.join(ga_ds, "manifest.yaml"), "w").write(
+    "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+    "  downstream: {storyboard: ../sb.html}\n"
+    "sections:\n  - {id: a, title: \"A\", status: draft, sources: [k]}\n")
+r = run_ga(ga_ds)
+rep = open(os.path.join(ga_ds, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: downstream만 등록+draft → 경고 없음 + coverage downstream 1",
+      "Cross-consistency not run" not in rep and "**0** source path(s) + **1** downstream target(s)" in rep)
+
+# 빈 list 값 → coverage 0 → cross-blind 경고(peer r1 test-gap)
+ga_empty = tempfile.mkdtemp()
+open(os.path.join(ga_empty, "manifest.yaml"), "w").write(
+    "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+    "  sources: {code_roots: []}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_empty)
+rep = open(os.path.join(ga_empty, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("gap_audit: 빈 list 소스 → coverage 0 + cross-blind 경고",
+      "**0** source path(s)" in rep and "Cross-consistency not run" in rep)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
