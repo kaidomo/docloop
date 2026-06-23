@@ -57,7 +57,7 @@ docloop — a thin writing harness (wraps codex / claude -p)
   docloop audit                       gap-audit: find contradictions (fan-out) + report
   docloop review <name> <target...>   the Oracle loop: external-model cross-review
   docloop split  [manifest.yaml]      regenerate publish pages from the SSOT
-  docloop gate   [manifest.yaml]      release gate (gap_audit.py --strict)
+  docloop gate   [manifest.yaml] [--strict-cross-audit]   release gate (gap_audit.py --strict)
 
 Env: DOCLOOP_MODEL=codex|claude (default codex)   DOCLOOP_REVIEW_DIR=~/.docloop/reviews
 Run plan/draft/audit from inside the work folder.
@@ -78,7 +78,11 @@ case "$cmd" in
     python3 "$LIB/stage.py" "$name" "$@"
     echo "docloop: review folder staged. Now fill REVIEW_BRIEF.md, then follow prompts/review.md." ;;
   split)  python3 "$LIB/split.py" "${1:-manifest.yaml}" ;;
-  gate)   python3 "$LIB/gap_audit.py" "${1:-manifest.yaml}" --strict ;;
+  gate)
+    # Optional leading manifest path; remaining args (e.g. --strict-cross-audit) pass through.
+    mf="manifest.yaml"
+    if [ "${1:-}" ] && [ "${1#-}" = "$1" ]; then mf="$1"; shift; fi
+    python3 "$LIB/gap_audit.py" "$mf" --strict "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command '$cmd' (try: docloop --help)" ;;
 esac

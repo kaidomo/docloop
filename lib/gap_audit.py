@@ -3,10 +3,13 @@
 of the manifest's gaps (evidence↔body · PRD↔downstream mismatches, D),
 open_questions (open decisions, E), and pending sections.
 Internal document (not included in the release).
-Usage: python3 gap_audit.py <manifest.yaml> [--out report.md] [--strict]
+Usage: python3 gap_audit.py <manifest.yaml> [--out report.md] [--strict] [--strict-cross-audit]
   --strict: exit 1 (release gate) if there are gaps · open open_questions ·
            pending sections · review_audit.pending_apply (unapplied). open_questions with
            status=resolved/deferred are treated as passing.
+  --strict-cross-audit: implies --strict and ALSO fails when cross-audit didn't run
+           (0 project.sources/downstream registered while sections are non-pending).
+           Opt-in for release CI that must not pass an internal-only check as "clean".
 (report scaffolding for the docloop manifest schema)
 
 Note: this script is **report scaffolding**. The actual cross-checking that *fills*
@@ -21,7 +24,7 @@ KST = timezone(timedelta(hours=9))
 
 
 def esc(s):
-    """마크다운 표 cell 안전화: None→빈칸, |·줄바꿈·역슬래시 깨짐 방지."""
+    """Make a value safe for a markdown table cell: None->empty, escape |/newline/backslash."""
     if s is None:
         return ""
     return str(s).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
@@ -45,6 +48,8 @@ def main():
     ap.add_argument("manifest")
     ap.add_argument("--out", default="")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--strict-cross-audit", action="store_true",
+                    help="imply --strict and also fail when cross-audit didn't run (0 sources/downstream)")
     a = ap.parse_args()
     m = load_validated(a.manifest)
     base = os.path.dirname(os.path.abspath(a.manifest))
@@ -60,10 +65,10 @@ def main():
         if st == "pending":
             pend.append((sid, s.get("title", "")))
     oq = m.get("open_questions", []) or []
-    open_oq = [q for q in oq if q.get("status", "open") == "open"]   # open만 게이트 실패(resolved·deferred는 통과)
+    open_oq = [q for q in oq if q.get("status", "open") == "open"]   # only 'open' fails the gate (resolved/deferred pass)
     decisions = m.get("decisions", []) or []
-    # 재검토/감사 모드 적용추적(백포트): pending_apply = 구두확정·SSOT 미반영 → 비어야 통과(false-pass 차단, Codex#2/#8)
-    # malformed shape는 load_validated(strict)가 이미 차단하지만, 게이트 자기완결성 위해 방어(peer r1#2)
+    # review/audit-mode apply tracking (backport): pending_apply = verbally confirmed but not in SSOT -> must be empty to pass (blocks false-pass, Codex#2/#8)
+    # malformed shapes are already blocked by load_validated(strict), but guard here too for gate self-sufficiency (peer r1#2)
     ra = m.get("review_audit")
     ra = ra if isinstance(ra, dict) else {}
     pa = ra.get("pending_apply")
@@ -137,7 +142,7 @@ def main():
         print(f"[warn] cross-consistency not run: 0 sources/downstream registered "
               f"({grounded} grounded section(s)) — 'gaps' reflects internal checks only", file=sys.stderr)
 
-    if a.strict:
+    if a.strict or a.strict_cross_audit:
         fails = []
         if gaps:
             fails.append(f"gaps {len(gaps)}")
@@ -147,6 +152,8 @@ def main():
             fails.append(f"pending sections {len(pend)}")
         if pending_apply:
             fails.append(f"pending_apply(unapplied) {len(pending_apply)}")
+        if a.strict_cross_audit and cross_blind:
+            fails.append(f"cross-audit not run (0 sources/downstream, {grounded} non-pending section(s))")
         if fails:
             sys.exit("[release gate FAILED] " + " + ".join(fails))
 

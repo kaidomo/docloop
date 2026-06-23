@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""docloop 회귀 테스트 — split.py(배포 분할) + approval_brief.py + validate_manifest sanity.
-사용: python3 tests/run_tests.py"""
+"""docloop regression tests — split.py (deploy split) + approval_brief.py + validate_manifest sanity.
+Usage: python3 tests/run_tests.py"""
 import sys, os, tempfile, subprocess
 
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")
@@ -27,18 +27,18 @@ def run(cwd, *args):
                           cwd=cwd, capture_output=True, text=True)
 
 
-# ── 순수 함수 ──
-check("safe_filename 경로구분자 제거", SP.safe_filename("a/b\\c") == "a_b_c")
-check("safe_filename 상위참조→untitled", SP.safe_filename("..") == "untitled")
+# ── pure functions ──
+check("safe_filename strips path separators", SP.safe_filename("a/b\\c") == "a_b_c")
+check("safe_filename parent-ref → untitled", SP.safe_filename("..") == "untitled")
 _b = SP.split_h1("# A\n\nx\n\n# B\n\ny\n")
-check("split_h1 H1 분할", [t for t, _ in _b] == ["A", "B"])
-check("split_h1 코드펜스 내 # 무시", len(SP.split_h1("# A\n\n```\n# 가짜\n```\n")) == 1)
-check("split_h1 닫는 # 시퀀스 제거", SP.split_h1("# 제목 #\n\nx\n")[0][0] == "제목")
-check("split_h1 선행 공백 H1 인식(≤3칸)", [t for t, _ in SP.split_h1("  # 들여쓴제목\n\nx\n")] == ["들여쓴제목"])
-check("split_h1 4칸+ 들여쓰기는 H1 아님(코드)", SP.split_h1("    # 코드주석\n")[0][0] is None)
-check("split_h1 'C#' 실제 제목 보존(닫는# 아님)", SP.split_h1("# C#\n\nx\n")[0][0] == "C#")
+check("split_h1 splits on H1", [t for t, _ in _b] == ["A", "B"])
+check("split_h1 ignores # inside code fence", len(SP.split_h1("# A\n\n```\n# 가짜\n```\n")) == 1)
+check("split_h1 strips trailing # sequence", SP.split_h1("# 제목 #\n\nx\n")[0][0] == "제목")
+check("split_h1 recognizes H1 with leading spaces (≤3)", [t for t, _ in SP.split_h1("  # 들여쓴제목\n\nx\n")] == ["들여쓴제목"])
+check("split_h1 4+ space indent is not H1 (code)", SP.split_h1("    # 코드주석\n")[0][0] is None)
+check("split_h1 preserves 'C#' as real title (not trailing #)", SP.split_h1("# C#\n\nx\n")[0][0] == "C#")
 
-# ── 디스크 fixture ──
+# ── disk fixtures ──
 tmp = tempfile.mkdtemp()
 open(os.path.join(tmp, "pm-policy.yaml"), "w").write(
     "org: {name: T, product_default: 제품X}\n"
@@ -62,51 +62,51 @@ ORIG_SSOT = open(os.path.join(tmp, "PRD.md")).read()
 
 # validate sanity
 m = V.load_validated(os.path.join(tmp, "manifest.yaml"), strict=False)
-check("validate_manifest: fixture 통과(오류 0)", isinstance(m, dict) and m["project"]["doc_type"] == "PRD")
+check("validate_manifest: fixture passes (0 errors)", isinstance(m, dict) and m["project"]["doc_type"] == "PRD")
 
-# dry-run: approved 2개만, draft/pending 제외
+# dry-run: only 2 approved sections, draft/pending excluded
 r = run(tmp, "--dry-run")
-check("split: dry-run approved만 포함(overview·goals)",
+check("split: dry-run includes approved only (overview·goals)",
       r.returncode == 0 and "overview, goals" in r.stdout)
-check("split: dry-run 쓰기 없음",
+check("split: dry-run writes no files",
       not any(f.endswith(".md") for f in os.listdir(os.path.join(tmp, "outputs"))))
 
-# 일반 빌드: page_pattern 치환된 파일 1장, approved 2섹션
+# normal build: 1 file with page_pattern substituted, 2 approved sections
 r = run(tmp)
 outs = [f for f in os.listdir(os.path.join(tmp, "outputs")) if f.endswith(".md")]
-check("split: page_pattern 치환 파일명", outs == ["제품X - 케이스제출 PRD.md"])
+check("split: page_pattern substituted filename", outs == ["제품X - 케이스제출 PRD.md"])
 body = open(os.path.join(tmp, "outputs", outs[0])).read() if outs else ""
-check("split: approved 본문 포함, draft/pending 제외",
+check("split: approved body included, draft/pending excluded",
       "배경" in body and "목표본문" in body and "범위초안" not in body)
-check("split: 마커 생성", os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
-check("split: SSOT 무손상", open(os.path.join(tmp, "PRD.md")).read() == ORIG_SSOT)
+check("split: marker file created", os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
+check("split: SSOT untouched", open(os.path.join(tmp, "PRD.md")).read() == ORIG_SSOT)
 
-# strict 역할 분리: 포함 섹션(approved overview·goals) 본문 있음 → strict 통과.
-# required 미승인(edge pending 등)은 경고만(차단 X). req_unmet 경고는 비-strict에서도 출력.
+# strict role separation: included sections (approved overview·goals) have body → strict passes.
+# required but unapproved (edge pending etc.) only warns (not blocked). req_unmet warning also printed in non-strict.
 r = run(tmp, "--strict")
-check("split: --strict 배포완전성 통과(포함 본문 OK)", r.returncode == 0)
+check("split: --strict deploy-completeness passes (included body OK)", r.returncode == 0)
 r = run(tmp, "--dry-run")
-check("split: required 미승인 경고는 항상 출력(strict 아님)", "required not approved" in r.stdout)
+check("split: required-not-approved warning always printed (non-strict)", "required not approved" in r.stdout)
 
-# include-draft: scope(draft) 포함
+# include-draft: scope (draft) included
 r = run(tmp, "--include-draft")
 body = open(os.path.join(tmp, "outputs", outs[0])).read()
-check("split: --include-draft draft 포함", "범위초안" in body)
+check("split: --include-draft includes draft sections", "범위초안" in body)
 
 import shutil
 
-# strict 실패 1: approved 섹션인데 SSOT에 본문 H1 없음 → 배포 완전성 실패
+# strict failure 1: approved section but SSOT missing body H1 → deploy-completeness fails
 nb = tempfile.mkdtemp()
-open(os.path.join(nb, "PRD.md"), "w").write("# 개요\n\n본문\n")   # goals H1 없음
+open(os.path.join(nb, "PRD.md"), "w").write("# 개요\n\n본문\n")   # goals H1 missing
 open(os.path.join(nb, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
     "sections:\n  - {id: a, title: \"개요\", status: approved, sources: [k]}\n"
     "  - {id: b, title: \"목표\", status: approved, sources: [k]}\n")
 os.makedirs(os.path.join(nb, "outputs"))
 r = run(nb, "--strict")
-check("split: --strict 본문 없음 실패", r.returncode != 0 and "no body" in (r.stdout + r.stderr))
+check("split: --strict fails when body missing", r.returncode != 0 and "no body" in (r.stdout + r.stderr))
 
-# strict 실패 2: SSOT 중복 H1 → 조용한 유실 방지로 실패 (#r1-1)
+# strict failure 2: duplicate H1 in SSOT → fails to prevent silent data loss (#r1-1)
 du = tempfile.mkdtemp()
 open(os.path.join(du, "PRD.md"), "w").write("# 개요\n\n첫번째\n\n# 개요\n\n두번째\n")
 open(os.path.join(du, "manifest.yaml"), "w").write(
@@ -114,27 +114,27 @@ open(os.path.join(du, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"개요\", status: approved, sources: [k]}\n")
 os.makedirs(os.path.join(du, "outputs"))
 r = run(du, "--strict")
-check("split: --strict 중복 H1 실패(#r1-1)", r.returncode != 0 and "duplicate H1" in (r.stdout + r.stderr))
-r = run(du)   # 비-strict는 경고만, 앞 블록 유지
-check("split: 중복 H1 비-strict 경고+앞블록 유지", r.returncode == 0
+check("split: --strict fails on duplicate H1 (#r1-1)", r.returncode != 0 and "duplicate H1" in (r.stdout + r.stderr))
+r = run(du)   # non-strict: warn only, keep first block
+check("split: duplicate H1 non-strict warns and keeps first block", r.returncode == 0
       and "첫번째" in open(os.path.join(du, "outputs", "P.md")).read())
 
-# 빈 무마커 outputs 입양
+# adopt empty unmarked outputs dir
 shutil.rmtree(os.path.join(tmp, "outputs")); os.makedirs(os.path.join(tmp, "outputs"))
 r = run(tmp)
-check("split: 빈 무마커 폴더 입양", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
+check("split: adopts empty unmarked output dir", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", ".docloop_output")))
 
-# marker 있는 폴더 rmtree 후 재생성(멱등) (#r1-9)
+# idempotent re-creation after rmtree of marked dir (#r1-9)
 r = run(tmp)
-check("split: 마커 폴더 멱등 재생성", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", outs[0])))
+check("split: marked dir recreated idempotently (#r1-9)", r.returncode == 0 and os.path.exists(os.path.join(tmp, "outputs", outs[0])))
 
-# 비어있지 않은 무마커 outputs 거부
+# non-empty unmarked outputs dir rejected
 shutil.rmtree(os.path.join(tmp, "outputs")); os.makedirs(os.path.join(tmp, "outputs"))
 open(os.path.join(tmp, "outputs", "user.txt"), "w").write("x")
 r = run(tmp)
-check("split: 비어있지 않은 무마커 거부", r.returncode != 0 and "marker" in (r.stdout + r.stderr))
+check("split: rejects non-empty unmarked output dir", r.returncode != 0 and "marker" in (r.stdout + r.stderr))
 
-# symlink output_dir 거부 (#r1-9)
+# symlink output_dir rejected (#r1-9)
 sl = tempfile.mkdtemp()
 open(os.path.join(sl, "PRD.md"), "w").write("# 개요\n\n본문\n")
 open(os.path.join(sl, "manifest.yaml"), "w").write(
@@ -143,12 +143,12 @@ open(os.path.join(sl, "manifest.yaml"), "w").write(
 ext = tempfile.mkdtemp()
 os.symlink(ext, os.path.join(sl, "outputs"))
 r = run(sl)
-check("split: symlink output_dir 거부", r.returncode != 0
+check("split: rejects symlink output_dir (#r1-9)", r.returncode != 0
       and ("symlink" in (r.stdout + r.stderr) or "안전검사" in (r.stdout + r.stderr)))
 
 # ── approval_brief.py ──
-check("approval_brief _strip_h1 선행 H1 제거", AB._strip_h1("# 목표\n\n본문\n") == "본문")
-check("approval_brief _match id/title 키워드", AB._match({"id": "goals", "title": "목표"}, AB.GOAL_IDS, AB.GOAL_KW))
+check("approval_brief _strip_h1 removes leading H1", AB._strip_h1("# 목표\n\n본문\n") == "본문")
+check("approval_brief _match id/title keyword", AB._match({"id": "goals", "title": "목표"}, AB.GOAL_IDS, AB.GOAL_KW))
 
 ab = tempfile.mkdtemp()
 open(os.path.join(ab, "PRD.md"), "w").write("# 목표\n\n전환율 개선\n\n# 범위\n\n포함: 폼\n")
@@ -163,23 +163,23 @@ os.makedirs(os.path.join(ab, "reports"))
 rb = subprocess.run([sys.executable, os.path.join(SCRIPTS, "approval_brief.py"), "manifest.yaml",
                      "--out", "reports/_approval_brief.md"], cwd=ab, capture_output=True, text=True)
 brief = open(os.path.join(ab, "reports", "_approval_brief.md"), encoding="utf-8").read()
-check("approval_brief: 생성 성공", rb.returncode == 0 and os.path.exists(os.path.join(ab, "reports", "_approval_brief.md")))
-check("approval_brief: 목적 본문 추출(H1 중복 없음)",
+check("approval_brief: generated successfully", rb.returncode == 0 and os.path.exists(os.path.join(ab, "reports", "_approval_brief.md")))
+check("approval_brief: goal body extracted (no duplicate H1)",
       "전환율 개선" in brief and "### 목표" in brief
       and not any(ln.strip() == "# 목표" for ln in brief.splitlines()))
-check("approval_brief: 범위 본문 추출", "포함: 폼" in brief)
-check("approval_brief: open_questions open만 표기(resolved 기본 제외)",
+check("approval_brief: scope body extracted", "포함: 폼" in brief)
+check("approval_brief: open_questions shows open only (resolved excluded by default)",
       "충돌" in brief and "끝난것" not in brief)
-check("approval_brief: 결정 로그·섹션 상태 표기", "확정" in brief and "| goals |" in brief)
+check("approval_brief: decision log and section status shown", "확정" in brief and "| goals |" in brief)
 
-# r1-2 키워드 앵커: '기능 목적 + AC'는 목적류 아님(시작 매칭)
-check("approval_brief: '기능 목적+AC' 목적 오탐 안 함",
+# r1-2 keyword anchor: a title that starts with a goal keyword but has extra suffix is not a goal type (prefix match only)
+check("approval_brief: title starting with goal keyword + extra suffix is not a goal match",
       not AB._match({"id": "func-ac", "title": "기능 목적 + AC(인수조건)"}, AB.GOAL_IDS, AB.GOAL_KW))
-# r1-3 정규화: 번호·공백 변형 흡수
-check("approval_brief: _norm 번호·공백 흡수", AB._norm("1. 목표 / 성공기준") == AB._norm("목표/성공기준"))
-# r1-5 _strip_h1: 소제목(####)·코드는 보존
-check("approval_brief: _strip_h1 소제목 보존", AB._strip_h1("#### 소제목\n본문\n") == "#### 소제목\n본문")
-# r1-3 통합: 번호 붙은 SSOT H1도 본문 추출
+# r1-3 normalization: absorbs numbering and whitespace variants
+check("approval_brief: _norm absorbs numbering and whitespace", AB._norm("1. 목표 / 성공기준") == AB._norm("목표/성공기준"))
+# r1-5 _strip_h1: sub-headings (####) and code are preserved
+check("approval_brief: _strip_h1 preserves sub-headings", AB._strip_h1("#### 소제목\n본문\n") == "#### 소제목\n본문")
+# r1-3 integrated: numbered SSOT H1 also extracts body
 nb2 = tempfile.mkdtemp()
 open(os.path.join(nb2, "PRD.md"), "w").write("# 1. 목표/성공기준\n\n번호달린목표\n")
 open(os.path.join(nb2, "manifest.yaml"), "w").write(
@@ -187,28 +187,28 @@ open(os.path.join(nb2, "manifest.yaml"), "w").write(
     "sections:\n  - {id: goals, title: \"목표 / 성공기준\", status: approved, sources: [k]}\n")
 r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "approval_brief.py"), "manifest.yaml"],
                    cwd=nb2, capture_output=True, text=True)
-# r1-4 기본 출력이 reports/ 로
-check("approval_brief: 기본 출력 reports/", r.returncode == 0
+# r1-4 default output goes to reports/
+check("approval_brief: default output to reports/", r.returncode == 0
       and os.path.exists(os.path.join(nb2, "reports", "_approval_brief.md")))
-check("approval_brief: 번호 H1도 본문 추출(정규화)",
+check("approval_brief: numbered H1 body extracted (normalized)",
       "번호달린목표" in open(os.path.join(nb2, "reports", "_approval_brief.md"), encoding="utf-8").read())
 
-# ══ 재검토/감사 모드 (review-audit) ══
+# ══ review/audit mode (review-audit) ══
 
-# ── verbatim_check.py 순수 함수 ──
-check("verbatim _norm_ws 공백 접기", VC._norm_ws("a  b\n c\t d") == "a b c d")
-check("verbatim sha16 16자", len(VC.sha16("abc")) == 16)
+# ── verbatim_check.py pure functions ──
+check("verbatim _norm_ws collapses whitespace", VC._norm_ws("a  b\n c\t d") == "a b c d")
+check("verbatim sha16 is 16 chars", len(VC.sha16("abc")) == 16)
 _q = VC.extract_blockquotes("> 인용 한 줄\n> 이어진 줄\n\n본문\n\n> 다른 인용\n")
-check("verbatim extract_blockquotes 인용 묶기", _q == ["인용 한 줄 이어진 줄", "다른 인용"])
-check("verbatim extract_blockquotes 코드펜스 내 > 무시",
+check("verbatim extract_blockquotes groups quotes", _q == ["인용 한 줄 이어진 줄", "다른 인용"])
+check("verbatim extract_blockquotes ignores > inside code fence",
       VC.extract_blockquotes("```\n> 가짜인용\n```\n") == [])
 
-# ── verbatim_check 디스크: 일치/불일치 + --strict ──
+# ── verbatim_check disk: match/mismatch + --strict ──
 vb = tempfile.mkdtemp()
 os.makedirs(os.path.join(vb, "inputs")); os.makedirs(os.path.join(vb, "reports"))
 open(os.path.join(vb, "inputs", "orig.md"), "w").write(
     "원문 시작\n\n검증 실패 시 사유와 확인된 값을 함께 안내해야 한다\n\n원문 끝\n")
-# SSOT: 첫 인용은 원문과 글자 일치(FULL), 둘째 인용은 원문에 없음(MISS)
+# SSOT: first quote matches source verbatim (FULL), second quote absent from source (MISS)
 open(os.path.join(vb, "PRD.md"), "w").write(
     "# 본문\n\n> 검증 실패 시 사유와 확인된 값을 함께 안내해야 한다\n\n설명\n\n> 원문에 전혀 없는 문장입니다\n")
 open(os.path.join(vb, "pm-policy.yaml"), "w").write(
@@ -225,13 +225,13 @@ def run_vc(cwd, *args):
 
 r = run_vc(vb)
 rep = open(os.path.join(vb, "reports", "_verbatim_report.md"), encoding="utf-8").read()
-check("verbatim: 리포트 생성", r.returncode == 0 and os.path.exists(os.path.join(vb, "reports", "_verbatim_report.md")))
-check("verbatim: FULL 1 · MISS 1 집계", "(FULL) **1**" in rep and "(MISS) **1**" in rep)
-check("verbatim: 원문 SHA 기록", VC.sha16(open(os.path.join(vb, "inputs", "orig.md")).read())[:8] in rep)
+check("verbatim: report generated", r.returncode == 0 and os.path.exists(os.path.join(vb, "reports", "_verbatim_report.md")))
+check("verbatim: FULL 1 · MISS 1 tallied", "(FULL) **1**" in rep and "(MISS) **1**" in rep)
+check("verbatim: source SHA recorded", VC.sha16(open(os.path.join(vb, "inputs", "orig.md")).read())[:8] in rep)
 r = run_vc(vb, "--strict")
-check("verbatim: --strict MISS 있으면 exit 1", r.returncode != 0 and "MISS" in (r.stdout + r.stderr))
+check("verbatim: --strict exits 1 when MISS present", r.returncode != 0 and "MISS" in (r.stdout + r.stderr))
 
-# 전부 일치하면 --strict 통과
+# all match → --strict passes
 vb2 = tempfile.mkdtemp()
 os.makedirs(os.path.join(vb2, "inputs")); os.makedirs(os.path.join(vb2, "reports"))
 open(os.path.join(vb2, "inputs", "orig.md"), "w").write("두 자료의 안내 경험은 같아야 한다\n")
@@ -242,9 +242,9 @@ open(os.path.join(vb2, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
     "sections:\n  - {id: a, title: \"본문\", status: approved, sources: [k]}\n")
 r = run_vc(vb2, "--strict")
-check("verbatim: 전부 일치 시 --strict 통과", r.returncode == 0)
+check("verbatim: --strict passes when all match", r.returncode == 0)
 
-# ── score_report.py 디스크: 점수표 + 임계 미달 --strict ──
+# ── score_report.py disk: score table + below-threshold --strict ──
 sc = tempfile.mkdtemp()
 os.makedirs(os.path.join(sc, "reports"))
 open(os.path.join(sc, "PRD.md"), "w").write("# A\n\n본문\n")
@@ -265,14 +265,14 @@ def run_sr(cwd, *args):
 
 r = run_sr(sc)
 srep = open(os.path.join(sc, "reports", "_review_audit.md"), encoding="utf-8").read()
-check("score_report: 리포트 생성", r.returncode == 0 and os.path.exists(os.path.join(sc, "reports", "_review_audit.md")))
-check("score_report: 두 섹션 채점 집계", "scored sections: **2**" in srep)
-check("score_report: 임계 미달 섹션 b 표기(completeness)",
+check("score_report: report generated", r.returncode == 0 and os.path.exists(os.path.join(sc, "reports", "_review_audit.md")))
+check("score_report: two sections scored and tallied", "scored sections: **2**" in srep)
+check("score_report: below-threshold section b shown (completeness)",
       "below-threshold sections: **1**" in srep and "| b |" in srep.split("Below-threshold sections")[1])
 r = run_sr(sc, "--strict")
-check("score_report: --strict 임계 미달 시 exit 1", r.returncode != 0 and "below" in (r.stdout + r.stderr))
+check("score_report: --strict exits 1 when below threshold", r.returncode != 0 and "below" in (r.stdout + r.stderr))
 
-# 전부 임계 이상이면 --strict 통과
+# all at or above threshold → --strict passes
 sc2 = tempfile.mkdtemp()
 os.makedirs(os.path.join(sc2, "reports"))
 open(os.path.join(sc2, "PRD.md"), "w").write("# A\n\n본문\n")
@@ -282,10 +282,10 @@ open(os.path.join(sc2, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
     "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 4, coherence: 4, clarity: 4, depth: 4}}\n")
 r = run_sr(sc2, "--strict")
-check("score_report: 전부 임계 이상 시 --strict 통과", r.returncode == 0)
+check("score_report: --strict passes when all above threshold", r.returncode == 0)
 
 # ── validate_manifest: optional scores/verbatim ──
-# 정상: scores(정수) + verbatim(source/quotes)
+# valid: scores (integers) + verbatim (source/quotes)
 m_ok = {
     "project": {"product": "P", "ssot": "x.md"},
     "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"],
@@ -293,89 +293,89 @@ m_ok = {
     "verbatim": [{"source": "inputs/o.md", "quotes": ["인용1"]}],
 }
 E, W = V.validate(m_ok)
-check("validate: scores/verbatim 정상 통과(오류 0)", E == [])
+check("validate: scores/verbatim valid (0 errors)", E == [])
 
-# scores 비정수 → 오류
+# scores non-integer → error
 m_bad = {"project": {"product": "P", "ssot": "x.md"},
          "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"],
                        "scores": {"completeness": "high"}}]}
 E, W = V.validate(m_bad)
-check("validate: scores 비정수 오류", any("scores.completeness" in e for e in E))
+check("validate: scores non-integer raises error", any("scores.completeness" in e for e in E))
 
-# verbatim source 누락 → 오류
+# verbatim missing source → error
 m_bad2 = {"project": {"product": "P", "ssot": "x.md"},
           "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
           "verbatim": [{"quotes": ["x"]}]}
 E, W = V.validate(m_bad2)
-check("validate: verbatim source 누락 오류", any("source missing" in e for e in E))
+check("validate: verbatim missing source raises error", any("source missing" in e for e in E))
 
-# scores/verbatim 없으면 통과(하위호환)
+# no scores/verbatim → passes (backward compat)
 m_none = {"project": {"product": "P", "ssot": "x.md"},
           "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}]}
 E, W = V.validate(m_none)
-check("validate: scores/verbatim 없으면 통과(하위호환)", E == [])
+check("validate: no scores/verbatim passes (backward compat)", E == [])
 
-# ── validate_manifest: review_audit 적용추적(백포트) ──
-# 정상: pending_apply/applied 각 decision_id가 decisions[]에 존재
+# ── validate_manifest: review_audit application tracking (backport) ──
+# valid: each pending_apply/applied decision_id exists in decisions[]
 m_ra_ok = {"project": {"product": "P", "ssot": "x.md"},
            "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
            "decisions": [{"id": "d1", "decision": "x"}, {"id": "d2", "decision": "y"}],
            "review_audit": {"pending_apply": [{"decision_id": "d2", "doc": "P.md", "note": "미반영"}],
                             "applied": [{"decision_id": "d1", "verified_at": "2026-06-03"}]}}
 E, W = V.validate(m_ra_ok)
-check("validate: review_audit pending_apply/applied 정상(오류 0)", E == [])
+check("validate: review_audit pending_apply/applied valid (0 errors)", E == [])
 
-# decision_id 누락 → 오류(Codex#5 추적성)
+# decision_id missing → error (Codex#5 traceability)
 m_ra_bad = {"project": {"product": "P", "ssot": "x.md"},
             "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
             "review_audit": {"pending_apply": [{"doc": "P.md"}]}}
 E, W = V.validate(m_ra_bad)
-check("validate: pending_apply decision_id 누락 오류", any("decision_id required" in e for e in E))
+check("validate: pending_apply missing decision_id raises error", any("decision_id required" in e for e in E))
 
-# decision_id 공백문자만 → 오류(peer r1#1 strip)
+# decision_id whitespace-only → error (peer r1#1 strip)
 m_ra_blank = {"project": {"product": "P", "ssot": "x.md"},
               "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
               "decisions": [{"id": "d1", "decision": "x"}],
               "review_audit": {"applied": [{"decision_id": "  "}]}}
 E, W = V.validate(m_ra_blank)
-check("validate: decision_id 공백만 오류", any("decision_id required" in e for e in E))
+check("validate: whitespace-only decision_id raises error", any("decision_id required" in e for e in E))
 
-# dangling: decision_id가 decisions[]에 없음 → 오류(peer r1#1 참조무결성)
+# dangling: decision_id not in decisions[] → error (peer r1#1 referential integrity)
 m_ra_dangling = {"project": {"product": "P", "ssot": "x.md"},
                  "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
                  "decisions": [{"id": "d1", "decision": "x"}],
                  "review_audit": {"pending_apply": [{"decision_id": "dZ", "doc": "P.md"}]}}
 E, W = V.validate(m_ra_dangling)
-check("validate: dangling decision_id 오류", any("dangling" in e for e in E))
+check("validate: dangling decision_id raises error", any("dangling" in e for e in E))
 
-# list 내 중복 decision_id → 오류(peer r1#4)
+# duplicate decision_id within list → error (peer r1#4)
 m_ra_dup = {"project": {"product": "P", "ssot": "x.md"},
             "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
             "decisions": [{"id": "d1", "decision": "x"}],
             "review_audit": {"applied": [{"decision_id": "d1"}, {"decision_id": "d1"}]}}
 E, W = V.validate(m_ra_dup)
-check("validate: applied 내 decision_id 중복 오류", any("duplicate" in e for e in E))
+check("validate: duplicate decision_id in applied raises error", any("duplicate" in e for e in E))
 
-# pending_apply ↔ applied 교집합 → 경고(peer r1#4, 오류 아님)
+# pending_apply ↔ applied intersection → warning (peer r1#4, not an error)
 m_ra_cross = {"project": {"product": "P", "ssot": "x.md"},
               "sections": [{"id": "a", "title": "A", "status": "approved", "sources": ["k"]}],
               "decisions": [{"id": "d1", "decision": "x"}],
               "review_audit": {"pending_apply": [{"decision_id": "d1"}], "applied": [{"decision_id": "d1"}]}}
 E, W = V.validate(m_ra_cross)
-check("validate: pending_apply↔applied 교집합 경고(오류 아님)",
+check("validate: pending_apply↔applied intersection warns (not an error)",
       E == [] and any("both" in w for w in W))
 
-# review_audit 없으면 통과(하위호환)
+# no review_audit → passes (backward compat)
 E, W = V.validate(m_none)
-check("validate: review_audit 없으면 통과(하위호환)", E == [])
+check("validate: no review_audit passes (backward compat)", E == [])
 
-# ── gap_audit.py: pending_apply 게이트(백포트) ──
+# ── gap_audit.py: pending_apply gate (backport) ──
 def run_ga(cwd, *args):
     return subprocess.run([sys.executable, os.path.join(SCRIPTS, "gap_audit.py"), "manifest.yaml", *args],
                           cwd=cwd, capture_output=True, text=True)
 
 
-# pending_apply 비어있지 않음 → 리포트 표기 + --strict exit 1
+# pending_apply non-empty → shown in report + --strict exit 1
 ga = tempfile.mkdtemp()
 open(os.path.join(ga, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
@@ -384,11 +384,11 @@ open(os.path.join(ga, "manifest.yaml"), "w").write(
     "review_audit:\n  pending_apply:\n    - {decision_id: d2, doc: PRD.md, note: \"본문 미반영\"}\n")
 r = run_ga(ga)
 grep = open(os.path.join(ga, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: pending_apply 리포트 표기", r.returncode == 0 and "| d2 |" in grep and "pending_apply (unapplied): **1**" in grep)
+check("gap_audit: pending_apply shown in report", r.returncode == 0 and "| d2 |" in grep and "pending_apply (unapplied): **1**" in grep)
 r = run_ga(ga, "--strict")
-check("gap_audit: --strict pending_apply 있으면 exit 1", r.returncode != 0 and "pending_apply" in (r.stdout + r.stderr))
+check("gap_audit: --strict exits 1 when pending_apply non-empty", r.returncode != 0 and "pending_apply" in (r.stdout + r.stderr))
 
-# pending_apply 비어있음(applied만) → --strict 통과(하위호환: gaps/open/pending 없음)
+# pending_apply empty (applied only) → --strict passes (backward compat: no gaps/open/pending)
 ga2 = tempfile.mkdtemp()
 open(os.path.join(ga2, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
@@ -396,15 +396,15 @@ open(os.path.join(ga2, "manifest.yaml"), "w").write(
     "decisions:\n  - {id: d1, date: 2026-06-01, decision: \"확정\", by: \"리드\"}\n"
     "review_audit:\n  applied:\n    - {decision_id: d1, verified_at: 2026-06-03}\n")
 r = run_ga(ga2, "--strict")
-check("gap_audit: pending_apply 비면 --strict 통과", r.returncode == 0)
+check("gap_audit: --strict passes when pending_apply empty", r.returncode == 0)
 
-# review_audit 키 없으면 기존 동작(하위호환) — pending_apply 0건
+# no review_audit key → existing behavior (backward compat) — pending_apply count 0
 ga3 = tempfile.mkdtemp()
 open(os.path.join(ga3, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
     "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
 r = run_ga(ga3, "--strict")
-check("gap_audit: review_audit 없으면 --strict 통과(하위호환)", r.returncode == 0)
+check("gap_audit: --strict passes with no review_audit key (backward compat)", r.returncode == 0)
 
 # ── gap_audit.py: cross-audit coverage honesty guard (silent-omission fix) ──
 # 0 sources/downstream + drafted section → warn that gaps==0 is internal-only, NOT clean.
@@ -414,13 +414,13 @@ open(os.path.join(ga_blind, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
 r = run_ga(ga_blind)
 rep = open(os.path.join(ga_blind, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: 0 소스+drafted → 리포트에 cross-blind 경고",
+check("gap_audit: 0 sources+drafted → cross-blind warning in report",
       "Cross-consistency not run" in rep and "**0** source path(s) + **0** downstream target(s)" in rep)
-check("gap_audit: cross-blind 경고 stderr 출력", "cross-consistency not run" in r.stderr)
+check("gap_audit: cross-blind warning printed to stderr", "cross-consistency not run" in r.stderr)
 r = run_ga(ga_blind, "--strict")
-check("gap_audit: cross-blind은 --strict 실패 아님(internal-only 정당)", r.returncode == 0)
+check("gap_audit: cross-blind does not fail --strict (internal-only is valid)", r.returncode == 0)
 
-# sources 등록됨 → 경고 없음
+# sources registered → no warning
 ga_src = tempfile.mkdtemp()
 open(os.path.join(ga_src, "manifest.yaml"), "w").write(
     "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
@@ -428,20 +428,20 @@ open(os.path.join(ga_src, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
 r = run_ga(ga_src)
 rep = open(os.path.join(ga_src, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: 소스 등록 시 cross-blind 경고 없음 + coverage 1",
+check("gap_audit: sources registered → no cross-blind warning + coverage 1",
       "Cross-consistency not run" not in rep and "**1** source path(s)" in rep)
 
-# 0 소스지만 전부 pending(grounded 0) → 오해 소지 없음 → 경고 없음
+# 0 sources but all pending (grounded 0) → no misleading context → no warning
 ga_pend = tempfile.mkdtemp()
 open(os.path.join(ga_pend, "manifest.yaml"), "w").write(
     "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
     "sections:\n  - {id: a, title: \"A\", status: pending}\n")
 r = run_ga(ga_pend)
 rep = open(os.path.join(ga_pend, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: 0 소스+전부 pending → cross-blind 경고 없음(오해 소지 없음)",
+check("gap_audit: 0 sources + all pending → no cross-blind warning (no misleading context)",
       "Cross-consistency not run" not in rep)
 
-# downstream만 등록(소스 0) + draft 섹션 → 경고 없음, coverage가 downstream 카운트(peer r1 test-gap)
+# downstream only registered (0 sources) + draft section → no warning, coverage counts downstream (peer r1 test-gap)
 ga_ds = tempfile.mkdtemp()
 open(os.path.join(ga_ds, "manifest.yaml"), "w").write(
     "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
@@ -449,10 +449,10 @@ open(os.path.join(ga_ds, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"A\", status: draft, sources: [k]}\n")
 r = run_ga(ga_ds)
 rep = open(os.path.join(ga_ds, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: downstream만 등록+draft → 경고 없음 + coverage downstream 1",
+check("gap_audit: downstream only + draft → no warning + coverage downstream 1",
       "Cross-consistency not run" not in rep and "**0** source path(s) + **1** downstream target(s)" in rep)
 
-# 빈 list 값 → coverage 0 → cross-blind 경고(peer r1 test-gap)
+# empty list value → coverage 0 → cross-blind warning (peer r1 test-gap)
 ga_empty = tempfile.mkdtemp()
 open(os.path.join(ga_empty, "manifest.yaml"), "w").write(
     "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
@@ -460,8 +460,52 @@ open(os.path.join(ga_empty, "manifest.yaml"), "w").write(
     "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
 r = run_ga(ga_empty)
 rep = open(os.path.join(ga_empty, "reports", "_gap_report.md"), encoding="utf-8").read()
-check("gap_audit: 빈 list 소스 → coverage 0 + cross-blind 경고",
+check("gap_audit: empty list source → coverage 0 + cross-blind warning",
       "**0** source path(s)" in rep and "Cross-consistency not run" in rep)
+
+# ── gap_audit.py: --strict-cross-audit opt-in (cross-blind treated as gate failure) ──
+# cross-blind (0 sources + drafted) + --strict-cross-audit → exit 1
+ga_xca = tempfile.mkdtemp()
+open(os.path.join(ga_xca, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_xca, "--strict-cross-audit")
+check("gap_audit: --strict-cross-audit + cross-blind → exit 1",
+      r.returncode != 0 and "cross-audit not run" in (r.stdout + r.stderr))
+# same manifest with plain --strict → passes (existing behavior unchanged)
+r = run_ga(ga_xca, "--strict")
+check("gap_audit: plain --strict passes cross-blind (backward compat unchanged)", r.returncode == 0)
+
+# sources registered → --strict-cross-audit also passes (not cross-blind)
+ga_xca2 = tempfile.mkdtemp()
+open(os.path.join(ga_xca2, "manifest.yaml"), "w").write(
+    "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+    "  sources: {code_roots: [\"~/code/src\"]}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_ga(ga_xca2, "--strict-cross-audit")
+check("gap_audit: --strict-cross-audit passes when sources registered", r.returncode == 0)
+
+# ── bin/docloop gate wrapper: flag passthrough + manifest-default contract (peer r1 LOW) ──
+BIN = os.path.join(os.path.dirname(SCRIPTS), "bin", "docloop")
+
+
+def run_gate(cwd, *args):
+    return subprocess.run(["bash", BIN, "gate", *args], cwd=cwd, capture_output=True, text=True)
+
+
+# cross-blind manifest at default path; flag-first must NOT be consumed as the manifest path
+gw = tempfile.mkdtemp()
+open(os.path.join(gw, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_gate(gw, "--strict-cross-audit")
+check("docloop gate: flag-first forwards + defaults manifest.yaml → cross-blind exit 1",
+      r.returncode != 0 and "cross-audit not run" in (r.stdout + r.stderr))
+r = run_gate(gw)
+check("docloop gate: plain gate (no flag) passes cross-blind", r.returncode == 0)
+r = run_gate(gw, "manifest.yaml", "--strict-cross-audit")
+check("docloop gate: explicit manifest + flag → cross-blind exit 1",
+      r.returncode != 0 and "cross-audit not run" in (r.stdout + r.stderr))
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
