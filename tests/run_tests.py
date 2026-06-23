@@ -572,7 +572,20 @@ open(os.path.join(sc_inc, "manifest.yaml"), "w").write(
 r = run_sr(sc_inc, "--strict")
 rep = open(os.path.join(sc_inc, "reports", "_review_audit.md"), encoding="utf-8").read()
 check("score_report: scored section missing axes → incomplete warned (clarity/depth)",
-      "Incomplete scoring" in rep and "incomplete scoring" in r.stderr and "clarity, depth" in rep)
+      r.returncode == 0 and "Incomplete scoring" in rep and "incomplete scoring" in r.stderr and "clarity, depth" in rep)
+
+# verify_blind other half: quotes present but ALL sources missing → blind warn + --strict fails via MISS
+vb_nosrc = tempfile.mkdtemp()
+os.makedirs(os.path.join(vb_nosrc, "inputs")); os.makedirs(os.path.join(vb_nosrc, "reports"))
+open(os.path.join(vb_nosrc, "PRD.md"), "w").write("# Body\n\n> a quoted sentence\n")
+open(os.path.join(vb_nosrc, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "verbatim:\n  - {source: inputs/gone.md}\n"
+    "sections:\n  - {id: a, title: \"Body\", status: approved, sources: [k]}\n")
+r = run_vc(vb_nosrc, "--strict")
+rep = open(os.path.join(vb_nosrc, "reports", "_verbatim_report.md"), encoding="utf-8").read()
+check("verbatim: quotes present but all sources missing → blind warn + --strict fails (MISS)",
+      r.returncode != 0 and "Nothing verified" in rep and "verified nothing" in r.stderr)
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
