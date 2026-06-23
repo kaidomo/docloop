@@ -172,8 +172,8 @@ check("approval_brief: open_questions shows open only (resolved excluded by defa
       "충돌" in brief and "끝난것" not in brief)
 check("approval_brief: decision log and section status shown", "확정" in brief and "| goals |" in brief)
 
-# r1-2 keyword anchor: a title that starts with a goal keyword but has extra suffix is not a goal type (prefix match only)
-check("approval_brief: title starting with goal keyword + extra suffix is not a goal match",
+# r1-2 keyword anchor: _match is prefix-only (startswith), so a goal keyword appearing mid-title (e.g. "기능 목적 + AC") is NOT a goal match — avoids mid-string false positives
+check("approval_brief: goal keyword mid-title (not prefix) is not a goal match",
       not AB._match({"id": "func-ac", "title": "기능 목적 + AC(인수조건)"}, AB.GOAL_IDS, AB.GOAL_KW))
 # r1-3 normalization: absorbs numbering and whitespace variants
 check("approval_brief: _norm absorbs numbering and whitespace", AB._norm("1. 목표 / 성공기준") == AB._norm("목표/성공기준"))
