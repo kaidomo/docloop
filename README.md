@@ -35,7 +35,7 @@ See [`docs/design.md`](docs/design.md) for the full argument.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/docloop && cd docloop
+git clone https://github.com/kaidomo/docloop && cd docloop
 pip install -r requirements.txt       # PyYAML (used by the lib/ scripts)
 chmod +x bin/docloop
 export PATH="$PWD/bin:$PATH"          # or symlink bin/docloop onto your PATH
