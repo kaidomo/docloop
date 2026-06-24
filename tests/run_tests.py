@@ -518,5 +518,74 @@ rep = open(os.path.join(ga_typo, "reports", "_gap_report.md"), encoding="utf-8")
 check("gap_audit: typo'd source key not counted (coverage 0, cross-blind warns)",
       "**0** source path(s)" in rep and "Cross-consistency not run" in rep)
 
+# ── silent-omission hardening (v0.1.2): verbatim_check + score_report ──
+# verbatim: 0 quotes → --strict passes but warns "nothing verified" (vacuous-pass guard)
+vb_blind = tempfile.mkdtemp()
+os.makedirs(os.path.join(vb_blind, "inputs")); os.makedirs(os.path.join(vb_blind, "reports"))
+open(os.path.join(vb_blind, "inputs", "orig.md"), "w").write("source text\n")
+open(os.path.join(vb_blind, "PRD.md"), "w").write("# Body\n\nno blockquotes here\n")
+open(os.path.join(vb_blind, "pm-policy.yaml"), "w").write(
+    "review_audit:\n  verbatim: {enabled: true, targets: [\"inputs/orig.md\"]}\n")
+open(os.path.join(vb_blind, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"Body\", status: approved, sources: [k]}\n")
+r = run_vc(vb_blind, "--strict")
+rep = open(os.path.join(vb_blind, "reports", "_verbatim_report.md"), encoding="utf-8").read()
+check("verbatim: 0 quotes → --strict passes but warns nothing verified",
+      r.returncode == 0 and "Nothing verified" in rep and "verified nothing" in r.stderr)
+
+# verbatim: a missing FIRST source must not shift the matched-source label (zip-misalign bug)
+vb_mis = tempfile.mkdtemp()
+os.makedirs(os.path.join(vb_mis, "inputs")); os.makedirs(os.path.join(vb_mis, "reports"))
+open(os.path.join(vb_mis, "inputs", "present.md"), "w").write("the canonical sentence\n")
+open(os.path.join(vb_mis, "PRD.md"), "w").write("# Body\n\n> the canonical sentence\n")
+open(os.path.join(vb_mis, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "verbatim:\n  - {source: inputs/missing.md}\n  - {source: inputs/present.md}\n"
+    "sections:\n  - {id: a, title: \"Body\", status: approved, sources: [k]}\n")
+r = run_vc(vb_mis, "--strict")
+rep = open(os.path.join(vb_mis, "reports", "_verbatim_report.md"), encoding="utf-8").read()
+check("verbatim: missing first source doesn't mislabel match (FULL→present.md)",
+      r.returncode == 0 and "(FULL) **1**" in rep
+      and "| FULL | inputs/present.md |" in rep          # matched-source column pinned
+      and "| FULL | inputs/missing.md |" not in rep)      # the old zip-misalign bug
+
+# score: sections exist but none scored → --strict passes but warns "nothing scored"
+sc_blind = tempfile.mkdtemp(); os.makedirs(os.path.join(sc_blind, "reports"))
+open(os.path.join(sc_blind, "PRD.md"), "w").write("# A\n\nbody\n")
+open(os.path.join(sc_blind, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n")
+r = run_sr(sc_blind, "--strict")
+rep = open(os.path.join(sc_blind, "reports", "_review_audit.md"), encoding="utf-8").read()
+check("score_report: 0 scored sections → --strict passes but warns nothing scored",
+      r.returncode == 0 and "Nothing scored" in rep and "scoring not run" in r.stderr)
+
+# score: a scored section missing axes → incomplete warned (not silently passing)
+sc_inc = tempfile.mkdtemp(); os.makedirs(os.path.join(sc_inc, "reports"))
+open(os.path.join(sc_inc, "PRD.md"), "w").write("# A\n\nbody\n")
+open(os.path.join(sc_inc, "pm-policy.yaml"), "w").write(
+    "review_audit:\n  scoring: {primary_axes: [completeness, coherence, clarity, depth], scale: {pass_threshold: 3}}\n")
+open(os.path.join(sc_inc, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 4, coherence: 4}}\n")
+r = run_sr(sc_inc, "--strict")
+rep = open(os.path.join(sc_inc, "reports", "_review_audit.md"), encoding="utf-8").read()
+check("score_report: scored section missing axes → incomplete warned (clarity/depth)",
+      r.returncode == 0 and "Incomplete scoring" in rep and "incomplete scoring" in r.stderr and "clarity, depth" in rep)
+
+# verify_blind other half: quotes present but ALL sources missing → blind warn + --strict fails via MISS
+vb_nosrc = tempfile.mkdtemp()
+os.makedirs(os.path.join(vb_nosrc, "inputs")); os.makedirs(os.path.join(vb_nosrc, "reports"))
+open(os.path.join(vb_nosrc, "PRD.md"), "w").write("# Body\n\n> a quoted sentence\n")
+open(os.path.join(vb_nosrc, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs}\n"
+    "verbatim:\n  - {source: inputs/gone.md}\n"
+    "sections:\n  - {id: a, title: \"Body\", status: approved, sources: [k]}\n")
+r = run_vc(vb_nosrc, "--strict")
+rep = open(os.path.join(vb_nosrc, "reports", "_verbatim_report.md"), encoding="utf-8").read()
+check("verbatim: quotes present but all sources missing → blind warn + --strict fails (MISS)",
+      r.returncode != 0 and "Nothing verified" in rep and "verified nothing" in r.stderr)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
