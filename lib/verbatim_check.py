@@ -10,8 +10,10 @@ Check = looks up the body's (SSOT) `>` blockquotes (or quotes named in verbatim.
        in the source via **exact-substring after whitespace normalization**.
 
 Output: reports/_verbatim_report.md (source SHA256 16 chars · full/partial/miss counts).
-Usage: python3 verbatim_check.py <manifest.yaml> [--out report.md] [--strict]
+Usage: python3 verbatim_check.py <manifest.yaml> [--out report.md] [--strict] [--strict-verbatim-coverage]
   --strict: exit 1 if any quote has no match (MISS).
+  --strict-verbatim-coverage: imply --strict and ALSO fail when nothing was verifiable
+           (0 quotes or 0 readable sources) — opt-in so release CI can't pass a vacuous check.
 (ported from the gap_audit.py pattern — load_validated · esc · KST · --strict gate. reuses split.split_h1.)
 
 Enforcement model: this script is a **mechanical block** axis (SHA · exact-substring).
@@ -122,6 +124,8 @@ def main():
     ap.add_argument("manifest")
     ap.add_argument("--out", default="")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--strict-verbatim-coverage", action="store_true",
+                    help="imply --strict and also fail when nothing was verifiable (0 quotes or 0 readable sources)")
     a = ap.parse_args()
     m = load_validated(a.manifest)
     base = os.path.dirname(os.path.abspath(a.manifest))
@@ -219,8 +223,14 @@ def main():
         print(f"[warn] {n_missing} declared verbatim source(s) missing — checked against "
               f"{len(present_sources)} readable source(s) only", file=sys.stderr)
 
-    if a.strict and n_miss:
-        sys.exit(f"[verbatim gate FAILED] {n_miss} quote(s) with no match (MISS)")
+    if a.strict or a.strict_verbatim_coverage:
+        fails = []
+        if n_miss:
+            fails.append(f"{n_miss} quote(s) with no match (MISS)")
+        if a.strict_verbatim_coverage and verify_blind:   # opt-in: vacuous pass is a failure
+            fails.append(f"nothing verifiable (quotes {len(quotes)}, readable sources {len(present_sources)})")
+        if fails:
+            sys.exit("[verbatim gate FAILED] " + " + ".join(fails))
 
 
 if __name__ == "__main__":

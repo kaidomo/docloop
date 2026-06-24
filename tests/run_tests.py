@@ -587,5 +587,46 @@ rep = open(os.path.join(vb_nosrc, "reports", "_verbatim_report.md"), encoding="u
 check("verbatim: quotes present but all sources missing → blind warn + --strict fails (MISS)",
       r.returncode != 0 and "Nothing verified" in rep and "verified nothing" in r.stderr)
 
+# ── opt-in coverage-fail flags (v0.2.0): a vacuous gate becomes a failure ──
+# verbatim: --strict-verbatim-coverage fails where plain --strict passed (0 quotes)
+r = run_vc(vb_blind, "--strict-verbatim-coverage")
+check("verbatim: --strict-verbatim-coverage fails on 0 quotes (vacuous)",
+      r.returncode != 0 and "nothing verifiable" in (r.stdout + r.stderr))
+# verifiable input (quote matches a present source) → coverage flag passes
+r = run_vc(vb_mis, "--strict-verbatim-coverage")
+check("verbatim: --strict-verbatim-coverage passes when quotes are verifiable", r.returncode == 0)
+# coverage flag inherits --strict (a MISS still fails)
+r = run_vc(vb, "--strict-verbatim-coverage")
+check("verbatim: --strict-verbatim-coverage inherits --strict (MISS still fails)",
+      r.returncode != 0 and "MISS" in (r.stdout + r.stderr))
+
+# score: --strict-scoring-coverage fails on 0 scored and on incomplete (unscored axes)
+r = run_sr(sc_blind, "--strict-scoring-coverage")
+check("score_report: --strict-scoring-coverage fails on 0 scored (vacuous)",
+      r.returncode != 0 and "nothing scored" in (r.stdout + r.stderr))
+r = run_sr(sc_inc, "--strict-scoring-coverage")
+check("score_report: --strict-scoring-coverage fails on unscored axes (incomplete)",
+      r.returncode != 0 and "unscored axes" in (r.stdout + r.stderr))
+# fully scored & above threshold → coverage flag passes
+r = run_sr(sc2, "--strict-scoring-coverage")
+check("score_report: --strict-scoring-coverage passes when fully scored & above threshold", r.returncode == 0)
+
+# coverage's other vacuous half: quotes present but 0 readable sources → "nothing verifiable" (peer r1 LOW)
+r = run_vc(vb_nosrc, "--strict-verbatim-coverage")
+check("verbatim: --strict-verbatim-coverage fails on 0 readable sources (vacuous)",
+      r.returncode != 0 and "nothing verifiable" in (r.stdout + r.stderr))
+
+# score coverage inherits --strict: fully scored but below threshold still fails (peer r1 LOW)
+sc_below = tempfile.mkdtemp(); os.makedirs(os.path.join(sc_below, "reports"))
+open(os.path.join(sc_below, "PRD.md"), "w").write("# A\n\nbody\n")
+open(os.path.join(sc_below, "pm-policy.yaml"), "w").write(
+    "review_audit:\n  scoring: {primary_axes: [completeness, coherence, clarity, depth], scale: {pass_threshold: 3}}\n")
+open(os.path.join(sc_below, "manifest.yaml"), "w").write(
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 2, coherence: 4, clarity: 4, depth: 4}}\n")
+r = run_sr(sc_below, "--strict-scoring-coverage")
+check("score_report: --strict-scoring-coverage inherits --strict (below-threshold still fails)",
+      r.returncode != 0 and "below pass_threshold" in (r.stdout + r.stderr))
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
