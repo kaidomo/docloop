@@ -8,8 +8,10 @@ The verdict labels (scores) are filled into the manifest by a **verifier (human/
 agent)** — this script only aggregates, sorts, and gates them (the authoring agent does not
 score its own work — hard rule).
 
-Usage: python3 score_report.py <manifest.yaml> [--out report.md] [--strict]
+Usage: python3 score_report.py <manifest.yaml> [--out report.md] [--strict] [--strict-scoring-coverage]
   --strict: exit 1 if any section has an axis below pass_threshold.
+  --strict-scoring-coverage: imply --strict and ALSO fail when nothing was scored (0 scored
+           sections) or scored sections left axes unscored — opt-in so release CI can't pass a vacuous check.
 (ported from the gap_audit.py pattern — load_validated · esc · KST · --strict gate.)
 
 Enforcement model: the score threshold (pass_threshold) is a **mechanical block** (--strict).
@@ -52,6 +54,8 @@ def main():
     ap.add_argument("manifest")
     ap.add_argument("--out", default="")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--strict-scoring-coverage", action="store_true",
+                    help="imply --strict and also fail when nothing was scored or scored sections left axes unscored")
     a = ap.parse_args()
     m = load_validated(a.manifest)
     base = os.path.dirname(os.path.abspath(a.manifest))
@@ -162,8 +166,16 @@ def main():
     elif incomplete:
         print(f"[warn] {len(incomplete)} scored section(s) missing one or more axes (incomplete scoring)", file=sys.stderr)
 
-    if a.strict and below:
-        sys.exit(f"[scoring gate FAILED] {len(below)} section(s) below pass_threshold({thr})")
+    if a.strict or a.strict_scoring_coverage:
+        fails = []
+        if below:
+            fails.append(f"{len(below)} section(s) below pass_threshold({thr})")
+        if a.strict_scoring_coverage and scoring_blind:     # opt-in: nothing scored is a failure
+            fails.append(f"nothing scored (0 of {total_secs} section(s))")
+        if a.strict_scoring_coverage and incomplete:        # opt-in: axes left unscored is a failure
+            fails.append(f"{len(incomplete)} section(s) with unscored axes")
+        if fails:
+            sys.exit("[scoring gate FAILED] " + " + ".join(fails))
 
 
 if __name__ == "__main__":

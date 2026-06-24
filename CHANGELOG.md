@@ -3,6 +3,17 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.2.0] — 2026-06-24
+### Added
+- **Opt-in flags to fail (not just warn) on a vacuous gate**, for release CI that must not
+  pass a check that verified nothing:
+  - `verbatim_check.py --strict-verbatim-coverage` — implies `--strict` and also fails when
+    nothing was verifiable (0 quotes or 0 readable sources).
+  - `score_report.py --strict-scoring-coverage` — implies `--strict` and also fails when
+    nothing was scored, or scored sections left configured axes unscored.
+  Plain `--strict` is unchanged (still warns only on vacuity); the new flags are additive.
+  This completes the family started by gap-audit's `--strict-cross-audit`.
+
 ## [0.1.2] — 2026-06-23
 Silent-omission hardening — extends the gap-audit honesty guard to the other gate scripts
 (a self-audit found the same "passes because nothing was checked" pattern elsewhere).
