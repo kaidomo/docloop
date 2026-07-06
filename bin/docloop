@@ -59,8 +59,16 @@ docloop — a thin writing harness (wraps codex / claude -p)
   docloop split  [manifest.yaml]      regenerate publish pages from the SSOT
   docloop gate   [manifest.yaml] [--strict-cross-audit]   release gate (gap_audit.py --strict)
 
+Change-plan mode (as-is/to-be) — plan fixes to an existing system, for a human to apply:
+  docloop atb-capture [sources...]    read the system -> capture observations (issues)
+  docloop atb-chunk                   group observations into chunks + sequence (handoff)
+  docloop atb-author                  write the as-is/to-be body per chunk into the SSOT
+  docloop atb-audit                   ground-audit: verify each as-is against its evidence (fan-out)
+  docloop atb-gate [manifest.yaml] [--strict-cross-audit]   handoff gate (ground_audit.py --strict)
+  (reuses: docloop init, docloop review)
+
 Env: DOCLOOP_MODEL=codex|claude (default codex)   DOCLOOP_REVIEW_DIR=~/.docloop/reviews
-Run plan/draft/audit from inside the work folder.
+Run plan/draft/audit (and atb-*) from inside the work folder.
 EOF
 }
 
@@ -83,6 +91,15 @@ case "$cmd" in
     mf="manifest.yaml"
     if [ "${1:-}" ] && [ "${1#-}" = "$1" ]; then mf="$1"; shift; fi
     python3 "$LIB/gap_audit.py" "$mf" --strict "$@" ;;
+  # ── change-plan mode (as-is/to-be) ──
+  atb-capture) run_model "$(stage_prompt atb-capture.md "$@")" rw ;;
+  atb-chunk)   run_model "$(stage_prompt atb-chunk.md "$@")"   rw ;;
+  atb-author)  run_model "$(stage_prompt atb-author.md "$@")"  rw ;;
+  atb-audit)   run_model "$(stage_prompt atb-audit.md "$@")"   rw ;;
+  atb-gate)
+    mf="manifest.yaml"
+    if [ "${1:-}" ] && [ "${1#-}" = "$1" ]; then mf="$1"; shift; fi
+    python3 "$LIB/ground_audit.py" "$mf" --strict "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command '$cmd' (try: docloop --help)" ;;
 esac

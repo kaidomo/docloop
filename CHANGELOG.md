@@ -3,6 +3,33 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.3.0] — 2026-07-06
+### Added
+- **Change-plan mode (as-is/to-be)** — a second, delineated pipeline for planning fixes to an
+  existing system (vs. writing a fresh doc). Read product/docs/logs/code → capture observations →
+  group into ordered chunks → write a single as-is/to-be canonical doc for a human to apply.
+  - Stages `atb-capture → atb-chunk → atb-author → atb-audit`, plus `atb-gate`, added as flat
+    `bin/docloop` commands (no pipeline-selector abstraction — matches the existing dispatcher).
+    Reuses `init` and `review`.
+  - `lib/ground_audit.py` — the ground-audit gate: a to-be built on a wrong as-is is the most
+    expensive mistake, so `--strict` blocks ungrounded to-be (authored chunk with an unverified
+    member), untraceable to-be (no members), missing `order_rationale`, missing as-is, and pending
+    chunks. Mirrors gap-audit's honesty guard: `--strict-cross-audit` fails when 0 `project.sources`
+    are registered while chunks are authored (as-is is self-assertion only).
+  - `validate_manifest`: optional `observations[]` (=issue) and `chunks[]` (=handoff + as-is/to-be,
+    with `order`/`order_rationale`) blocks — absent = pass (document mode unaffected), present =
+    validated (referential integrity of `members` → `observations`, same idiom as `decision_id`).
+    `sections`/`doc_type` "empty" warnings are suppressed when a manifest is in change-plan mode.
+  - `templates/manifest.atb.example.yaml` + `templates/policy.atb.example.yaml` (sequencing
+    direction, `consumer`, taxonomy). New prompts under `prompts/atb-*.md`.
+- **`project.sources` recognizes `docs` and `logs`** (additive) for change-plan grounding.
+  Coverage counting stays mode-specific — `gap_audit` counts `code_roots/design/prototypes`
+  (document mode's audited classes, unchanged), `ground_audit` counts `code_roots/design/docs/logs`
+  — so recognizing a key in the validator never silently changes a mode's cross-blind honesty guard.
+### Fixed
+- **`validate_manifest`: file/YAML errors now exit cleanly** (a `[abort]` message) instead of a
+  raw traceback — shared by both gates.
+
 ## [0.2.0] — 2026-06-24
 ### Added
 - **Opt-in flags to fail (not just warn) on a vacuous gate**, for release CI that must not

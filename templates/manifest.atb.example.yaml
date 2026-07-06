@@ -1,0 +1,56 @@
+# manifest.yaml example — change-plan mode (as-is/to-be). Put it at the work-folder root.
+# This example is intentionally generic (a fictional SaaS team). Use placeholder paths for your repo.
+# Standard layout: inputs/ (source material, read-only) · work/ (notes, fan-out ground files) · reports/ (audit)
+project:
+  product: Case Submission Form     # target-area label (product-agnostic)
+  ssot: asis_tobe_case-submission.md  # the single as-is/to-be canonical doc (edit ONLY here) — work-folder root
+  policy: ./policy.atb.yaml          # change-plan house rules (the variable layer) — path only; engine is agnostic
+  # output_dir: outputs             # (optional) only if you split the single doc into pages
+  # Cross-grounding source roots (for as-is verification). Without them, as-is is self-assertion only
+  # and ground_audit warns (cross-blind). Allowed keys: code_roots/design/docs/logs.
+  sources:
+    code_roots: ["~/code/your-frontend/src"]
+    design: ["~/design/figma-export"]
+    docs: ["./inputs/submission-policy.md"]
+    logs: ["~/logs/case-submit-errors.log"]
+
+# ── stage 1 capture: observations (=issue) ──
+# kind: bug|intent_gap|improvement|new (policy taxonomy). verified:false = no evidence -> stays out of the body.
+observations:
+  - id: o1
+    what: "On submit failure a generic 'Error' toast shows, with no reason"
+    sources: ["CaseSubmitForm submit catch block", "case-submit-errors.log 2025-01-20"]
+    kind: bug
+    intent_gap: "Violates policy §5 'show the reason and confirmed values together'"
+    verified: true
+  - id: o2
+    what: "Required fields: code has 4 (REQUIRED_FIELDS) vs policy states 5"
+    sources: ["CaseSubmitForm REQUIRED_FIELDS", "submission-policy.md §3"]
+    kind: intent_gap
+    verified: true
+  - id: o3
+    what: "No concurrent-submission conflict path appears to exist (suspected)"
+    sources: []                # couldn't locate evidence
+    kind: bug
+    verified: false            # ★ unverified -> body-excluded; ground_audit recovers it
+
+# ── stage 2/3 chunk & sequence + as-is/to-be: chunks (=handoff) ──
+# members = grouped observation ids. order_rationale required. status: draft|review|approved|pending.
+chunks:
+  - id: c1
+    title: "Submit-error UX — surface the reason"
+    members: [o1]
+    order: 1
+    order_rationale: "high_risk_first: directly drives user drop-off + policy violation. Isolated change, no dependency."
+    status: draft
+    asis: "On submit failure the catch block in CaseSubmitForm shows a fixed 'Error' toast with no reason (violates submission-policy.md §5)."
+    tobe: "On submit failure, show the server's failure reason and the confirmed input values together. Expose a retry path in the same toast."
+    issues: "Needs a server error-code -> user-message mapping table (scope)."
+    approach: "Branch on error.code in the catch -> message map. (Applied by the human.)"
+  - id: c2
+    title: "Required-field consistency — code vs policy"
+    members: [o2]
+    order: 2
+    order_rationale: "Lower risk than c1 (isolated validation logic). Policy is the SSOT, so align the code."
+    status: pending            # which is right (policy 5 vs code 4) awaits a human decision
+    # asis/tobe unwritten — pending chunks are not bodied
