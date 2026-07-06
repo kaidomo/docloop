@@ -628,5 +628,146 @@ r = run_sr(sc_below, "--strict-scoring-coverage")
 check("score_report: --strict-scoring-coverage inherits --strict (below-threshold still fails)",
       r.returncode != 0 and "below pass_threshold" in (r.stdout + r.stderr))
 
+# ══════════════ change-plan mode (as-is/to-be): validate + ground_audit ══════════════
+
+def run_gr(cwd, *args):
+    return subprocess.run([sys.executable, os.path.join(SCRIPTS, "ground_audit.py"), "manifest.yaml", *args],
+                          cwd=cwd, capture_output=True, text=True)
+
+
+def _w(d, text):
+    with open(os.path.join(d, "manifest.yaml"), "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+# ── validate (pure) ──
+M_ATB_OK = {
+    "project": {"product": "P", "ssot": "x.md", "sources": {"code_roots": ["~/c"]}},
+    "observations": [{"id": "o1", "what": "phenomenon", "sources": ["f1"], "kind": "bug", "verified": True}],
+    "chunks": [{"id": "c1", "title": "chunk", "members": ["o1"], "order": 1,
+                "order_rationale": "risk first", "status": "draft", "asis": "current X", "tobe": "should be Y"}],
+}
+E, W = V.validate(M_ATB_OK)
+check("atb validate: valid change-plan manifest passes (0 errors)", E == [])
+check("atb validate: sections/doc_type warnings suppressed in change-plan mode",
+      not any("sections is empty" in w or "doc_type not set" in w for w in W))
+
+E, W = V.validate({"project": {"product": "P", "ssot": "x"}, "observations": [{"id": "o1", "what": "w"}],
+                   "chunks": [{"id": "c1", "title": "t", "members": ["oX"], "order": 1, "order_rationale": "r", "status": "pending"}]})
+check("atb validate: dangling member error", any("dangling" in e for e in E))
+E, W = V.validate({"project": {"product": "P", "ssot": "x"},
+                   "observations": [{"id": "o1", "what": "w", "verified": "yes"}]})
+check("atb validate: verified non-bool error", any("verified must be a bool" in e for e in E))
+E, W = V.validate({"project": {"product": "P", "ssot": "x"},
+                   "observations": [{"id": "o1", "what": "w", "kind": "typo"}]})
+check("atb validate: unknown kind is a warning (not error)", not any("kind" in e for e in E) and any("kind 'typo'" in w for w in W))
+E, W = V.validate({"project": {"product": "P", "ssot": "x"}, "observations": [{"id": "o1", "what": "w", "verified": True, "sources": ["s"]}],
+                   "chunks": [{"id": "c1", "title": "t", "members": ["o1"], "order": 1, "order_rationale": "  ", "status": "pending"}]})
+check("atb validate: blank order_rationale error", any("order_rationale must be a non-empty" in e for e in E))
+E, W = V.validate({"project": {"product": "P", "ssot": "x"}, "observations": [{"id": "o1", "what": "w", "verified": True, "sources": ["s"]}],
+                   "chunks": [{"id": "c1", "title": "t", "members": [], "order": 1, "order_rationale": "r", "status": "draft", "asis": "a"}]})
+check("atb validate: authored chunk with empty members warns", any("no traceable observation" in w for w in W))
+
+# ── ground_audit (disk) ──
+ATB_CLEAN = (
+    "project: {product: P, ssot: x.md, sources: {code_roots: [\"~/c\"]}}\n"
+    "observations:\n  - {id: o1, what: \"phenomenon\", sources: [f1], kind: bug, verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [o1], order: 1, order_rationale: \"risk first\", status: draft, asis: \"current\", tobe: \"target\"}\n"
+)
+d = tempfile.mkdtemp(); _w(d, ATB_CLEAN)
+r = run_gr(d)
+rep = open(os.path.join(d, "reports", "_ground_report.md"), encoding="utf-8").read()
+check("atb ground_audit: report generated", r.returncode == 0 and os.path.exists(os.path.join(d, "reports", "_ground_report.md")))
+check("atb ground_audit: clean --strict passes", run_gr(d, "--strict").returncode == 0)
+check("atb ground_audit: clean --strict-cross-audit passes (sources registered)", run_gr(d, "--strict-cross-audit").returncode == 0)
+check("atb ground_audit: order rationale shown in order table", "risk first" in rep)
+
+# verified:true + empty sources member of authored chunk → ungrounded → --strict fails
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md, sources: {code_roots: [\"~/c\"]}}\n"
+    "observations:\n  - {id: o1, what: \"claimed but no evidence\", sources: [], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [o1], order: 1, order_rationale: \"r\", status: draft, asis: \"a\", tobe: \"b\"}\n"))
+r = run_gr(d, "--strict")
+check("atb ground_audit: --strict blocks verified+empty-sources false-pass", r.returncode != 0 and "ungrounded to-be" in (r.stdout + r.stderr))
+
+# memberless authored chunk → --strict fails
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md, sources: {code_roots: [\"~/c\"]}}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [], order: 1, order_rationale: \"r\", status: draft, asis: \"a\", tobe: \"b\"}\n"))
+r = run_gr(d, "--strict")
+check("atb ground_audit: --strict blocks untraceable (memberless) to-be", r.returncode != 0 and "untraceable to-be" in (r.stdout + r.stderr))
+
+# pending chunk → --strict fails; missing rationale/asis → fails
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md, sources: {code_roots: [\"~/c\"]}}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [o1], order: 1, order_rationale: \"r\", status: pending}\n"))
+check("atb ground_audit: --strict blocks pending chunk", run_gr(d, "--strict").returncode != 0)
+
+# cross-blind: 0 sources + authored → warn + --strict passes + --strict-cross-audit fails
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [o1], order: 1, order_rationale: \"r\", status: draft, asis: \"a\", tobe: \"b\"}\n"))
+r = run_gr(d)
+rep = open(os.path.join(d, "reports", "_ground_report.md"), encoding="utf-8").read()
+check("atb ground_audit: cross-blind warning in report + stderr", "Cross-grounding not run" in rep and "cross-grounding not run" in r.stderr)
+check("atb ground_audit: cross-blind not a --strict failure (internal ok)", run_gr(d, "--strict").returncode == 0)
+check("atb ground_audit: --strict-cross-audit fails on cross-blind", run_gr(d, "--strict-cross-audit").returncode != 0)
+
+# empty-string source path → coverage 0 (cross-blind kept, not hidden)
+d = tempfile.mkdtemp(); _w(d, (
+    "project:\n  product: P\n  ssot: x.md\n  sources: {code_roots: [\"\"]}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"chunk\", members: [o1], order: 1, order_rationale: \"r\", status: draft, asis: \"a\", tobe: \"b\"}\n"))
+r = run_gr(d)
+rep = open(os.path.join(d, "reports", "_ground_report.md"), encoding="utf-8").read()
+check("atb ground_audit: empty-string source counts 0 (cross-blind kept)", "**0** source path" in rep and "Cross-grounding not run" in rep)
+
+# malformed YAML → clean exit (not a traceback)
+d = tempfile.mkdtemp(); _w(d, "project: {product: P, ssot: [broken\n  bad: : :\n")
+r = run_gr(d)
+check("atb: malformed YAML clean exit (not a traceback)",
+      r.returncode != 0 and "YAML syntax error" in (r.stdout + r.stderr) and "Traceback" not in (r.stdout + r.stderr))
+
+# ── peer r1: coverage-key split, missing-tobe gate, mode detection by key presence ──
+
+# r1#1 doc-mode regression: a doc manifest with only sources.docs/logs stays cross-blind
+# (docs/logs are recognized by the validator but NOT counted by gap_audit's DOC_SRC coverage)
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, output_dir: outputs, sources: {docs: [\"./x.md\"]}}\n"
+    "sections:\n  - {id: a, title: \"A\", status: approved, sources: [k]}\n"))
+r = run_ga(d)
+rep = open(os.path.join(d, "reports", "_gap_report.md"), encoding="utf-8").read()
+check("r1#1 doc-mode: sources.docs does NOT count for doc-mode coverage (still cross-blind)",
+      "**0** source path" in rep and "Cross-consistency not run" in rep)
+# but change-plan ground_audit DOES count sources.docs (its own class) → not cross-blind
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md, sources: {docs: [\"./x.md\"]}}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"c\", members: [o1], order: 1, order_rationale: \"r\", status: draft, asis: \"a\", tobe: \"b\"}\n"))
+r = run_gr(d)
+rep = open(os.path.join(d, "reports", "_ground_report.md"), encoding="utf-8").read()
+check("r1#1 change-plan: sources.docs counts for ground coverage (not cross-blind)",
+      "**1** source path" in rep and "Cross-grounding not run" not in rep)
+
+# r1#4 missing-tobe: authored chunk with as-is + grounded member but no to-be → --strict fails
+d = tempfile.mkdtemp(); _w(d, (
+    "project: {product: P, ssot: x.md, sources: {code_roots: [\"~/c\"]}}\n"
+    "observations:\n  - {id: o1, what: \"w\", sources: [s], verified: true}\n"
+    "chunks:\n  - {id: c1, title: \"c\", members: [o1], order: 1, order_rationale: \"r\", status: draft, asis: \"a\"}\n"))
+r = run_gr(d, "--strict")
+check("r1#4: --strict blocks authored chunk with no to-be", r.returncode != 0 and "missing to-be" in (r.stdout + r.stderr))
+E, W = V.validate({"project": {"product": "P", "ssot": "x"}, "observations": [{"id": "o1", "what": "w", "verified": True, "sources": ["s"]}],
+                   "chunks": [{"id": "c1", "title": "t", "members": ["o1"], "order": 1, "order_rationale": "r", "status": "draft", "asis": "a"}]})
+check("r1#4: validate warns on authored chunk with no to-be", any("no to-be" in w for w in W))
+
+# r1#5: empty observations:[]/chunks:[] is still change-plan mode (key presence) → no doc-mode warnings
+E, W = V.validate({"project": {"product": "P", "ssot": "x"}, "observations": [], "chunks": []})
+check("r1#5: empty observations/chunks still suppresses doc-mode warnings",
+      not any("sections is empty" in w or "doc_type not set" in w for w in W))
+
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

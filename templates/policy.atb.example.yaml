@@ -1,0 +1,57 @@
+# policy.atb — change-plan (as-is/to-be) house rules (the variable layer, outside the engine).
+#
+# This file absorbs what varies per team: observation taxonomy, sequencing direction/weights,
+# authoring convention, forbidden words. Copy it into your work folder, fill it in, and point
+# the manifest's project.policy at it. Swap teams -> swap this one file.
+#
+# ⚠️ The AI (the stage prompts) reads this file to author/classify/sequence. The scripts
+#    (validate_manifest / ground_audit) do NOT parse policy — they check the structural schema
+#    only; gate strength is passed via the ground_audit CLI flags (--strict / --strict-cross-audit).
+# This example is intentionally generic (a fictional SaaS team).
+
+org:
+  name: Your Team
+  product_default: Target Area       # default label if the manifest omits it
+
+# ── observation taxonomy (observation.kind) ──
+# Default: bug | intent_gap | improvement | new. Adding a kind here means "that's an intended
+# classification" — the AI treats it as valid. (validate_manifest still flags kinds outside the
+# default set as an advisory warning, but ignore that if it's a policy extension — scripts don't read policy.)
+taxonomy:
+  kinds: [bug, intent_gap, improvement, new]
+
+# ── chunking & sequencing (stage 2's distinctive value) ──
+sequencing:
+  # blast-radius direction — the ordering principle.
+  #   high_risk_first     : tackle the big/uncertain first -> remove uncertainty early (find plan-breakers before sinking effort into small edits).
+  #   small_isolated_first: small isolated changes first -> rhythm, momentum, independent verification.
+  blast_radius: high_risk_first
+  # ordering weights (higher = earlier). A dependency always wins first (if A is a prerequisite of B, A first — regardless of blast_radius).
+  weights: {dependency: 4, risk: 3, blast: 2, effort: 1}
+  require_order_rationale: true   # every chunk needs an order_rationale (ground_audit --strict blocks it otherwise)
+
+# ── as-is/to-be authoring convention (stage 3) ──
+authoring:
+  # consumer — who consumes the output.
+  #   human: you apply the fix by hand. To-be may leave judgment calls open; keep verification scaffolding minimal -> precise enough to paste in.
+  #   agent: an autonomous runner (e.g. /goal) consumes it. Close every decision + state acceptance criteria and verification steps.
+  # The agent bar is a superset (a closed doc is still human-readable). Default human; the agent form is one flag away.
+  consumer: human
+  asis_requires_source: true   # no as-is without a source -> stop with verified:false otherwise
+  tobe_style: normative        # normative ("it should be X") — not implementation-following ("follow the existing convention")
+  flat_list_max: 3             # more than 3 similar rules as a flat list -> group by theme (bold heading + sub-list)
+
+# ── tone / forbidden words ──
+tone:
+  voice: plain                 # or formal / terse
+forbidden:                     # vague words — caught while authoring
+  - {term: "etc.",       why: "scope unclear"}
+  - {term: "later",      why: "no deadline -> open_questions"}
+  - {term: "as appropriate", why: "no criterion"}
+
+# ── ground-audit gate (stage 4) ──
+# Enforced by the script (--strict): authored chunk with an ungrounded member · missing order_rationale ·
+#   authored with no as-is · untraceable to-be · pending chunk -> blocks handoff.
+ground_audit:
+  strict: true               # require `ground_audit.py --strict` (docloop atb-gate) to pass before handoff
+  strict_cross_audit: false  # true also fails when 0 project.sources are registered (cross-grounding not run)
