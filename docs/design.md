@@ -76,6 +76,25 @@ part that can be made convergent and the part that can't.
   scripted; *applying* a critique is a human gate. A wrong critique applied blindly
   is a regression, and there's no test to catch it.
 
+## A second instance: change-plan mode (as-is/to-be)
+
+The split isn't specific to writing a PRD. **Change-plan mode** applies the same cut to a
+different job — planning fixes to a system that already exists — and it lands the oracle line
+*inside a single document*:
+
+- **As-is has an oracle.** A statement about the current system ("the submit handler shows a
+  generic error") is checkable: the code, screen, or log either says it or it doesn't. So the
+  ground-audit gate is mechanical — an as-is with no confirmed source is blocked, because a
+  to-be built on a wrong as-is is the most expensive mistake there is.
+- **To-be doesn't.** The target state is judgment — which trade-off, which direction — and stays
+  outside the loop, with the human who will apply it by hand.
+
+This is the cleanest statement of the thesis: not "some documents have oracles and some don't,"
+but "within one document, the descriptive half is convergent and the prescriptive half is not."
+The distinctive stage is the one with no analogue in the writing pipeline — grouping observations
+into an ordered set of change-chunks (each with a stated reason for its place in the sequence),
+because ordering *how you fix* is judgment a checker can't supply.
+
 ## When not to use it
 
 docloop's convergent leg assumes a source of truth already exists — code, a

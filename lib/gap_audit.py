@@ -18,7 +18,12 @@ gaps/open_questions (doc ↔ code·policy·design·prototype) is done by the fan
 import sys, os, argparse
 from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from validate_manifest import load_validated
+from validate_manifest import load_validated, KNOWN_DS
+
+# Document-mode audited source classes (coverage counting). Intentionally NOT the full validator
+# KNOWN_SRC: docs/logs are recognized by the validator (no unknown-key warning) but the doc-mode
+# fan-out audits code/design/prototypes only — counting docs/logs here would hide a cross-blind doc.
+DOC_SRC = {"code_roots", "design", "prototypes"}
 
 KST = timezone(timedelta(hours=9))
 
@@ -83,9 +88,9 @@ def main():
     # against; if there are none but sections are drafted, "gaps: 0" reflects
     # INTERNAL consistency only — surface that instead of letting it read as "clean".
     proj = m["project"]
-    # known keys mirror validate_manifest's KNOWN_SRC / KNOWN_DS
-    n_src = _count_paths(proj.get("sources"), {"code_roots", "design", "prototypes"})
-    n_ds = _count_paths(proj.get("downstream"), {"storyboard", "manual_manifest", "policy_docs"})
+    # downstream keys are shared with the validator; source coverage is doc-mode-specific (see DOC_SRC)
+    n_src = _count_paths(proj.get("sources"), DOC_SRC)
+    n_ds = _count_paths(proj.get("downstream"), KNOWN_DS)
     n_cross = n_src + n_ds
     grounded = sum(v for k, v in status_count.items() if k != "pending")
     cross_blind = n_cross == 0 and grounded > 0
