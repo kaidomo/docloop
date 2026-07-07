@@ -17,6 +17,10 @@
 1. <the thing you most want reviewed>
 2. <...>
 
+## Input / rule versions (traceability)
+- ssot_ref: <the input-SSOT version/commit this review stands on — e.g. repo commit sha, doc vN. In git: `git rev-parse --short HEAD`>
+- policy_ref.policy_version: <the policy version this loop checked against; n/a if none>
+
 ## Caveats / constraints
 - <dependencies / known limits / copy location (apply fixes to the original)>
 
@@ -28,8 +32,8 @@
 <reviewer output, or a human-pasted review>
 
 ## Applied (v1 — YYYY-MM-DD HH:MM:SS TZ)
-| finding | class | status (applied/pending/hold/rejected) | path | reason / test |
-|---------|-------|------|------|------|
-| | | | | |
+| finding_id | lens | finding | class (severity) | status (applied/pending/held/rejected) | path | reason / test |
+|------------|------|---------|------------------|----------------------------------------|------|---------------|
+| r1-01 | n/a | | | | | |
 
 **Intentionally not applied**: <item + reason>
