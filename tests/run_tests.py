@@ -284,6 +284,106 @@ open(os.path.join(sc2, "manifest.yaml"), "w").write(
 r = run_sr(sc2, "--strict")
 check("score_report: --strict passes when all above threshold", r.returncode == 0)
 
+# ── #5 (ported from pm-authoring): top-level scoring.rubric.scale/weights; legacy fixtures above lock the fallback ──
+def _mk_sr(policy_yaml, sections_yaml):
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, "reports"))
+    open(os.path.join(d, "PRD.md"), "w").write("# A\n\n본문\n")
+    open(os.path.join(d, "pm-policy.yaml"), "w").write(policy_yaml)
+    open(os.path.join(d, "manifest.yaml"), "w").write(
+        "project: {doc_type: PRD, product: P, title: P, ssot: PRD.md, policy: ./pm-policy.yaml, output_dir: outputs}\n"
+        "sections:\n" + sections_yaml)
+    return d
+
+# new path works (discriminating): pass_threshold=4 with NO legacy — a score of 3 fails ONLY if the
+#   top-level scoring.rubric.scale is actually read (default threshold 3 would pass, proving nothing).
+snp = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: {scale: {min: 1, max: 5, pass_threshold: 4}, weights: {regulatory: 3, coherence: 2}}\n",
+    "  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 3, coherence: 4, clarity: 4, depth: 4}}\n")
+r = run_sr(snp, "--strict")
+check("score_report(#5): top-level scoring.rubric.scale pass_threshold=4 read (score 3 below) → --strict exit 1",
+      r.returncode != 0 and "below" in (r.stdout + r.stderr))
+
+# partial migration: top-level scoring present but no rubric.scale → field-merge keeps legacy review_audit.scale=4.
+#   (a block `top or old` would pick top(truthy)→scale={}→default thr 3→pass at 3; field-merge → thr 4 → block.)
+smix = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "review_audit:\n"
+    "  scoring: {scale: {pass_threshold: 4}}\n",
+    "  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 3, coherence: 3, clarity: 3, depth: 3}}\n")
+r = run_sr(smix, "--strict")
+check("score_report(#5,partial): no rubric.scale → legacy scale.pass_threshold=4 honored, 3 below → exit 1", r.returncode != 0)
+
+# coexistence precedence: top rubric.scale=4 wins over legacy review_audit.scale=3
+sboth = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: {scale: {pass_threshold: 4}}\n"
+    "review_audit:\n"
+    "  scoring: {scale: {pass_threshold: 3}}\n",
+    "  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 3, coherence: 3, clarity: 3, depth: 3}}\n")
+r = run_sr(sboth, "--strict")
+check("score_report(#5,coexist): top rubric.scale=4 > legacy scale=3 → 3 below → exit 1", r.returncode != 0)
+
+# weight ordering: regulatory flag(+3) > coherence axis-weight(2) > unweighted(1), via report row order
+sord = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: {scale: {pass_threshold: 3}, weights: {regulatory: 3, coherence: 2}}\n",
+    "  - {id: plain, title: \"Plain\", status: approved, sources: [k], scores: {completeness: 2, coherence: 4, clarity: 4, depth: 4}}\n"
+    "  - {id: coh,   title: \"Coh\",   status: approved, sources: [k], scores: {completeness: 4, coherence: 2, clarity: 4, depth: 4}}\n"
+    "  - {id: reg,   title: \"Reg\", regulatory: true, status: approved, sources: [k], scores: {completeness: 2, coherence: 4, clarity: 4, depth: 4}}\n")
+r = run_sr(sord)
+srep = open(os.path.join(sord, "reports", "_review_audit.md"), encoding="utf-8").read()
+_MARK = "Per-section scores"   # guard: if the report header ever changes, fail as a check, not an IndexError crash
+check("score_report(#5,weights): report has per-section score table", _MARK in srep)
+tbl = srep.split(_MARK, 1)[1] if _MARK in srep else ""
+i_reg, i_coh, i_plain = tbl.find("| reg |"), tbl.find("| coh |"), tbl.find("| plain |")
+check("score_report(#5,weights): priority sort regulatory(+3) > coherence-axis(2) > unweighted(1)",
+      -1 < i_reg < i_coh < i_plain)
+
+# explicit empty weights on the new path is honored (does not leak legacy priority_rubric)
+sew = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: {scale: {pass_threshold: 3}, weights: {}}\n"
+    "review_audit:\n"
+    "  priority_rubric: {weights: {regulatory: 3}}\n",
+    "  - {id: plain, title: \"Plain\", status: approved, sources: [k], scores: {completeness: 2, coherence: 4, clarity: 4, depth: 4}}\n"
+    "  - {id: reg,   title: \"Reg\", regulatory: true, status: approved, sources: [k], scores: {completeness: 2, coherence: 4, clarity: 4, depth: 4}}\n")
+r = run_sr(sew)
+srep = open(os.path.join(sew, "reports", "_review_audit.md"), encoding="utf-8").read()
+check("score_report(#5,empty-weights): report has per-section score table", _MARK in srep)
+tbl = srep.split(_MARK, 1)[1] if _MARK in srep else ""
+check("score_report(#5,empty-weights): top weights:{} honored — legacy priority_rubric not leaked (plain<reg)",
+      -1 < tbl.find("| plain |") < tbl.find("| reg |"))
+
+# scalar rubric ref (contract-allowed) must not crash → falls back to legacy scale.pass_threshold=4
+sref = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: ./external-rubric.yaml\n"
+    "review_audit:\n"
+    "  scoring: {scale: {pass_threshold: 4}}\n",
+    "  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 3, coherence: 3, clarity: 3, depth: 3}}\n")
+r = run_sr(sref, "--strict")
+check("score_report(#5,scalar-ref): rubric scalar ref does not crash → legacy scale=4 fallback, 3 below → exit 1",
+      r.returncode != 0 and "Traceback" not in (r.stdout + r.stderr))
+
+# partial scale key-merge: top rubric.scale has min/max only (no threshold) → legacy pass_threshold=4 survives
+spsc = _mk_sr(
+    "scoring:\n"
+    "  primary_axes: [completeness, coherence, clarity, depth]\n"
+    "  rubric: {scale: {min: 0, max: 10}}\n"
+    "review_audit:\n"
+    "  scoring: {scale: {pass_threshold: 4}}\n",
+    "  - {id: a, title: \"A\", status: approved, sources: [k], scores: {completeness: 3, coherence: 3, clarity: 3, depth: 3}}\n")
+r = run_sr(spsc, "--strict")
+check("score_report(#5,partial-scale): min/max only → legacy pass_threshold=4 key-merged, 3 below → exit 1", r.returncode != 0)
+
 # ── validate_manifest: optional scores/verbatim ──
 # valid: scores (integers) + verbatim (source/quotes)
 m_ok = {
