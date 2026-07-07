@@ -3,6 +3,24 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.5.0] — 2026-07-07
+### Changed
+- **Ported change #5 — `score_report.py` reads the policy top-level `scoring` (contract 1).**
+  Mirrors the pm-authoring canonical change (Q2: scoring axes hoisted from `review_audit`
+  into a top-level `scoring` block). `lib/score_report.py` now reads the top-level
+  `scoring` first, falling back to legacy `review_audit.scoring` / `priority_rubric`.
+  - **Field-level merge** (not a block `top or old`): a partially-migrated policy keeps the
+    legacy `pass_threshold` instead of silently dropping to the default 3; `scale` is
+    key-merged; a scalar `rubric` ref is guarded (no crash); `weights` fall back by key
+    presence (an explicit empty `{}` is honored, not leaked from the legacy path).
+  - Tests: 9 new-path checks (partial-migration, coexistence precedence, weight ordering,
+    empty-weights, scalar-ref crash guard, partial-scale key-merge). Legacy fixtures retained
+    to lock the fallback. 126 passed.
+  Note: docloop policy templates carry no `scoring` block (pure writing harness), so nothing
+  to hoist there — this keeps the reader in round-trip sync with the canonical skill.
+  `score_report.py` stays dispatcher-dormant; the change is inert until wired. This closes the
+  0.4.0 note that "policy (contract 1) is out of scope" for the scoring-reader surface.
+
 ## [0.4.0] — 2026-07-07
 ### Changed
 - **Ported the review (Oracle) loop to the peer-review canonical (contracts 2 & 3).**
