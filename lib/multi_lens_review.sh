@@ -73,7 +73,7 @@ trap 'kill $(jobs -p) 2>/dev/null' INT TERM
 run_lens() {
   L="$1"; OUT="REVIEW_r${N}_${L}.md"
   PROMPT="Read REVIEW_BRIEF.md and review the enclosed artifact. Lens: $(lens_focus "$L")
-Report findings with severity (bug / robustness / design / minor) as markdown. Do not relitigate the 'decisions already made' in the brief. Do not modify files — output review text only."
+Prefix every finding with a finding_id — format r${N}-${L}-<nn> (nn = a 2-digit serial within this lens review, e.g. r${N}-${L}-01). Write each finding as a markdown bullet in this order: finding_id · severity (bug / robustness / design / trivial) · location (file · section · line) · claim · suggested_fix (if any). location and claim are REQUIRED. Do not relitigate the 'decisions already made' in the brief. Do not modify files — output review text only."
   if [ "$DRY_RUN" = "1" ]; then
     echo "  [dry] $L -> $OUT : codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=$EFFORT${MODEL_DESC}"
     return 0
