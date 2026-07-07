@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Scoring report (review/audit mode ①②⑦): reads each manifest section's optional
-`scores` (4 axes) and pm-policy `review_audit` (scale · pass_threshold · priority_rubric)
-and emits a per-section score table + priority-weighted sort + below-threshold markers
+`scores` (4 axes) and pm-policy top-level `scoring.rubric` (scale · weights, canonical)
+— falling back to legacy `review_audit.scoring` · `priority_rubric` when absent, with
+`scoring.scale` accepted only as a partial-migration compatibility path — and emits a
+per-section score table + priority-weighted sort + below-threshold markers
 to `reports/_review_audit.md`.
 
 The verdict labels (scores) are filled into the manifest by a **verifier (human/verification
@@ -64,13 +66,36 @@ def main():
 
     pol = _load_policy(proj, base)
     ra = (pol or {}).get("review_audit") or {}
-    scoring = ra.get("scoring") or {}
-    axes = scoring.get("primary_axes") or DEFAULT_AXES
-    scale = scoring.get("scale") or {}
+    # Scoring axes are owned by the top-level `scoring` block (#5, Q2); legacy
+    # `review_audit.scoring`/`priority_rubric` remain as a backward-compat fallback.
+    # ★ Field-level merge (NOT a block-level `top or old`): a partially-migrated policy
+    #   (top-level scoring present but no rubric.scale yet) must not silently ignore the
+    #   legacy scale and let thr drop back to the default 3.
+    new_scoring = (pol or {}).get("scoring") or {}
+    old_scoring = ra.get("scoring") or {}
+    axes = new_scoring.get("primary_axes") or old_scoring.get("primary_axes") or DEFAULT_AXES
+    # rubric may be an object (scale+weights) OR a scalar ref per the contract; this script
+    # only consumes an inline object, so a scalar ref / non-dict is treated as "no inline
+    # rubric" — never crash on .get() (guard).
+    _nr = new_scoring.get("rubric")
+    new_rubric = _nr if isinstance(_nr, dict) else {}
+    # scale is key-merged (later wins: legacy → top scoring.scale → top rubric.scale) rather
+    # than picked whole with `or`, so a partial scale (e.g. min/max only, no threshold) does
+    # not silently discard a legacy pass_threshold and fall back to the default 3.
+    scale = {}
+    for _sc in (old_scoring.get("scale"), new_scoring.get("scale"), new_rubric.get("scale")):
+        if isinstance(_sc, dict):
+            scale.update(_sc)
     smin = scale.get("min", 1)
     smax = scale.get("max", 5)
     thr = scale.get("pass_threshold", 3)
-    rubric = (ra.get("priority_rubric") or {}).get("weights") or {}
+    # weights fall back by **key presence** (not truthiness): an explicit top-level
+    # `scoring.rubric.weights: {}` is honored as "no weights" and does not leak the legacy
+    # priority_rubric; the legacy path is used only when the top-level weights key is absent.
+    if "weights" in new_rubric:
+        rubric = new_rubric.get("weights") or {}
+    else:
+        rubric = (ra.get("priority_rubric") or {}).get("weights") or {}
 
     # Priority weighting: more failing axes and larger deficits increase weight + rubric bonus (axis name matches a weights key → added)
     rows, below, incomplete = [], [], []   # below: failing axes · incomplete: scored but missing/non-int axes
