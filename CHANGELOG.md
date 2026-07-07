@@ -3,6 +3,30 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.4.0] — 2026-07-07
+### Changed
+- **Ported the review (Oracle) loop to the peer-review canonical (contracts 2 & 3).**
+  peer-review is upstream; docloop mirrors it so the two round-trip.
+  - Reviewer prompts (single pass `prompts/review.md`, multi-lens `lib/multi_lens_review.sh`)
+    now require a **finding_id** per finding (`r<N>-<nn>`; multi-lens `r<N>-<lens>-<nn>`)
+    plus **location + claim** as required fields — the shared key for contracts 2 & 3.
+  - Triage **severity** carries the finding's *nature* only (bug / robustness / design /
+    trivial); accept/reject moved fully to the Applied table's `status` (removed "reject"
+    from the severity axis). Triage also mirrors the canonical **alias-fold** rule
+    (re-confirmed prior-round findings keep their original finding_id).
+  - `REVIEW_BRIEF` **Applied (vN)** table is keyed by **finding_id** (+ lens column);
+    status vocabulary fixed to `applied / pending / held / rejected` (was `hold`).
+  - Termination recorded as a contract `termination.status` English enum: normal
+    `converged / round_cap / human_stop` **plus 5 failure/deadlock states**
+    (blocked_missing_input / writer_noncompliance / critic_disagreement / rule_conflict /
+    budget_exhausted), with a `residual` finding_id list and ssot_ref/policy_ref re-stated.
+  - `REVIEW_BRIEF` gains an **Input / rule versions** header
+    (`ssot_ref`, `policy_ref.policy_version`) for round traceability.
+  Note: severity token `design` follows decision Q4. `manifest.yaml` document-state and the
+  `gap_audit`/`ground_audit` hard gates are unchanged; policy (contract 1) is out of scope.
+  `prompts/review.md` and `lib/multi_lens_review.sh` are shared by document and change-plan
+  (atb) modes — this affects both by design.
+
 ## [0.3.0] — 2026-07-06
 ### Added
 - **Change-plan mode (as-is/to-be)** — a second, delineated pipeline for planning fixes to an
