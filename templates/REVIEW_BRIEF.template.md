@@ -37,3 +37,9 @@
 | r1-01 | n/a | | | | | |
 
 **Intentionally not applied**: <item + reason>
+
+## Loop closed (YYYY-MM-DD HH:MM:SS TZ)
+<!-- Fill on termination (see review.md §6). status is a contract termination.status enum. -->
+- status: <converged | round_cap | human_stop | blocked_missing_input | writer_noncompliance | critic_disagreement | rule_conflict | budget_exhausted>
+- residual: <finding_ids handed to the human unresolved>
+- ssot_ref / policy_ref.policy_version: <re-stated from the Input / rule versions header (audit convenience; not termination fields)>

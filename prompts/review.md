@@ -72,8 +72,9 @@ items, then test. Blindly applying selective/wrong critique risks regressions.
 Add a `## Applied (vN)` table keyed by finding_id: **finding_id** → **lens**
 (multi-lens only; single pass = n/a) → finding → class (severity) →
 **status (applied / pending / held / rejected)** → path → reason/test.
-finding_id is the SAME value the reviewer emitted (§2) and triage used (§3)
-(single = `r<N>-<nn>`, multi-lens = lens-prefixed); it is the stable cross-round key —
+finding_id is the canonical id triage keys on (§3) — normally the reviewer-emitted id (§2),
+but triage may assign one (if the reviewer omitted it) or alias-fold a re-review onto the
+original id (single = `r<N>-<nn>`, multi-lens = lens-prefixed); it is the stable cross-round key —
 per §3's alias rule, a prior finding still live on re-review keeps its ORIGINAL id here,
 so dispositions and residual track across rounds. The lens column is for readability;
 uniqueness rests on finding_id.
