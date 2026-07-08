@@ -31,6 +31,24 @@ and returns **a verification list only** — never a dump of the source.
 - **Refuted as-is:** set that observation `verified: false`; the chunk built on it drops back to the report.
 - **Agents disagree:** keep it unverified (the stricter reading wins for a grounding gate). No auto-verdict.
 
+## Close-reading pass against the source (completion gate)
+**Verbatim anchor match = false confidence.** Even when a quoted string matches the source
+character-for-character, the context / section / scope it sits in can still be wrong. So the
+audit does not stop at string matching — it must clear the close-reading pass below as a
+completion gate (log the collation results into `reports/_ground_report.md`):
+1. **Section / heading context** — for each anchor, confirm the parent section number and title
+   in the source. A verbatim string match alone does not pass (e.g. the quote is right but
+   "1.1 Purpose" is actually "1.2 Expected effect" — a mislabelled section).
+2. **House-style / terminology** — write the to-be in the terms and phrasing the target document
+   actually uses. If the target document avoids a given jargon term, follow that document's prose.
+   grep the term's usage frequency in the target doc when in doubt.
+3. **Over-assertion / scope lens** — check each to-be sentence through "would the document owner
+   object to this subject assertion / scope / phrasing?" (especially subject, path, and
+   global-vs-partial scope claims).
+4. **Insertion safety** — an insertion-type change (adding a row/block) must show **the original
+   plus the new content together** in the to-be, presented as "leave it like this". Writing only
+   the new row risks deleting the original if it is pasted in as a replacement.
+
 ## Output
 Run the report script (it lives in the docloop install, NOT in the work folder — use the lib
 path from this prompt's "Run context", e.g. `python3 <docloop-lib>/ground_audit.py manifest.yaml`).
@@ -41,3 +59,10 @@ Add `--strict` before handoff: ungrounded to-be / untraceable to-be / missing or
 missing as-is / pending chunks → exit 1. Then stop at the human gate — the human confirms the
 to-be direction and priority, and applies the fixes by hand. The script scaffolds the report;
 *you* verify as-is via the fan-out above and record `verified`/`sources` in the manifest.
+
+**Completion:** clearing the ground-audit *and* the close-reading pass above still leaves the
+output a **draft until domain sign-off**. Do not mark it done on "reviewer converged (zero new
+findings)" or an anchor match alone — the human (document owner) must confirm the to-be
+direction/priority and sign off. On sign-off, flip the chunk's `status` to `approved` (or log the
+sign-off in `_ground_report.md`) to release the draft. Keep verification scaffolding minimal and
+spend that time reading the source instead.

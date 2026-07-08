@@ -7,6 +7,17 @@ Staging is automatic (`docloop review` scaffolds the folder + brief); the review
 is invoked by the command in step 2; **applying feedback is a human gate**, so a
 wrong critique is never blindly applied.
 
+**Source-collation is a required verification axis (when evidence is enclosed).** If the
+reviewed artifact is derived from another source (an SSOT, evidence docs, code — e.g. a
+change plan) and that source is staged alongside it, the reviewer does not stop at confirming
+that quoted strings match — in at least one pass, collate whether (a) each anchor's parent
+section/context matches the source, (b) terminology/house-style matches, (c) subject/scope
+claims do not exceed the source's definitions, (d) insertion-type changes (adding a row/block)
+are shown with original+new side-by-side so nothing is silently replaced/deleted. **Verbatim
+anchor match = false confidence** (the text can be right while the context/section is wrong).
+The evidence stays `evidence only` (not the revision target) but is promoted to a
+**close-reading target**.
+
 ## The loop
 
 ### 0) Scope
@@ -31,7 +42,10 @@ Read REVIEW_BRIEF.md, then review the enclosed artifact against the brief's
 Write each finding as a markdown bullet in this order: finding_id · severity
 (bug / robustness / design / trivial) · location (file · section · line) · claim ·
 suggested_fix (if any). location and claim are REQUIRED. Do not relitigate decisions
-already made. Do not modify files — output review text only.
+already made. If source/original files are enclosed, collate whether each quote/anchor
+matches the source not just as a string but in its parent section, context, terminology
+and scope claims, and whether insertion-type changes are shown with original+new
+side-by-side (a string match alone does not pass). Do not modify files — output review text only.
 PEER_REVIEW_PROMPT
 ```
 - Quote the heredoc terminator (`'PEER_REVIEW_PROMPT'`) so `$`/backticks in the

@@ -3,6 +3,30 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.6.0] — 2026-07-08
+### Changed
+- **Ported the source-fidelity quality patch from the canonical skills (docuauthring #33).**
+  The review contract verified in-plan consistency and verbatim anchor matches but never
+  close-read the *source document* (`reviewed_artifact = CHANGE_PLAN, source = evidence only`),
+  so mislabelled sections, over-asserted subject/scope, house-style violations, and
+  insertion-vs-replacement deletion risk slipped through. The fix adds **close-reading to the
+  atb-audit completion gate** and **source-collation as a required review verification axis**
+  (not extra review rounds).
+  - `prompts/atb-audit.md` (ground-audit): a **close-reading pass against the source** with 4
+    gates — (1) section/heading context, (2) house-style/terminology, (3) over-assertion/scope
+    lens, (4) insertion safety — framed by "verbatim anchor match = false confidence". Plus a
+    **completion definition**: clearing the gates still leaves the output a *draft until domain
+    sign-off* (not "reviewer converged" / anchor match); on sign-off flip the chunk `status` to
+    `approved` (or log it in `_ground_report.md`).
+  - `prompts/review.md` (Oracle loop): **source-collation is a required verification axis when
+    evidence is enclosed** — collate anchors' section/context, terminology, scope, and
+    original+new side-by-side for insertions, not just string matches. Evidence stays
+    `evidence only` (not the revision target) but is promoted to a close-reading target.
+    Same instruction added to the reviewer heredoc prompt.
+  Prompt-only change (no `lib/` or schema change); 126 tests still pass. Mirrors the canonical
+  skills so the two round-trip; docuauthring peer review (Codex r1) had already folded the
+  insertion-safety gate into the review contract (finding r1-02).
+
 ## [0.5.0] — 2026-07-07
 ### Changed
 - **Ported change #5 — `score_report.py` reads the policy top-level `scoring` (contract 1).**
