@@ -134,10 +134,10 @@ The summary: **convergence where there's a check, a human where there isn't.**
 
 ## Decision record (2026-07-14): docloop is a protocol kernel, not a universal document engine
 
-A cross-review (Codex, r1) tested the direction of promoting docloop to the
-canonical, general-purpose engine behind a family of specialized authoring skills.
-The direction was **rejected in that broad form** and replaced with a narrower,
-layered one. The decisions:
+docloop is deliberately scoped as a **shared validation/execution protocol kernel**,
+not the canonical general-purpose engine behind a family of specialized authoring
+skills. Promoting the core to own document *meaning* would blur ownership and leave
+prompts and validation rules duplicated across layers. The decisions:
 
 ```mermaid
 flowchart TB
