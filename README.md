@@ -110,15 +110,16 @@ orgs, swap that one file. See `templates/policy.example.yaml`.
 
 ## Direction (planned, not shipped) · 방향(계획·미구현)
 
-The following describes where docloop is *intended* to go. **None of it is implemented** —
-there is no domain-pack loader, no derivation verb, and no reviewer-eval gold set in the
-shipped verb set (`init · plan · draft · audit · review · gate · split` plus the `atb-*`
-change-plan stages). Treat this section as design direction, not features.
+This section is design direction, not a feature list. **Current:** the protocol-kernel
+boundary and the `policy.yaml` variable layer — the shipped verb set is `init · plan ·
+draft · audit · review · gate · split` plus the `atb-*` change-plan stages. **Planned,
+not shipped:** a domain-pack loader, a derivation-manifest execution path, and the
+reviewer-eval gold set. The conditional-tense text below describes where those planned pieces would go.
 
-아래는 docloop이 *지향하는* 방향이다. **어느 것도 구현돼 있지 않다** — shipped verb 집합
-(`init · plan · draft · audit · review · gate · split` 및 `atb-*` 변경계획 스테이지)에는
-domain-pack 로더도, derivation verb도, reviewer-eval 골드셋도 없다. 이 섹션은 기능이 아니라
-설계 방향으로 읽어라.
+이 섹션은 기능 목록이 아니라 설계 방향이다. **현재 있는 것:** 프로토콜 커널 경계와 `policy.yaml`
+가변층 — shipped verb는 `init · plan · draft · audit · review · gate · split` + `atb-*`
+변경계획 스테이지다. **계획이며 미구현:** domain-pack 로더, derivation manifest 실행 경로,
+reviewer-eval 골드셋. 아래 조건법 문장은 그 계획된 조각들이 어디로 갈지를 그린다.
 
 The intended shape is a **shared protocol kernel** rather than the single canonical engine
 behind a family of specialized authoring skills. In that target, document *meaning*
@@ -135,7 +136,7 @@ being that **core imports no document type**.
 flowchart TB
   dom["domain pack / skill · 문서 특화 (planned)<br/>ontology · prompts · derivation · validators"]
   pol["policy.yaml · 조직 규칙 (shipped)<br/>values · constraints"]
-  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
+  core["docloop core · 프로토콜 커널 (shipped)<br/>manifest · gap · gate · split"]
   dom -.-> core
   pol --> core
 ```
@@ -189,9 +190,10 @@ docloop atb-gate                  # handoff gate (ground_audit.py --strict)
 Stages: `atb-capture` (observations=issues) → `atb-chunk` (chunks=handoff, with ordering) →
 `atb-author` (single as-is/to-be doc) → `atb-audit` / `atb-gate` (ground-audit: an as-is with no
 source is blocked — *a to-be built on a wrong as-is is the most expensive mistake*). The
-`blast_radius` direction (default `high_risk_first`) and the handoff target
-(`consumer`, default `human`) — which tunes how the plan is written up for its recipient —
-live in `templates/policy.atb.example.yaml`.
+`blast_radius` direction (default `high_risk_first`) and the ATB **handoff consumer**
+(`consumer`, default `human` — the recipient the plan is written up for; distinct from the
+`authoring`/`evaluator` consumer *role* in [`docs/design.md`](docs/design.md)) live in
+`templates/policy.atb.example.yaml`.
 
 ## Layout · 구성
 
