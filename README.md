@@ -121,6 +121,45 @@ source is blocked — *a to-be built on a wrong as-is is the most expensive mist
 `blast_radius` direction (default `high_risk_first`) and `consumer` (default `human`, one flag from
 `agent`-ready) live in `templates/policy.atb.example.yaml`.
 
+## Design direction: a protocol kernel · 설계 방향: 프로토콜 커널
+
+A cross-review (Codex) tested — and rejected — promoting docloop into the single
+canonical engine behind a family of specialized authoring skills. The refined
+direction: **docloop stays a shared validation/execution protocol kernel.** Document
+*meaning* (ontology, prompts, derivations) lives in domain packs/skills; declarative
+org rules live in `policy.yaml`; the core owns only the protocol. Ownership is layered
+so each rule lives in exactly one place — the boundary test: **core imports no
+document type.**
+교차 리뷰(Codex)는 docloop을 특화 스킬군의 유일한 정본 엔진으로 승격하는 방향을 검토해
+기각했다. 교정된 방향: **docloop은 공용 검증·실행 프로토콜 커널로 남는다.** 문서의 *의미*
+(ontology·프롬프트·파생)는 domain pack/스킬에, 선언형 조직 규칙은 `policy.yaml`에, core는
+프로토콜만 소유한다. 각 규칙이 정확히 한 곳에만 있도록 계층화한다 — 경계 판정: **core는
+어떤 문서 타입도 import하지 않는다.**
+
+```mermaid
+flowchart TB
+  dom["domain pack / skill · 문서 특화<br/>ontology · prompts · derivation · validators"]
+  pol["policy.yaml · 조직 규칙<br/>values · constraints"]
+  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
+  dom --> core
+  pol --> core
+```
+
+Two more results from the review: **derivation** (PRD → storyboard → manual) is not a
+core verb — a domain pack authors a *derivation manifest* and the core only executes
+it; and a reviewer needs an oracle too, so reviewer quality is graded **offline against
+a veteran-PM gold set** (blocking-recall, not text similarity) — a target decided but
+**not yet operational** (it needs the gold set).
+리뷰의 결정 둘 더: **파생**(PRD → 스토리보드 → 매뉴얼)은 core verb가 아니다 — domain pack이
+*derivation manifest*를 쓰고 core는 실행만 한다. 그리고 리뷰어에게도 Oracle이 필요하므로,
+리뷰어 품질은 **베테랑 PM 골드셋 대비 오프라인 채점**(텍스트 유사도가 아니라 blocking-recall)으로
+잰다 — 목표는 정해졌으나 **아직 미가동**(골드셋 필요).
+
+See [`docs/design.md`](docs/design.md) ·
+[`docs/reviewer-eval-bootstrap.md`](docs/reviewer-eval-bootstrap.md) ·
+[`docs/reviewer-lens-set.md`](docs/reviewer-lens-set.md) ·
+[`docs/cold-start-strategies.md`](docs/cold-start-strategies.md).
+
 ## Layout · 구성
 
 ```
@@ -128,7 +167,10 @@ bin/docloop          thin launcher (wraps codex / claude -p)
 prompts/             stage prompts — doc mode: plan/draft/gap-audit/review · change-plan mode: atb-capture/atb-chunk/atb-author/atb-audit
 lib/                 python scripts: init, validate, gap_audit, ground_audit, split, approval_brief, stage, ...
 templates/           policy + manifest skeletons (doc + .atb change-plan variants), review-brief template
-docs/design.md       why writing harnesses differ from coding harnesses
+docs/design.md       why writing harnesses differ from coding harnesses; design decisions (protocol kernel, reviewer-eval)
+docs/reviewer-eval-bootstrap.md   bootstrapping a reviewer-quality gold set from review residue · 리뷰 잔여물에서 리뷰어 골드셋 부트스트랩
+docs/reviewer-lens-set.md         document-review lenses harvested from PM skills (55 → 73 criteria) · PM 스킬에서 하베스트한 문서 리뷰 렌즈
+docs/cold-start-strategies.md     initial evidence-acquisition patterns for authoring · 저작 초기 증거 획득 패턴
 ```
 
 ## License · 라이선스
