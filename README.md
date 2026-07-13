@@ -6,20 +6,19 @@ cross-reviewing documents (PRDs, specs, policies).
 **PM·기획 문서(PRD·정책서 등)를 위한 얇은 글쓰기 하네스** — 이미 사용 중인 모델 CLI(`codex`
 또는 `claude -p`)를 감싸 문서를 작성·감사·교차 리뷰하는, 규율 있는 루프로 묶는다.
 
-> **Writing has no oracle** — there is no compiler for a PRD. So docloop drives the
-> checkable parts (accuracy, consistency, policy) with real loops and makes the machine
-> **surface the gaps and stop**; judgment stays with the human. Even the reviewer is held
-> to an oracle — graded against a human gold set, not its own confidence.
+> **Writing has no single oracle** — docloop checks what can be checked (source-grounded
+> accuracy, consistency, policy), surfaces the gaps, and stops; judgment stays with the human.
 >
-> **글에는 오라클이 없다** — PRD엔 컴파일러가 없다. 그래서 docloop은 검증 가능한 부분(정확성·정합·
-> 정책)만 실제 루프로 몰고, 기계는 **빈틈을 드러내고 멈추게** 한다. 판단은 사람의 몫. 리뷰어조차
-> 오라클에 매인다 — 자기 확신이 아니라 사람 골드셋에 채점된다.
+> **글에는 단일 오라클이 없다** — docloop은 검증 가능한 것(출처 대비 정확성·정합·정책)만 점검해
+> 빈틈을 드러내고 멈춘다. 판단은 사람의 몫으로 남는다.
 
 docloop adds **no new runtime and no new agent.** The value is in three things:
 docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
 
-1. **The prompts** (`prompts/`) — a five-stage pipeline: plan → draft → gap-audit → review → split.
-   <br>**프롬프트** (`prompts/`) — 5단계 파이프라인: plan → draft → gap-audit → review → split.
+1. **The prompts** (`prompts/`) — the pipeline: plan → draft → audit → review → gate → split
+   (`audit` runs the gap-audit machinery).
+   <br>**프롬프트** (`prompts/`) — 파이프라인: plan → draft → audit → review → gate → split
+   (`audit`는 gap-audit 기계를 돌린다).
 2. **The scripts** (`lib/`) — manifest validation, consistency reporting, release gates, publish split.
    <br>**스크립트** (`lib/`) — manifest 검증, 정합성 리포트, 릴리스 게이트, 배포용 분할.
 3. **The loop discipline** — manifest-as-state, evidence-over-plausibility, and a human approval gate.
@@ -42,16 +41,18 @@ something outside it can say "still wrong."
 docloop's answer is to split the problem:
 docloop의 해법은 문제를 둘로 쪼개는 것이다:
 
-- **What *can* be made convergent** — factual accuracy, internal/cross-document
-  consistency, policy compliance — is driven by loops with real checks: gap-audit
-  (fan-out consistency), scripted release gates, and an **external model as
-  independent pressure** (the review stage: Codex/Gemini/another Claude attacks the
-  draft — an *attention* test, not a *truth* test, since a second model shares the
-  first's blind spots).
-  <br>**수렴시킬 수 있는 것**(사실 정확성, 문서 내·문서 간 정합, 정책 준수)은 실제 점검이 있는
-  루프로 돌린다: gap-audit(팬아웃 정합 점검), 스크립트 릴리스 게이트, 그리고 **외부 모델을 독립적
-  압력으로** 둔다(review 단계에서 Codex·Gemini·다른 Claude가 초안을 공격 — 두 번째 모델도 첫 모델의
-  맹점을 상당 부분 공유하므로 진짜 Oracle은 아니고, 정답 판정이 아니라 주의환기 점검).
+- **What *can* be made convergent** — source-grounded accuracy (agreement with selected
+  sources), internal/cross-document consistency, policy compliance — is driven by loops
+  with real checks: gap-audit (fan-out consistency), scripted release gates, and an
+  **external model as independent pressure** (the review stage: Codex/Gemini/another Claude
+  attacks the draft — an *attention* test, not a *truth* test, since a second model shares
+  the first's blind spots). docloop detects drift from the selected sources; it does not
+  prove those sources are true or current.
+  <br>**수렴시킬 수 있는 것**(출처 대비 정확성=선택한 출처와의 일치, 문서 내·문서 간 정합, 정책 준수)은
+  실제 점검이 있는 루프로 돌린다: gap-audit(팬아웃 정합 점검), 스크립트 릴리스 게이트, 그리고 **외부
+  모델을 독립적 압력으로** 둔다(review 단계에서 Codex·Gemini·다른 Claude가 초안을 공격 — 두 번째 모델도
+  첫 모델의 맹점을 상당 부분 공유하므로 진짜 Oracle은 아니고, 정답 판정이 아니라 주의환기 점검).
+  docloop은 선택한 출처로부터의 드리프트를 잡을 뿐, 그 출처가 참이거나 최신임을 증명하지는 않는다.
 - **What can't** — voice, judgment, the actual decisions — stays **outside the loop,
   with the human.** The harness surfaces gaps and stops; it never manufactures consensus.
   <br>**수렴시킬 수 없는 것**(문체, 판단, 실제 의사결정)은 **루프 밖, 사람의 몫**으로 둔다.
@@ -60,45 +61,15 @@ docloop의 해법은 문제를 둘로 쪼개는 것이다:
 See [`docs/design.md`](docs/design.md) for the full argument.
 전체 논의는 [`docs/design.md`](docs/design.md)에서 다룬다.
 
-## Where docloop draws the line: a protocol kernel · docloop이 긋는 선: 프로토콜 커널
+## Where docloop draws the line · docloop이 긋는 선
 
-docloop deliberately stays a **shared validation/execution protocol kernel** rather
-than the single canonical engine behind a family of specialized authoring skills.
-Document *meaning* (ontology, prompts, derivations) lives in domain packs/skills;
-declarative org rules live in `policy.yaml`; the core owns only the protocol. Ownership
-is layered so each rule lives in exactly one place — the boundary test: **core imports
-no document type.**
+docloop owns only the shared protocol — manifest state, gap-audit, gate, split; org rules
+live in `policy.yaml`; the core imports no document type. See [`docs/design.md`](docs/design.md)
+for the full argument, and the **Direction (planned)** section below for where this is meant to go.
 
-docloop은 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 검증·실행 프로토콜 커널**로 남는다.
-문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에, 선언형 조직 규칙은 `policy.yaml`에,
-core는 프로토콜만 소유한다. 각 규칙이 정확히 한 곳에만 있도록 계층화한다 — 경계 판정: **core는
-어떤 문서 타입도 import하지 않는다.**
-
-```mermaid
-flowchart TB
-  dom["domain pack / skill · 문서 특화<br/>ontology · prompts · derivation · validators"]
-  pol["policy.yaml · 조직 규칙<br/>values · constraints"]
-  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
-  dom --> core
-  pol --> core
-```
-
-Two decisions follow. **Derivation** (PRD → storyboard → manual) is not a core verb —
-a domain pack authors a *derivation manifest* and the core only executes it. And the
-**review stage is a stand-in oracle, so it needs grading too**: reviewer quality is
-measured **offline against a veteran-PM gold set** (blocking-recall, not text
-similarity) — a target decided but **not yet operational** (it needs the gold set).
-
-두 결정이 뒤따른다. **파생**(PRD → 스토리보드 → 매뉴얼)은 core verb가 아니다 — domain pack이
-*derivation manifest*를 쓰고 core는 실행만 한다. 그리고 **review 단계는 대역 오라클이라 그 자체도
-채점 대상**이다: 리뷰어 품질을 **베테랑 PM 골드셋 대비 오프라인**(텍스트 유사도가 아니라
-blocking-recall)으로 잰다 — 목표는 정해졌으나 **아직 미가동**(골드셋 필요).
-
-**Design & rationale · 설계와 근거**:
-[`design.md`](docs/design.md) (protocol kernel · 프로토콜 커널) ·
-[`reviewer-eval-bootstrap.md`](docs/reviewer-eval-bootstrap.md) (grading the reviewer · 리뷰어 채점) ·
-[`reviewer-lens-set.md`](docs/reviewer-lens-set.md) (73 review lenses · 리뷰 렌즈 73) ·
-[`cold-start-strategies.md`](docs/cold-start-strategies.md) (evidence acquisition · 증거 획득).
+docloop은 공용 프로토콜만 소유한다 — manifest 상태, gap-audit, gate, split. 조직 규칙은 `policy.yaml`에
+두고, core는 어떤 문서 타입도 import하지 않는다. 전체 논의는 [`docs/design.md`](docs/design.md),
+지향점은 아래 **Direction(계획)** 섹션 참고.
 
 ## Install · 설치
 
@@ -124,7 +95,7 @@ cp /path/to/docloop/templates/policy.example.yaml ./policy.yaml   # edit to your
 docloop plan  "PRD for the case submission flow"   # interview -> manifest
 docloop draft                                       # write grounded sections
 docloop audit                                       # find contradictions, report
-docloop review case-submission ./PRD_*.md           # Oracle: external-model cross-review
+docloop review case-submission ./PRD_*.md           # attention test: external-model cross-review
 docloop gate                                        # release gate (strict)
 docloop split                                       # regenerate publish pages
 ```
@@ -137,6 +108,57 @@ orgs, swap that one file. See `templates/policy.example.yaml`.
 조직별 규칙(섹션 순서, 필수 섹션, 용어, 금칙어, 톤, Definition of Done)은 엔진이 아니라 **한 파일**
 (`policy.yaml`)에 둔다. 조직이 바뀌면 이 파일 하나만 교체한다. `templates/policy.example.yaml` 참고.
 
+## Direction (planned, not shipped) · 방향(계획·미구현)
+
+The following describes where docloop is *intended* to go. **None of it is implemented** —
+there is no domain-pack loader, no derivation verb, and no reviewer-eval gold set in the
+shipped verb set (`init · plan · draft · audit · review · gate · split` plus the `atb-*`
+change-plan stages). Treat this section as design direction, not features.
+
+아래는 docloop이 *지향하는* 방향이다. **어느 것도 구현돼 있지 않다** — shipped verb 집합
+(`init · plan · draft · audit · review · gate · split` 및 `atb-*` 변경계획 스테이지)에는
+domain-pack 로더도, derivation verb도, reviewer-eval 골드셋도 없다. 이 섹션은 기능이 아니라
+설계 방향으로 읽어라.
+
+The intended shape is a **shared protocol kernel** rather than the single canonical engine
+behind a family of specialized authoring skills. In that target, document *meaning*
+(ontology, prompts, derivations) *would* live in domain packs/skills; declarative org rules
+already live in `policy.yaml`; the core *would* own only the protocol — the boundary test
+being that **core imports no document type**.
+
+지향하는 형태는 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 프로토콜 커널**이다. 그 목표에서
+문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에 두게 *될 것이고*, 선언형 조직 규칙은
+이미 `policy.yaml`에 있으며, core는 프로토콜만 소유하게 *될 것이다* — 경계 판정은 **core가 어떤
+문서 타입도 import하지 않는다**는 것이다.
+
+```mermaid
+flowchart TB
+  dom["domain pack / skill · 문서 특화 (planned)<br/>ontology · prompts · derivation · validators"]
+  pol["policy.yaml · 조직 규칙 (shipped)<br/>values · constraints"]
+  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
+  dom -.-> core
+  pol --> core
+```
+
+Two directions *would* follow. **Derivation** (PRD → storyboard → manual) *would not* be a
+core verb — a future domain pack *would* author a *derivation manifest* and the core's
+intended role *would be* protocol execution only. And because the **review stage is an
+oracle stand-in, it would need grading too**: reviewer quality is **not operational** today,
+and the planned metric *would* evaluate it **offline against a veteran-PM gold set**
+(blocking-recall, not text similarity) — the gold set does not yet exist.
+
+두 방향이 뒤따르게 *될 것이다*. **파생**(PRD → 스토리보드 → 매뉴얼)은 core verb가 *아니게 될
+것이고* — 향후 domain pack이 *derivation manifest*를 쓰고 core의 역할은 실행만으로 한정될 *것이다*.
+그리고 **review 단계는 오라클 대용이라 그 자체도 채점 대상이 될 것**이다: 리뷰어 품질은 현재
+**미가동(not operational)**이며, 향후 지표는 이를 **베테랑 PM 골드셋 대비 오프라인**(텍스트 유사도가
+아니라 blocking-recall)으로 **측정할 계획**이다 — 골드셋은 아직 존재하지 않는다.
+
+**Design & rationale · 설계와 근거**:
+[`design.md`](docs/design.md) (protocol kernel · 프로토콜 커널) ·
+[`reviewer-eval-bootstrap.md`](docs/reviewer-eval-bootstrap.md) (grading the reviewer · 리뷰어 채점) ·
+[`reviewer-lens-set.md`](docs/reviewer-lens-set.md) (73 review lenses · 리뷰 렌즈 73) ·
+[`cold-start-strategies.md`](docs/cold-start-strategies.md) (evidence acquisition · 증거 획득).
+
 ## Change-plan mode (as-is/to-be) · 변경계획 모드
 
 A second, delineated pipeline for the other half of the job: not writing a fresh doc, but
@@ -144,7 +166,7 @@ A second, delineated pipeline for the other half of the job: not writing a fresh
 produce a single **as-is/to-be** change plan for a human to apply by hand (not an agent handoff).
 It reuses the same machinery (manifest, validate, gates, `init`, `review`) with its own stages.
 기존에 없는 문서를 새로 쓰는 게 아니라, **이미 있는 시스템을 어떻게 고칠지** 계획하는 다른 절반.
-제품·문서·로그·코드를 읽고, 사람이 손으로 고칠 **단일 as-is/to-be 정본**을 낸다(자율 실행 핸드오프 아님).
+제품·문서·로그·코드를 읽고, 사람이 손으로 고칠 **단일 as-is/to-be 변경계획서**를 낸다(자율 실행 핸드오프 아님).
 manifest·검증·게이트·`init`·`review`는 공유하고, 스테이지만 별도다.
 
 Why it's a mode, not a footnote: docloop's thesis is *separate the part with an oracle from the
@@ -167,8 +189,9 @@ docloop atb-gate                  # handoff gate (ground_audit.py --strict)
 Stages: `atb-capture` (observations=issues) → `atb-chunk` (chunks=handoff, with ordering) →
 `atb-author` (single as-is/to-be doc) → `atb-audit` / `atb-gate` (ground-audit: an as-is with no
 source is blocked — *a to-be built on a wrong as-is is the most expensive mistake*). The
-`blast_radius` direction (default `high_risk_first`) and `consumer` (default `human`, one flag from
-`agent`-ready) live in `templates/policy.atb.example.yaml`.
+`blast_radius` direction (default `high_risk_first`) and the handoff target
+(`consumer`, default `human`) — which tunes how the plan is written up for its recipient —
+live in `templates/policy.atb.example.yaml`.
 
 ## Layout · 구성
 
