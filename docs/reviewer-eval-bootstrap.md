@@ -1,7 +1,5 @@
 # Reviewer-eval bootstrap — 골드셋 없이 시작해 골드로 수렴하는 경로
 
-> **r1 반영 (2026-07-14, Codex 리뷰 finding r1-01~05·13 승인분)**: Phase 0 산출을 "씨앗 골드"에서 **adjudicated seed**로 개명·강등하고 gold 자격 조건을 명시(r1-01), 비대칭 정책하 precision을 blinded 사람 adjudication 계약으로 확정(r1-02), corpus/라벨에 provenance를 붙여 silver 순환을 차단(r1-03), finding match 규칙을 정의(r1-04), Phase 1 자동 silver를 `[a]` 구조검사로 제한하고 `candidate_unadjudicated`로 분리(r1-05), precision floor를 사전등록 규칙으로 고정(r1-13).
-
 관련 결정: docloop `docs/design.md` H-01 (리뷰어 품질 = 베테랑 PM 골드 대비 **blocking-recall + precision 하한**, eval-time 전용). 그 결정의 **미결(골드셋 부재)** 을 푸는 부트스트랩 계획.
 
 ## 핵심 통찰 — 씨앗은 0이 아니다, 이미 만들어왔다 (단 아직 골드는 아니다)
@@ -14,7 +12,7 @@
 
 → 각 dispositioned finding = **라벨 1개** (사람이 "이건 유효/무효/blocking"이라 판정). **이미 값을 치른 adjudicated seed.** 단, 이것은 씨앗이지 골드가 아니다 — 아래 '골드 자격 조건'을 통과하기 전까지는 A/B 기준선으로 승격하지 않는다.
 
-## 왜 seed는 아직 gold가 아닌가 — recall 분모의 부재 (r1-01)
+## 왜 seed는 아직 gold가 아닌가 — recall 분모의 부재
 
 triage disposition은 "리뷰어가 **제출한** finding이 유효했는가"만 보여준다. 그 기록은 **후보 finding에 조건부**라서, 해당 문서의 blocking finding 전체가 열거됐다는 보장이 없다. 따라서:
 
@@ -39,12 +37,12 @@ triage disposition은 "리뷰어가 **제출한** finding이 유효했는가"만
 ### Phase 1 — 실버 확대 (하베스트한 렌즈 세트 투입)
 triage 히스토리가 얇은 문서 영역은, **pm-* 스킬에서 하베스트한 합본 렌즈 세트**를 코퍼스(님 과거 R2/docloop 문서)에 돌린다. 단 자동 생성물의 지위를 아래처럼 제한한다.
 
-- **자동 silver는 렌즈 세트의 `[a]` 구조검사(존재·enum·카운트 등) 하위검사로만 제한**한다 (r1-05).
+- **자동 silver는 렌즈 세트의 `[a]` 구조검사(존재·enum·카운트 등) 하위검사로만 제한**한다.
 - **`[b]` 판단형 렌즈의 출력은 silver 라벨이 아니라 `candidate_unadjudicated`로 저장**한다 — 생성기 판단을 정답 라벨로 복제하지 않기 위함. 이 후보는 사람 adjudication을 거쳐야만 라벨이 된다.
 - 코퍼스: 님 과거 실제 PRD/기획서(가장 현실적) + 공개 예시 PRD 소수.
 - **차원(렌즈 세트 10개 차원)별로 `auto-covered / human-covered / uncovered` 비율을 별도 보고**한다 — coverage gap을 인정만 하지 않고 수치로 드러낸다.
 
-#### provenance 분리 (silver 순환 차단, r1-03)
+#### provenance 분리 (silver 순환 차단)
 "silver는 1순위 제외"만으로는 간접 누수(silver 결과를 보고 reviewer/lens/prompt/threshold를 개선)가 남는다. corpus와 **모든 라벨에 provenance 태그를 문서 단위로** 붙여 세 부류로 격리한다:
 
 - `development-silver` — 렌즈 자동 생성물. **진단 전용**: 오류 분석·학습에만 사용. 후보(reviewer/prompt/lens) 선택·**threshold 조정·최종 A/B 보고 어디에도 사용하지 않는다.**
@@ -56,20 +54,20 @@ triage 히스토리가 얇은 문서 영역은, **pm-* 스킬에서 하베스트
 - **blocking-recall** (베테랑 blocking 라벨 중 리뷰어가 잡은 비율) = 1순위.
 - **precision** = 아래 '비대칭 precision 계약'대로 산출, 사전등록 floor만 통과.
 
-#### finding match 규칙 (r1-04)
+#### finding match 규칙
 `위치+주장`은 특징 목록일 뿐 매치 규칙이 아니다(paraphrase·위치 이동·split/merge·중복에 따라 recall이 크게 흔들림). 아래를 **사전등록**한다:
 - **매치 단위 = 결함 명제 + 대상 객체/범위 + 위반된 요구 + 영향** (네 요소 대조로 판정, 텍스트 유사도 아님).
 - **one-to-one matching 기본.**
 - **split**(하나의 gold를 여러 finding으로 쪼갬)·**merge**(여러 gold를 한 finding으로 합침)·**부분포착**·**중복**·**위치 불일치** 처리 규칙을 사전등록.
 - 경계 사례는 **blind adjudication** 절차로 판정(절차도 사전등록).
 
-#### 비대칭 precision 계약 (r1-02)
+#### 비대칭 precision 계약
 라벨 밖의 유효 finding을 감점하지 않는 정책하에서는 unmatched candidate를 자동 FP로 볼 수 없다(중립으로 두면 환각 finding도 분모에서 사라져 floor가 무력화). 따라서:
 - 모든 unmatched candidate를 **blinded 사람 adjudication** → `valid-new / duplicate / invalid / unassessable`로 분류.
 - **precision은 adjudicated `invalid`를 포함해 계산**한다(valid-new는 감점 아님, 중립~가점).
 - 사람 adjudication 없이 **자동 평가만** 하는 경우, 그 지표는 precision이 아니라 **"known-FP challenge-set rejection rate"**로 별도 명명한다(사전 수집된 known-FP 챌린지 세트의 기각률 — 환각 상한을 측정하는 별개 지표).
 
-#### precision floor 사전등록 (r1-13)
+#### precision floor 사전등록
 floor는 결과를 본 뒤 유리하게 고르지 않는다. **실행 전에 고정**한다:
 - **값**: 현재 reviewer 또는 베테랑 baseline과 허용 가능한 invalid-finding 검토 비용에서 도출.
 - **집계 단위**: **문서별 macro precision** (단일 point estimate 금지).
