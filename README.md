@@ -6,6 +6,15 @@ cross-reviewing documents (PRDs, specs, policies).
 **PM·기획 문서(PRD·정책서 등)를 위한 얇은 글쓰기 하네스** — 이미 사용 중인 모델 CLI(`codex`
 또는 `claude -p`)를 감싸 문서를 작성·감사·교차 리뷰하는, 규율 있는 루프로 묶는다.
 
+> **Writing has no oracle** — there is no compiler for a PRD. So docloop drives the
+> checkable parts (accuracy, consistency, policy) with real loops and makes the machine
+> **surface the gaps and stop**; judgment stays with the human. Even the reviewer is held
+> to an oracle — graded against a human gold set, not its own confidence.
+>
+> **글에는 오라클이 없다** — PRD엔 컴파일러가 없다. 그래서 docloop은 검증 가능한 부분(정확성·정합·
+> 정책)만 실제 루프로 몰고, 기계는 **빈틈을 드러내고 멈추게** 한다. 판단은 사람의 몫. 리뷰어조차
+> 오라클에 매인다 — 자기 확신이 아니라 사람 골드셋에 채점된다.
+
 docloop adds **no new runtime and no new agent.** The value is in three things:
 docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
 
@@ -50,6 +59,46 @@ docloop의 해법은 문제를 둘로 쪼개는 것이다:
 
 See [`docs/design.md`](docs/design.md) for the full argument.
 전체 논의는 [`docs/design.md`](docs/design.md)에서 다룬다.
+
+## Where docloop draws the line: a protocol kernel · docloop이 긋는 선: 프로토콜 커널
+
+docloop deliberately stays a **shared validation/execution protocol kernel** rather
+than the single canonical engine behind a family of specialized authoring skills.
+Document *meaning* (ontology, prompts, derivations) lives in domain packs/skills;
+declarative org rules live in `policy.yaml`; the core owns only the protocol. Ownership
+is layered so each rule lives in exactly one place — the boundary test: **core imports
+no document type.**
+
+docloop은 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 검증·실행 프로토콜 커널**로 남는다.
+문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에, 선언형 조직 규칙은 `policy.yaml`에,
+core는 프로토콜만 소유한다. 각 규칙이 정확히 한 곳에만 있도록 계층화한다 — 경계 판정: **core는
+어떤 문서 타입도 import하지 않는다.**
+
+```mermaid
+flowchart TB
+  dom["domain pack / skill · 문서 특화<br/>ontology · prompts · derivation · validators"]
+  pol["policy.yaml · 조직 규칙<br/>values · constraints"]
+  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
+  dom --> core
+  pol --> core
+```
+
+Two decisions follow. **Derivation** (PRD → storyboard → manual) is not a core verb —
+a domain pack authors a *derivation manifest* and the core only executes it. And the
+**review stage is a stand-in oracle, so it needs grading too**: reviewer quality is
+measured **offline against a veteran-PM gold set** (blocking-recall, not text
+similarity) — a target decided but **not yet operational** (it needs the gold set).
+
+두 결정이 뒤따른다. **파생**(PRD → 스토리보드 → 매뉴얼)은 core verb가 아니다 — domain pack이
+*derivation manifest*를 쓰고 core는 실행만 한다. 그리고 **review 단계는 대역 오라클이라 그 자체도
+채점 대상**이다: 리뷰어 품질을 **베테랑 PM 골드셋 대비 오프라인**(텍스트 유사도가 아니라
+blocking-recall)으로 잰다 — 목표는 정해졌으나 **아직 미가동**(골드셋 필요).
+
+**Design & rationale · 설계와 근거**:
+[`design.md`](docs/design.md) (protocol kernel · 프로토콜 커널) ·
+[`reviewer-eval-bootstrap.md`](docs/reviewer-eval-bootstrap.md) (grading the reviewer · 리뷰어 채점) ·
+[`reviewer-lens-set.md`](docs/reviewer-lens-set.md) (73 review lenses · 리뷰 렌즈 73) ·
+[`cold-start-strategies.md`](docs/cold-start-strategies.md) (evidence acquisition · 증거 획득).
 
 ## Install · 설치
 
@@ -120,45 +169,6 @@ Stages: `atb-capture` (observations=issues) → `atb-chunk` (chunks=handoff, wit
 source is blocked — *a to-be built on a wrong as-is is the most expensive mistake*). The
 `blast_radius` direction (default `high_risk_first`) and `consumer` (default `human`, one flag from
 `agent`-ready) live in `templates/policy.atb.example.yaml`.
-
-## Design direction: a protocol kernel · 설계 방향: 프로토콜 커널
-
-docloop deliberately stays a **shared validation/execution protocol kernel** rather
-than the single canonical engine behind a family of specialized authoring skills.
-Document *meaning* (ontology, prompts, derivations) lives in domain packs/skills;
-declarative org rules live in `policy.yaml`; the core owns only the protocol. Ownership
-is layered so each rule lives in exactly one place — the boundary test: **core imports
-no document type.**
-
-docloop은 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 검증·실행 프로토콜 커널**로 남는다.
-문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에, 선언형 조직 규칙은 `policy.yaml`에,
-core는 프로토콜만 소유한다. 각 규칙이 정확히 한 곳에만 있도록 계층화한다 — 경계 판정: **core는
-어떤 문서 타입도 import하지 않는다.**
-
-```mermaid
-flowchart TB
-  dom["domain pack / skill · 문서 특화<br/>ontology · prompts · derivation · validators"]
-  pol["policy.yaml · 조직 규칙<br/>values · constraints"]
-  core["docloop core · 프로토콜 커널<br/>manifest · gap · gate · split"]
-  dom --> core
-  pol --> core
-```
-
-Two related decisions: **derivation** (PRD → storyboard → manual) is not a core verb —
-a domain pack authors a *derivation manifest* and the core only executes it; and a
-reviewer needs an oracle too, so reviewer quality is graded **offline against a
-veteran-PM gold set** (blocking-recall, not text similarity) — a target decided but
-**not yet operational** (it needs the gold set).
-
-관련 결정 둘: **파생**(PRD → 스토리보드 → 매뉴얼)은 core verb가 아니다 — domain pack이
-*derivation manifest*를 쓰고 core는 실행만 한다. 그리고 리뷰어에게도 Oracle이 필요하므로,
-리뷰어 품질은 **베테랑 PM 골드셋 대비 오프라인 채점**(텍스트 유사도가 아니라 blocking-recall)으로
-잰다 — 목표는 정해졌으나 **아직 미가동**(골드셋 필요).
-
-See [`docs/design.md`](docs/design.md) ·
-[`docs/reviewer-eval-bootstrap.md`](docs/reviewer-eval-bootstrap.md) ·
-[`docs/reviewer-lens-set.md`](docs/reviewer-lens-set.md) ·
-[`docs/cold-start-strategies.md`](docs/cold-start-strategies.md).
 
 ## Layout · 구성
 
