@@ -131,3 +131,111 @@ consequential one. Grounding was never "every claim has a citation." It's "every
 claim's source is one you'd still stand behind today."
 
 The summary: **convergence where there's a check, a human where there isn't.**
+
+## Decision record (2026-07-14): docloop is a protocol kernel, not a universal document engine
+
+A cross-review (Codex, r1) tested the direction of promoting docloop to the
+canonical, general-purpose engine behind a family of specialized authoring skills.
+The direction was **rejected in that broad form** and replaced with a narrower,
+layered one. The decisions:
+
+```mermaid
+flowchart TB
+  subgraph own["Ownership layers"]
+    dom["domain pack / skill"] --> core["docloop core · protocol kernel"]
+    pol["policy.yaml"] --> core
+  end
+  core --> ev["evidence"]
+  ev --> br{"consumer role?"}
+  br -->|authoring| au["claims → SSOT → draft → gap-audit"]
+  br -->|evaluator| evl["validated evaluator asset → calibration"]
+  evl -. "promotion gate" .-> au
+```
+
+- **Three-layer ownership; each rule lives in exactly one layer.**
+  1. *docloop core* — workspace, manifest state, evidence/gap format, review
+     handoff, gate, split. It owns the **execution/validation protocol**, nothing
+     document-specific. Test of the boundary: **core imports no document type.**
+  2. *domain pack / skill* — document ontology, prompts, evidence adapters,
+     derivation mappings, type-specific validators and blocking rules.
+  3. *policy* — declarative, per-org constraints only.
+
+  Promoting core to own document *meaning* does not remove the canonical-source
+  duplication it was meant to fix; it just blurs ownership and leaves prompts and
+  validation rules on both sides. Core is the canonical source of the **shared
+  protocol**, not of the skills.
+
+- **"Generalize = extract everything into `policy.yaml`" is wrong.** `policy.yaml`
+  fits variability that is fully expressible as data (section order, glossary,
+  banned terms, approvers, tone, a static DoD). It is *not* the container for
+  read-order over sources, requirement→screen→manual mappings, per-type manifest
+  schemas, conditional steps, or type-specific validators — push those into YAML
+  and it becomes an untyped DSL, a hidden program the engine must interpret, and
+  the "thin harness" is gone. Keep **policy (values/constraints)** and **domain
+  pack (prompts/schemas/transforms/validators)** separate.
+
+- **Heterogeneous `derive` (PRD → storyboard → manual) is not a core verb.** Today's
+  `split` is a mechanical, same-meaning regeneration from one body SSOT.
+  Cross-artifact derivation decides semantic mappings, traceability, ordering, and
+  partial-regeneration policy — document ontology, not execution plumbing. The skill
+  / domain pack authors a **derivation manifest**; docloop only executes it and
+  records provenance. Absorbing derive into core would drag in an artifact registry,
+  a DAG scheduler, and type plugins — clear scope creep.
+
+- **`goal` is a read-only aggregation of gate results, not a convergence engine.**
+  Collecting "per-document gate pass/fail, blocking-gap count, drift locations,
+  pending approvals" across N documents is objective state observation and fits the
+  no-oracle philosophy. Producing a composite score or "goal %" and looping a model
+  to raise it would fake a single oracle over distinct judgment problems — forbidden.
+  Its output contract is limited to *gate results + provenance + unresolved blockers*;
+  no composite score, no auto-fix, no auto-approve, no model-judged green. The name
+  `status` or `portfolio gate` states the intent better than `goal`. Precondition:
+  today's model treats a single body as the SSOT, so the per-artifact canonical /
+  derivation / approval relationships must be defined *before* a multi-document HUD
+  is built on top of them.
+
+- **`derive` (a write path) and `goal` (a read model) are different responsibilities
+  and must not be fused into one surface.** A separate thin orchestrator (a
+  `docgraph`-style caller) can walk the artifact DAG the domain pack declares;
+  docloop provides only the per-node manifest/gate protocol; `status` reads that same
+  DAG's manifests and gate results. This keeps the thin execution contract intact
+  while still giving heterogeneous derivation and multi-document visibility.
+
+- **CLI vs. skill is not decided by "for-me vs. for-others."** The criterion is
+  repeatability, environment independence, headless/automation need, model/host
+  portability, and a supportable versioned contract — not user count. A single user
+  who needs CI/cron/multiple model CLIs/reproducible workspaces justifies a standalone
+  CLI; a many-user workflow welded to one agent environment may be better as an
+  installed skill. Being public OSS signals distribution *intent*, not verified
+  external demand.
+
+The refined direction: **docloop evolves into a shared validation/execution protocol
+kernel** — derivation meaning stays in skills/domain packs, and `status` stays a
+read-only projection of existing gates.
+
+### Reviewer quality is measured against a veteran-PM gold set (eval-time only)
+
+The `review` stage is a stand-in oracle; it is only worth as much as its agreement
+with a human expert. So the reviewer's quality is graded **offline** against a
+veteran-PM gold set — the same "AI-review vs. human-review agreement" metric used
+to build the earlier review agent.
+
+- **Two levels, one human oracle.** At runtime the document has no oracle (L0 → human
+  gate, unchanged). The human is the *only* oracle, and it is too scarce to run on
+  every document — so it is spent **eval-time** to grade the cheap machine reviewer
+  (L1), which is then run at scale. This calibrates the reviewer; it never
+  auto-converges a document.
+- **Finding-level agreement, not text similarity.** The metric is **recall on the
+  veteran's *blocking* findings** (missing a blocker is the failure mode), with a
+  **precision floor** (bounded false positives). Prose/embedding similarity is
+  rejected: it rewards mimicry of the human's style and penalizes the reviewer for
+  catching valid issues the human missed.
+- **Asymmetric.** A valid finding the AI raises that the veteran missed is
+  neutral-to-positive, not divergence — the independent-oracle value must not be
+  scored away. Agreement is a **gate, not the objective function**; optimizing
+  similarity directly would converge the reviewer on imitation instead of defects.
+- **This is the pre-registered A/B baseline** the peer-review loop requires before
+  any review lens / rubric / machinery change.
+- **Status: target decided, not yet operational.** It requires a veteran-PM gold set,
+  which does not exist yet. Until that gold set exists, review-lens changes have no
+  baseline to A/B against — this is a known, open prerequisite, not a shipped check.
