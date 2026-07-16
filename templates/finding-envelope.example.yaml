@@ -1,0 +1,50 @@
+# finding-envelope.example.yaml — common finding envelope for panel review output.
+#
+# Downstream port. The upstream canonical lives in the private skill repo
+# (docuauthring: playbooks/mac-n-cheese-learning-transfer/contracts/finding-envelope.yaml);
+# this file is docloop's ported copy of that contract. If the two drift, upstream wins
+# and this copy gets re-ported — do not fork the schema here.
+#
+# Structure rules:
+# - One role's output = case header + role_header + a `findings:` array (0+ items),
+#   nested — never flat. Finding boundaries must be machine-parseable so the
+#   synthesis (Area Chair) step can collect them.
+# - Role-level confidence (role_header.confidence) and finding-level confidence
+#   are separate namespaces (the nesting keeps them apart).
+# - `verdict` belongs to role_header only — findings carry no verdict.
+
+schema_version: 1
+
+# ── case header (pre-filled by the orchestrator — evaluators must not invent it) ──
+case_id: ""
+artifact_id: ""
+reviewer_role: ""          # pm | product-designer | frontend | backend | qa | <case-specific specialist>
+model_lineage: ""          # same model/prompt ancestry marker — basis for correlated-agreement bookkeeping
+criterion_id: ""
+
+# ── role header ──
+role_header:
+  verdict: ""              # pass | revise | blocked            — all roles: does the artifact need changes?
+  feasibility: ""          # feasible | feasible_with_changes | blocked — frontend/backend only: can it be built?
+  difficulty:              # frontend/backend only — six axes, never a single high/medium/low
+    implementation_volume: ""
+    technical_uncertainty: ""
+    external_dependency: ""
+    existing_system_impact: ""
+    verification_cost: ""
+    reversibility: ""
+  confidence: ""           # low | medium | high — role level
+  abstained: []            # [{area: "", reason: ""}] — what this role did not judge, and why
+
+# ── findings array ──
+findings:
+  - finding_id: ""
+    aliases: []            # duplicates alias to the canonical finding_id
+    classification: ""     # bug | robustness | design decision | invalid
+    impact: ""             # critical | major | minor
+    confidence: ""         # low | medium | high — finding level
+    applicability: ""      # applicable | not_applicable | abstain
+    claim: ""
+    evidence: ""           # findings without evidence get removed at synthesis (with the removal recorded)
+    inference_boundary: "" # fact | inference | hypothesis
+    affected_artifact: ""
