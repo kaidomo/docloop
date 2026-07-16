@@ -133,7 +133,10 @@ EOF
 # every role has finished — an early-finishing role's output is never visible to a running one.
 TMPD=""
 cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
-trap 'for _p in $(jobs -p); do pkill -P "$_p" 2>/dev/null; kill "$_p" 2>/dev/null; done; cleanup' INT TERM
+# On INT/TERM: disarm the trap, clean the temp dir, then signal the whole process group —
+# background jobs and the model CLIs they spawned share this group, so grandchildren go too.
+# (A child that detaches into its own session is unreachable from here — documented limit.)
+trap 'trap - INT TERM; cleanup; kill -TERM 0' INT TERM
 trap 'cleanup' EXIT
 
 run_one() {  # <role> <out-path>
@@ -228,20 +231,27 @@ case "$MODEL" in
 esac
 { [ "$FAIL" = "1" ] || [ ! -s "$SYN_TMP" ]; } && { echo "panel: synthesis failed or empty — nothing published" >&2; exit 1; }
 # Budget cap is a contract, not a hope: decision_item_count must be present and <= 5.
-DC="$(grep -Eo 'decision_item_count[^0-9]*[0-9]+' "$SYN_TMP" | grep -Eo '[0-9]+' | head -1 || true)"
+DC="$(grep -E '^[[:space:]]*decision_item_count[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*$' "$SYN_TMP" | grep -Eo '[0-9]+' | head -1 || true)"
 [ -n "$DC" ] || { echo "panel: synthesis lacks decision_item_count — nothing published" >&2; exit 1; }
 [ "$DC" -le 5 ] || { echo "panel: decision_item_count=$DC exceeds the budget cap of 5 — nothing published" >&2; exit 1; }
 
-# Publish all-or-nothing, and only after every validation passed. A destination that is a
-# directory (or a symlink to one) is an error, not a silent move-into.
-publish() {  # <src> <dst>
-  if [ -d "$2" ]; then echo "panel: destination is a directory: $2 — aborting publish" >&2; return 1; fi
-  [ -e "$2" ] && [ "$FORCE" = "1" ] && rm -f "$2"
-  mv "$1" "$2"
-}
-for R in "${ROLES[@]}"; do
-  publish "$TMPD/PANEL_r${N}_${R}.yaml" "PANEL_r${N}_${R}.yaml" || exit 1
+# Publish all-or-nothing, and only after every validation passed. Two phases: first check
+# EVERY destination (a directory — or symlink to one — is an error, not a silent move-into),
+# then move; nothing is removed or moved until all destinations pass.
+DESTS=()
+for R in "${ROLES[@]}"; do DESTS+=("PANEL_r${N}_${R}.yaml"); done
+DESTS+=("$SYN")
+for D2 in "${DESTS[@]}"; do
+  [ -d "$D2" ] && { echo "panel: destination is a directory: $D2 — nothing published" >&2; exit 1; }
 done
-publish "$SYN_TMP" "$SYN" || exit 1
+SRCS=()
+for R in "${ROLES[@]}"; do SRCS+=("$TMPD/PANEL_r${N}_${R}.yaml"); done
+SRCS+=("$SYN_TMP")
+i=0
+for D2 in "${DESTS[@]}"; do
+  [ -e "$D2" ] && [ "$FORCE" = "1" ] && rm -f "$D2"
+  mv "${SRCS[$i]}" "$D2" || { echo "panel: publish failed at $D2 — files published so far were left in place; re-run with FORCE=1 after inspecting" >&2; exit 1; }
+  i=$((i+1))
+done
 
 echo "panel: done — ${ROLE_FILES}+ $SYN (human decisions stay with you)"
