@@ -112,12 +112,12 @@ orgs, swap that one file. See `templates/policy.example.yaml`.
 
 This section is design direction, not a feature list. **Current:** the protocol-kernel
 boundary and the `policy.yaml` variable layer — the shipped verb set is `init · plan ·
-draft · audit · review · gate · split` plus the `atb-*` change-plan stages. **Planned,
+draft · audit · review · panel · lock · verify · gate · split` plus the `atb-*` change-plan stages. **Planned,
 not shipped:** a domain-pack loader, a derivation-manifest execution path, and the
 reviewer-eval gold set. The conditional-tense text below describes where those planned pieces would go.
 
 이 섹션은 기능 목록이 아니라 설계 방향이다. **현재 있는 것:** 프로토콜 커널 경계와 `policy.yaml`
-가변층 — shipped verb는 `init · plan · draft · audit · review · gate · split` + `atb-*`
+가변층 — shipped verb는 `init · plan · draft · audit · review · panel · lock · verify · gate · split` + `atb-*`
 변경계획 스테이지다. **계획이며 미구현:** domain-pack 로더, derivation manifest 실행 경로,
 reviewer-eval 골드셋. 아래 조건법 문장은 그 계획된 조각들이 어디로 갈지를 그린다.
 

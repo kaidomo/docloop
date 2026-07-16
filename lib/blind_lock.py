@@ -17,7 +17,7 @@ Usage:
   blind_lock.py verify <payload-file> <sidecar>         -> exit 0 (intact) / 1 (mismatch)
 Exit codes: 0 ok · 1 digest mismatch (verify) · 2 usage/missing/malformed · 3 sidecar already exists (lock)
 """
-import sys, os, hashlib, datetime
+import sys, os, re, hashlib, datetime
 
 import yaml
 
@@ -78,7 +78,11 @@ def verify(payload, sidecar):
     except Exception as e:  # malformed sidecar is a usage error, not a tamper verdict
         print(f"blind_lock: malformed sidecar ({e.__class__.__name__}): {sidecar}", file=sys.stderr)
         return 2
-    if not isinstance(recorded, str) or len(recorded) != 64:
+    algo = doc["lock_sidecar"].get("algorithm")
+    if algo != "sha256":
+        print(f"blind_lock: unsupported/missing algorithm in sidecar: {algo!r}", file=sys.stderr)
+        return 2
+    if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded):
         print(f"blind_lock: sidecar digest is not a sha256 hex string: {recorded!r}", file=sys.stderr)
         return 2
     actual = _sha256(payload)

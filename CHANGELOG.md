@@ -20,7 +20,7 @@ All notable changes to docloop are documented here. This project adheres to
   the outcome exists; re-hash at reveal. Tampered payload → "judge nothing, diagnostic-only".
   Re-lock refused (append-only). Only the primitive is ported — the full learning lifecycle
   (experiment cards, lesson states, human gate) stays upstream. New: `lib/blind_lock.py`.
-- Tests: 126 → 147 (blind_lock lock/verify/tamper/re-lock/malformed-sidecar/quoted-paths; panel validation, dry-run smoke, and real-execution paths via a fake CLI shim: publish-after-validate, failure propagation, empty-output rejection).
+- Tests: 126 → 151 (blind_lock lock/verify/tamper/re-lock/malformed-sidecar/quoted-paths; panel validation, dry-run smoke, and real-execution paths via a fake CLI shim: publish-after-validate, failure propagation, empty-output rejection).
 
 ## [0.6.0] — 2026-07-08
 ### Changed

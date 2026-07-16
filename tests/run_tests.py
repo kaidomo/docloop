@@ -934,14 +934,43 @@ def _mk_shim(body):
     os.chmod(sh, 0o755)
     return sd
 
-_OK_SHIM = r'''
-for last in "$@"; do :; done
-if printf '%s' "$last" | grep -q "You are the Area Chair"; then
-  echo "# synthesis"; echo "decision_item_count: 1"
-else
-  echo "role_header:"; echo "  verdict: revise"; echo "findings: []"
-fi
-'''
+_ENVELOPE_OUT = r'''cat <<"Y"
+schema_version: 1
+case_id: "panel-x-r1"
+artifact_id: "staged artifact per REVIEW_BRIEF.md"
+reviewer_role: "pm"
+model_lineage: "claude"
+criterion_id: "REVIEW_BRIEF.md"
+role_header:
+  verdict: revise
+  confidence: medium
+  abstained: []
+findings:
+  - finding_id: f-01
+    classification: robustness
+    impact: minor
+    confidence: medium
+    applicability: applicable
+    claim: c
+    evidence: e
+    inference_boundary: fact
+    affected_artifact: a
+Y'''
+_SYNTH_OUT = r'''cat <<"Y"
+# synthesis
+## decision table
+| s-01 | f-01 | e | minor | revise | none | none | human |
+## lone criticals
+## role conflicts (unresolved)
+## abstentions
+## removed findings
+## correlated-agreement record
+decision_item_count: 1
+appendix: role outputs
+Y'''
+_OK_SHIM = ("\nfor last in \"$@\"; do :; done\n"
+            "if printf '%s' \"$last\" | grep -q \"You are the Area Chair\"; then\n"
+            + _SYNTH_OUT + "\nelse\n" + _ENVELOPE_OUT + "\nfi\n")
 d = tempfile.mkdtemp()
 open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
 _env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim(_OK_SHIM) + os.pathsep + os.environ["PATH"]}
@@ -966,6 +995,64 @@ r = run_panel(d, d, "1", "pm", env_extra=_env)
 check("panel(real path): empty role output -> exit 1, nothing published",
       r.returncode == 1 and "produced no output" in r.stderr
       and not os.path.exists(os.path.join(d, "PANEL_r1_pm.yaml")))
+
+# comment-only spine must fail real YAML validation
+_FAKE_YAML_SHIM = "\necho '# role_header: findings: (comment only)'\n"
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim(_FAKE_YAML_SHIM) + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", env_extra=_env)
+check("panel(real path): comment-only envelope rejected by YAML validation",
+      r.returncode == 1 and "not a valid envelope YAML" in r.stderr)
+
+# budget cap enforced: decision_item_count > 5 -> nothing published
+_OVER_SHIM = ("\nfor last in \"$@\"; do :; done\n"
+              "if printf '%s' \"$last\" | grep -q \"You are the Area Chair\"; then\n"
+              "  echo 'decision_item_count: 9'\nelse\n" + _ENVELOPE_OUT + "\nfi\n")
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim(_OVER_SHIM) + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", env_extra=_env)
+check("panel(real path): decision_item_count>5 -> exit 1, nothing published",
+      r.returncode == 1 and "exceeds the budget cap" in r.stderr
+      and not os.path.exists(os.path.join(d, "PANEL_r1_pm.yaml"))
+      and not os.path.exists(os.path.join(d, "PANEL_r1_SYNTHESIS.md")))
+
+# destination-is-a-directory is an abort, not a move-into (FORCE path)
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+os.mkdir(os.path.join(d, "PANEL_r1_pm.yaml"))
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "FORCE": "1",
+        "PATH": _mk_shim(_OK_SHIM) + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", env_extra=_env)
+check("panel(real path): dest-is-directory aborts publish",
+      r.returncode != 0 and "destination is a directory" in r.stderr)
+
+# codex path via a codex shim honoring --output-last-message
+_CODEX_SHIM = r'''
+out=""; prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then out="$a"; fi
+  prev="$a"
+done
+for last in "$@"; do :; done
+if printf '%s' "$*" | grep -q -- "--help"; then echo "--output-last-message"; exit 0; fi
+if printf '%s' "$last" | grep -q "You are the Area Chair"; then
+  { echo "# synthesis"; echo "## decision table"; echo "decision_item_count: 1"; } > "$out"
+else
+  { echo "schema_version: 1"; echo "role_header:"; echo "  verdict: revise"; echo "  confidence: medium"; echo "  abstained: []"; echo "findings: []"; } > "$out"
+fi
+'''
+sd = tempfile.mkdtemp()
+open(os.path.join(sd, "codex"), "w", encoding="utf-8").write("#!/bin/bash\n" + _CODEX_SHIM)
+os.chmod(os.path.join(sd, "codex"), 0o755)
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "codex", "PATH": sd + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", env_extra=_env)
+check("panel(real path, codex shim): output captured via --output-last-message, synthesis published",
+      r.returncode == 0 and os.path.isfile(os.path.join(d, "PANEL_r1_pm.yaml"))
+      and os.path.isfile(os.path.join(d, "PANEL_r1_SYNTHESIS.md")))
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

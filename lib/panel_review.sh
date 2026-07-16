@@ -133,7 +133,7 @@ EOF
 # every role has finished — an early-finishing role's output is never visible to a running one.
 TMPD=""
 cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
-trap 'kill $(jobs -p) 2>/dev/null; cleanup' INT TERM
+trap 'for _p in $(jobs -p); do pkill -P "$_p" 2>/dev/null; kill "$_p" 2>/dev/null; done; cleanup' INT TERM
 trap 'cleanup' EXIT
 
 run_one() {  # <role> <out-path>
@@ -142,7 +142,7 @@ run_one() {  # <role> <out-path>
   case "$MODEL" in
     codex)
       codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
-        "${MODEL_ARG[@]}" --output-last-message "$out" "$(role_prompt "$role")" >/dev/null ;;
+        ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} --output-last-message "$out" "$(role_prompt "$role")" >/dev/null ;;
     claude)
       claude -p --allowedTools "Read,Glob,Grep" "$(role_prompt "$role")" > "$out" ;;
     *) echo "unknown DOCLOOP_MODEL '$MODEL' (use codex or claude)" >&2; return 2 ;;
@@ -152,7 +152,8 @@ run_one() {  # <role> <out-path>
 echo "panel: round r${N}, roles: ${ROLES[*]} (model=$MODEL, per-process; outputs held back until all finish)"
 if [ "$DRY_RUN" = "1" ]; then
   for R in "${ROLES[@]}"; do echo "[dry-run] $MODEL role=$R effort=$EFFORT$MODEL_DESC -> PANEL_r${N}_${R}.yaml"; done
-  echo "[dry-run] synthesis over exactly: ${ROLES[*]/#/PANEL_r${N}_}"  # suffix added below in real run
+  _list=""; for R in "${ROLES[@]}"; do _list+="PANEL_r${N}_${R}.yaml "; done
+  echo "[dry-run] synthesis over exactly: ${_list}"
   echo "[dry-run] synthesis -> PANEL_r${N}_SYNTHESIS.md"
   exit 0
 fi
@@ -168,17 +169,29 @@ for R in "${ROLES[@]}"; do run_one "$R" "$TMPD/PANEL_r${N}_${R}.yaml" & PIDS+=($
 for P in "${PIDS[@]}"; do wait "$P" || FAIL=1; done
 [ "$FAIL" = "1" ] && { echo "panel: one or more role runs failed — synthesis skipped" >&2; exit 1; }
 
-# Validate before publishing: every role file must exist, be non-empty, and carry the envelope spine.
+# Validate before publishing: every role file must exist, be non-empty, and parse as an
+# envelope document (real YAML parse — a mention of the keys in a comment does not count).
 for R in "${ROLES[@]}"; do
   f="$TMPD/PANEL_r${N}_${R}.yaml"
   [ -s "$f" ] || { echo "panel: role '$R' produced no output — synthesis skipped" >&2; exit 1; }
-  grep -q 'findings:' "$f" && grep -q 'role_header:' "$f" \
-    || { echo "panel: role '$R' output lacks the envelope spine (role_header/findings) — synthesis skipped" >&2; exit 1; }
+  python3 - "$f" <<'PY' || { echo "panel: role '$R' output is not a valid envelope YAML — synthesis skipped" >&2; exit 1; }
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+ok = isinstance(d, dict) and isinstance(d.get("role_header"), dict) and isinstance(d.get("findings"), list)
+sys.exit(0 if ok else 1)
+PY
 done
-for R in "${ROLES[@]}"; do mv "$TMPD/PANEL_r${N}_${R}.yaml" "PANEL_r${N}_${R}.yaml"; done
 
+# Synthesis runs in an isolated staging dir holding ONLY the brief + this round's role files —
+# stale PANEL_* files from other rounds/roles are physically absent, not merely "please ignore".
+SYNTH_DIR="$TMPD/synth"
+mkdir "$SYNTH_DIR"
+cp REVIEW_BRIEF.md "$SYNTH_DIR/"
 ROLE_FILES=""
-for R in "${ROLES[@]}"; do ROLE_FILES+="PANEL_r${N}_${R}.yaml "; done
+for R in "${ROLES[@]}"; do
+  cp "$TMPD/PANEL_r${N}_${R}.yaml" "$SYNTH_DIR/PANEL_r${N}_${R}.yaml"
+  ROLE_FILES+="PANEL_r${N}_${R}.yaml "
+done
 
 synthesis_prompt() {
   cat <<EOF
@@ -209,12 +222,26 @@ EOF
 SYN="PANEL_r${N}_SYNTHESIS.md"
 SYN_TMP="$TMPD/synthesis.md"
 case "$MODEL" in
-  codex)  codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
-            "${MODEL_ARG[@]}" --output-last-message "$SYN_TMP" "$(synthesis_prompt)" >/dev/null || FAIL=1 ;;
-  claude) claude -p --allowedTools "Read,Glob,Grep" "$(synthesis_prompt)" > "$SYN_TMP" || FAIL=1 ;;
+  codex)  (cd "$SYNTH_DIR" && codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
+            ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} --output-last-message "$SYN_TMP" "$(synthesis_prompt)" >/dev/null) || FAIL=1 ;;
+  claude) (cd "$SYNTH_DIR" && claude -p --allowedTools "Read,Glob,Grep" "$(synthesis_prompt)" > "$SYN_TMP") || FAIL=1 ;;
 esac
-{ [ "$FAIL" = "1" ] || [ ! -s "$SYN_TMP" ]; } && { echo "panel: synthesis failed or empty — role outputs kept, no synthesis written" >&2; exit 1; }
-grep -q 'decision_item_count' "$SYN_TMP" || echo "panel: warning — synthesis lacks decision_item_count (check the budget cap by hand)" >&2
-mv "$SYN_TMP" "$SYN"
+{ [ "$FAIL" = "1" ] || [ ! -s "$SYN_TMP" ]; } && { echo "panel: synthesis failed or empty — nothing published" >&2; exit 1; }
+# Budget cap is a contract, not a hope: decision_item_count must be present and <= 5.
+DC="$(grep -Eo 'decision_item_count[^0-9]*[0-9]+' "$SYN_TMP" | grep -Eo '[0-9]+' | head -1 || true)"
+[ -n "$DC" ] || { echo "panel: synthesis lacks decision_item_count — nothing published" >&2; exit 1; }
+[ "$DC" -le 5 ] || { echo "panel: decision_item_count=$DC exceeds the budget cap of 5 — nothing published" >&2; exit 1; }
+
+# Publish all-or-nothing, and only after every validation passed. A destination that is a
+# directory (or a symlink to one) is an error, not a silent move-into.
+publish() {  # <src> <dst>
+  if [ -d "$2" ]; then echo "panel: destination is a directory: $2 — aborting publish" >&2; return 1; fi
+  [ -e "$2" ] && [ "$FORCE" = "1" ] && rm -f "$2"
+  mv "$1" "$2"
+}
+for R in "${ROLES[@]}"; do
+  publish "$TMPD/PANEL_r${N}_${R}.yaml" "PANEL_r${N}_${R}.yaml" || exit 1
+done
+publish "$SYN_TMP" "$SYN" || exit 1
 
 echo "panel: done — ${ROLE_FILES}+ $SYN (human decisions stay with you)"
