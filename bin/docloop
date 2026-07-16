@@ -56,6 +56,9 @@ docloop — a thin writing harness (wraps codex / claude -p)
   docloop draft  [notes...]           write sections from evidence (reconcile)
   docloop audit                       gap-audit: find contradictions (fan-out) + report
   docloop review <name> <target...>   the Oracle loop: external-model cross-review
+  docloop panel <folder> <N> [roles]  role-panel review: independent job-role evaluators (per-process isolation) + Area Chair synthesis
+  docloop lock <payload-file>         seal a prediction (sha256 sidecar) BEFORE the outcome exists
+  docloop verify <payload> <sidecar>  re-hash the payload; mismatch = judge nothing (diagnostic-only)
   docloop split  [manifest.yaml]      regenerate publish pages from the SSOT
   docloop gate   [manifest.yaml] [--strict-cross-audit]   release gate (gap_audit.py --strict)
 
@@ -85,6 +88,15 @@ case "$cmd" in
     name="$1"; shift
     python3 "$LIB/stage.py" "$name" "$@"
     echo "docloop: review folder staged. Now fill REVIEW_BRIEF.md, then follow prompts/review.md." ;;
+  panel)
+    [ "$#" -ge 2 ] || die "usage: docloop panel <review-folder> <roundN> [roles...]"
+    bash "$LIB/panel_review.sh" "$@" ;;
+  lock)
+    [ "$#" -ge 1 ] || die "usage: docloop lock <payload-file> [--locker NAME]"
+    python3 "$LIB/blind_lock.py" lock "$@" ;;
+  verify)
+    [ "$#" -eq 2 ] || die "usage: docloop verify <payload-file> <sidecar>"
+    python3 "$LIB/blind_lock.py" verify "$@" ;;
   split)  python3 "$LIB/split.py" "${1:-manifest.yaml}" ;;
   gate)
     # Optional leading manifest path; remaining args (e.g. --strict-cross-audit) pass through.

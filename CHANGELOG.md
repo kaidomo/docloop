@@ -3,6 +3,25 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.7.0] — 2026-07-17
+### Added
+- **Role-panel review (`docloop panel`)** — ported (downstream) from the canonical
+  `cross-functional-review` skill (docuauthring v0.8.0). Independent job-role evaluators
+  (default pm · product-designer · frontend · backend · qa; case-specific roles allowed)
+  each run as their **own headless model process**, with role outputs held in a private temp dir until every role finishes (and the prompt forbids reading PANEL_* files) — process separation on one machine, not an air gap —
+  then an Area Chair synthesis preserves conflicts, abstentions, and lone criticals, never
+  averages or majority-votes, records same-model agreement as correlated (no confidence
+  boost), and compresses to at most 5 human decision items. New: `lib/panel_review.sh`
+  (modeled on `multi_lens_review.sh`: DRY_RUN / FORCE / filename-injection guards),
+  `templates/finding-envelope.example.yaml` (ported envelope; upstream canonical wins on drift).
+- **Prediction lock (`docloop lock` / `docloop verify`)** — the B1 blind-diagnosis primitive
+  from the canonical `meta-learning-loop` skill: seal a prediction file with a sha256
+  **sidecar** (digest lives outside the hashed file — in-file digests are circular) *before*
+  the outcome exists; re-hash at reveal. Tampered payload → "judge nothing, diagnostic-only".
+  Re-lock refused (append-only). Only the primitive is ported — the full learning lifecycle
+  (experiment cards, lesson states, human gate) stays upstream. New: `lib/blind_lock.py`.
+- Tests: 126 → 151 (blind_lock lock/verify/tamper/re-lock/malformed-sidecar/quoted-paths; panel validation, dry-run smoke, and real-execution paths via a fake CLI shim: publish-after-validate, failure propagation, empty-output rejection).
+
 ## [0.6.0] — 2026-07-08
 ### Changed
 - **Ported the source-fidelity quality patch from the canonical skills (docuauthring #33).**
