@@ -138,7 +138,7 @@ cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
 # shared with the caller in non-interactive/CI shells), then clean the temp dir.
 # (A child that detaches into its own session is unreachable from here — documented limit.)
 killtree() { local _c; for _c in $(pgrep -P "$1" 2>/dev/null); do killtree "$_c"; done; kill "$1" 2>/dev/null; }
-trap 'trap - INT TERM; for _j in $(jobs -p); do killtree "$_j"; done; cleanup' INT TERM
+trap 'trap - INT TERM; for _j in $(jobs -p); do killtree "$_j"; done; cleanup; exit 143' INT TERM
 trap 'cleanup' EXIT
 
 run_one() {  # <role> <out-path>
@@ -226,11 +226,14 @@ EOF
 
 SYN="PANEL_r${N}_SYNTHESIS.md"
 SYN_TMP="$TMPD/synthesis.md"
+# Synthesis runs as a background job too, so the INT/TERM trap's jobs-based killtree
+# covers it (a foreground child would outlive the trap and stall the exit).
 case "$MODEL" in
   codex)  (cd "$SYNTH_DIR" && codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
-            ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} --output-last-message "$SYN_TMP" "$(synthesis_prompt)" >/dev/null) || FAIL=1 ;;
-  claude) (cd "$SYNTH_DIR" && claude -p --allowedTools "Read,Glob,Grep" "$(synthesis_prompt)" > "$SYN_TMP") || FAIL=1 ;;
+            ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} --output-last-message "$SYN_TMP" "$(synthesis_prompt)" >/dev/null) & ;;
+  claude) (cd "$SYNTH_DIR" && claude -p --allowedTools "Read,Glob,Grep" "$(synthesis_prompt)" > "$SYN_TMP") & ;;
 esac
+wait $! || FAIL=1
 { [ "$FAIL" = "1" ] || [ ! -s "$SYN_TMP" ]; } && { echo "panel: synthesis failed or empty — nothing published" >&2; exit 1; }
 # Budget cap is a contract, not a hope: decision_item_count must be present and <= 5.
 DC="$(grep -E '^[[:space:]]*decision_item_count[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*$' "$SYN_TMP" | grep -Eo '[0-9]+' | head -1 || true)"
