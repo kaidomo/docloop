@@ -869,5 +869,51 @@ check("r1#5: empty observations/chunks still suppresses doc-mode warnings",
       not any("sections is empty" in w or "doc_type not set" in w for w in W))
 
 
+# ── blind_lock.py (lock/verify primitive — deterministic) ──
+import blind_lock as BL  # noqa: E402
+
+d = tempfile.mkdtemp()
+_p = os.path.join(d, "b1.md")
+open(_p, "w", encoding="utf-8").write("predicted_failure: X\n")
+check("blind_lock: lock writes sidecar, exit 0", BL.lock(_p, "tester") == 0 and os.path.isfile(_p + ".lock.yaml"))
+_sc = _p + ".lock.yaml"
+_sct = open(_sc, encoding="utf-8").read()
+check("blind_lock: sidecar carries digest/byte_length/lock_time/locker",
+      all(k in _sct for k in ("digest:", "byte_length:", "lock_time:", "locker: \"tester\"")))
+check("blind_lock: verify intact payload -> 0", BL.verify(_p, _sc) == 0)
+open(_p, "a", encoding="utf-8").write("tampered\n")
+check("blind_lock: verify tampered payload -> 1 (diagnostic-only)", BL.verify(_p, _sc) == 1)
+check("blind_lock: re-lock refused (append-only discipline) -> 3", BL.lock(_p, "tester") == 3)
+check("blind_lock: lock missing file -> 2", BL.lock(os.path.join(d, "nope.md")) == 2)
+check("blind_lock: verify missing sidecar -> 2", BL.verify(_p, os.path.join(d, "nope.yaml")) == 2)
+
+# ── panel_review.sh (validation + dry-run smoke — no model calls) ──
+PANEL = os.path.join(SCRIPTS, "panel_review.sh")
+
+def run_panel(cwd, *args, env_extra=None):
+    env = dict(os.environ, DRY_RUN="1")
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(["bash", PANEL, *args], cwd=cwd, capture_output=True, text=True, env=env)
+
+d = tempfile.mkdtemp()
+r = run_panel(d, d, "1")
+check("panel: missing REVIEW_BRIEF.md -> nonzero", r.returncode != 0 and "REVIEW_BRIEF.md not found" in r.stderr)
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+r = run_panel(d, d, "x")
+check("panel: non-numeric round -> exit 2", r.returncode == 2)
+r = run_panel(d, d, "1", "bad/role")
+check("panel: role name injection blocked -> exit 2", r.returncode == 2)
+r = run_panel(d, d, "1")
+check("panel: dry-run lists 5 default roles + synthesis",
+      r.returncode == 0 and r.stdout.count("[dry-run]") == 6 and "SYNTHESIS" in r.stdout)
+r = run_panel(d, d, "1", "pm", "qa", "pv-practitioner")
+check("panel: custom role set honored in dry-run", r.returncode == 0 and "role=pv-practitioner" in r.stdout)
+open(os.path.join(d, "PANEL_r2_pm.yaml"), "w", encoding="utf-8").write("x\n")
+r = run_panel(d, d, "2", "pm")
+check("panel: refuses to clobber existing round files -> exit 3", r.returncode == 3)
+r = run_panel(d, d, "2", "pm", env_extra={"FORCE": "1"})
+check("panel: FORCE=1 allows overwrite in dry-run", r.returncode == 0)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
