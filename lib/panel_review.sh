@@ -133,10 +133,12 @@ EOF
 # every role has finished — an early-finishing role's output is never visible to a running one.
 TMPD=""
 cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
-# On INT/TERM: disarm the trap, clean the temp dir, then signal the whole process group —
-# background jobs and the model CLIs they spawned share this group, so grandchildren go too.
+# On INT/TERM: disarm the trap, kill each background job's process TREE (recursive pgrep -P —
+# reaches the model CLI and its children without signalling our own process group, which may be
+# shared with the caller in non-interactive/CI shells), then clean the temp dir.
 # (A child that detaches into its own session is unreachable from here — documented limit.)
-trap 'trap - INT TERM; cleanup; kill -TERM 0' INT TERM
+killtree() { local _c; for _c in $(pgrep -P "$1" 2>/dev/null); do killtree "$_c"; done; kill "$1" 2>/dev/null; }
+trap 'trap - INT TERM; for _j in $(jobs -p); do killtree "$_j"; done; cleanup' INT TERM
 trap 'cleanup' EXIT
 
 run_one() {  # <role> <out-path>
