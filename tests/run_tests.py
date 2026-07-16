@@ -879,13 +879,22 @@ check("blind_lock: lock writes sidecar, exit 0", BL.lock(_p, "tester") == 0 and 
 _sc = _p + ".lock.yaml"
 _sct = open(_sc, encoding="utf-8").read()
 check("blind_lock: sidecar carries digest/byte_length/lock_time/locker",
-      all(k in _sct for k in ("digest:", "byte_length:", "lock_time:", "locker: \"tester\"")))
+      all(k in _sct for k in ("digest:", "byte_length:", "lock_time:", "locker: tester")))
 check("blind_lock: verify intact payload -> 0", BL.verify(_p, _sc) == 0)
 open(_p, "a", encoding="utf-8").write("tampered\n")
 check("blind_lock: verify tampered payload -> 1 (diagnostic-only)", BL.verify(_p, _sc) == 1)
 check("blind_lock: re-lock refused (append-only discipline) -> 3", BL.lock(_p, "tester") == 3)
 check("blind_lock: lock missing file -> 2", BL.lock(os.path.join(d, "nope.md")) == 2)
 check("blind_lock: verify missing sidecar -> 2", BL.verify(_p, os.path.join(d, "nope.yaml")) == 2)
+check("blind_lock: --locker without value -> usage error 2 (no silent lock)",
+      BL.main(["lock", _p, "--locker"]) == 2)
+_bad = os.path.join(d, "bad.lock.yaml")
+open(_bad, "w", encoding="utf-8").write("digest: nope\n")
+check("blind_lock: malformed sidecar -> 2 (not a tamper verdict)", BL.verify(_p, _bad) == 2)
+_q = os.path.join(d, "weird \"name'.md")
+open(_q, "w", encoding="utf-8").write("x\n")
+check("blind_lock: quotes in payload path survive lock+verify",
+      BL.lock(_q, 'loc"ker') == 0 and BL.verify(_q, _q + ".lock.yaml") == 0)
 
 # ── panel_review.sh (validation + dry-run smoke — no model calls) ──
 PANEL = os.path.join(SCRIPTS, "panel_review.sh")
@@ -904,9 +913,11 @@ r = run_panel(d, d, "x")
 check("panel: non-numeric round -> exit 2", r.returncode == 2)
 r = run_panel(d, d, "1", "bad/role")
 check("panel: role name injection blocked -> exit 2", r.returncode == 2)
+r = run_panel(d, d, "1", "pm", "pm")
+check("panel: duplicate role names rejected -> exit 2", r.returncode == 2 and "duplicate" in r.stderr)
 r = run_panel(d, d, "1")
 check("panel: dry-run lists 5 default roles + synthesis",
-      r.returncode == 0 and r.stdout.count("[dry-run]") == 6 and "SYNTHESIS" in r.stdout)
+      r.returncode == 0 and r.stdout.count("[dry-run]") == 7 and "SYNTHESIS" in r.stdout)
 r = run_panel(d, d, "1", "pm", "qa", "pv-practitioner")
 check("panel: custom role set honored in dry-run", r.returncode == 0 and "role=pv-practitioner" in r.stdout)
 open(os.path.join(d, "PANEL_r2_pm.yaml"), "w", encoding="utf-8").write("x\n")
@@ -914,6 +925,47 @@ r = run_panel(d, d, "2", "pm")
 check("panel: refuses to clobber existing round files -> exit 3", r.returncode == 3)
 r = run_panel(d, d, "2", "pm", env_extra={"FORCE": "1"})
 check("panel: FORCE=1 allows overwrite in dry-run", r.returncode == 0)
+
+# real execution path via a fake `claude` shim on PATH (no network, no real model)
+def _mk_shim(body):
+    sd = tempfile.mkdtemp()
+    sh = os.path.join(sd, "claude")
+    open(sh, "w", encoding="utf-8").write("#!/bin/bash\n" + body)
+    os.chmod(sh, 0o755)
+    return sd
+
+_OK_SHIM = r'''
+for last in "$@"; do :; done
+if printf '%s' "$last" | grep -q "You are the Area Chair"; then
+  echo "# synthesis"; echo "decision_item_count: 1"
+else
+  echo "role_header:"; echo "  verdict: revise"; echo "findings: []"
+fi
+'''
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim(_OK_SHIM) + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", "qa", env_extra=_env)
+check("panel(real path): 2 roles + synthesis via shim -> exit 0",
+      r.returncode == 0 and os.path.isfile(os.path.join(d, "PANEL_r1_pm.yaml"))
+      and os.path.isfile(os.path.join(d, "PANEL_r1_qa.yaml"))
+      and os.path.isfile(os.path.join(d, "PANEL_r1_SYNTHESIS.md")))
+
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim("exit 1\n") + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", "qa", env_extra=_env)
+check("panel(real path): role failure -> exit 1, nothing published",
+      r.returncode == 1 and not os.path.exists(os.path.join(d, "PANEL_r1_pm.yaml"))
+      and not os.path.exists(os.path.join(d, "PANEL_r1_SYNTHESIS.md")))
+
+d = tempfile.mkdtemp()
+open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+_env = {"DRY_RUN": "0", "DOCLOOP_MODEL": "claude", "PATH": _mk_shim("exit 0\n") + os.pathsep + os.environ["PATH"]}
+r = run_panel(d, d, "1", "pm", env_extra=_env)
+check("panel(real path): empty role output -> exit 1, nothing published",
+      r.returncode == 1 and "produced no output" in r.stderr
+      and not os.path.exists(os.path.join(d, "PANEL_r1_pm.yaml")))
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

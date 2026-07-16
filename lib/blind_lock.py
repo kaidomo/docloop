@@ -15,8 +15,17 @@ third-party verifiability, commit the payload+sidecar before the outcome exists.
 Usage:
   blind_lock.py lock   <payload-file> [--locker NAME]   -> writes <payload-file>.lock.yaml
   blind_lock.py verify <payload-file> <sidecar>         -> exit 0 (intact) / 1 (mismatch)
+Exit codes: 0 ok · 1 digest mismatch (verify) · 2 usage/missing/malformed · 3 sidecar already exists (lock)
 """
 import sys, os, hashlib, datetime
+
+import yaml
+
+_HEADER = (
+    "# B1 lock sidecar — lives OUTSIDE the hashed payload (a digest inside the file it\n"
+    "# hashes is circular). Payload is immutable after this lock; additions go in a new\n"
+    "# payload + new sidecar. For third-party verifiability, commit both before the reveal.\n"
+)
 
 
 def _sha256(path):
@@ -32,27 +41,27 @@ def lock(payload, locker="unknown"):
         print(f"blind_lock: no such payload file: {payload}", file=sys.stderr)
         return 2
     sidecar = payload + ".lock.yaml"
-    if os.path.exists(sidecar):
+    digest = _sha256(payload)
+    doc = {"schema_version": 1, "lock_sidecar": {
+        "payload_ref": os.path.abspath(payload),
+        "digest": digest,
+        "algorithm": "sha256",
+        "byte_length": os.path.getsize(payload),
+        "lock_time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "locker": locker,
+    }}
+    try:
+        # O_CREAT|O_EXCL: atomic create — a concurrent or repeated lock cannot truncate the
+        # original sidecar (re-lock would erase the original lock time; append a NEW payload instead).
+        fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
         print(f"blind_lock: refusing to overwrite existing sidecar: {sidecar} "
               "(a re-lock would erase the original lock time — append a NEW payload instead)",
               file=sys.stderr)
         return 3
-    digest = _sha256(payload)
-    body = (
-        "# B1 lock sidecar — lives OUTSIDE the hashed payload (a digest inside the file it\n"
-        "# hashes is circular). Payload is immutable after this lock; additions go in a new\n"
-        "# payload + new sidecar. For third-party verifiability, commit both before the reveal.\n"
-        "schema_version: 1\n"
-        "lock_sidecar:\n"
-        f"  payload_ref: \"{os.path.abspath(payload)}\"\n"
-        f"  digest: \"{digest}\"\n"
-        "  algorithm: sha256\n"
-        f"  byte_length: {os.path.getsize(payload)}\n"
-        f"  lock_time: \"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')}\"\n"
-        f"  locker: \"{locker}\"\n"
-    )
-    with open(sidecar, "w", encoding="utf-8") as f:
-        f.write(body)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(_HEADER)
+        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
     print(f"locked: {payload}\n  sha256 {digest}\n  sidecar {sidecar}")
     return 0
 
@@ -62,15 +71,15 @@ def verify(payload, sidecar):
         if not os.path.isfile(p):
             print(f"blind_lock: no such file: {p}", file=sys.stderr)
             return 2
-    recorded = None
-    with open(sidecar, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("digest:"):
-                recorded = line.split(":", 1)[1].strip().strip('"')
-                break
-    if not recorded:
-        print("blind_lock: sidecar has no digest field", file=sys.stderr)
+    try:
+        with open(sidecar, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+        recorded = doc["lock_sidecar"]["digest"]
+    except Exception as e:  # malformed sidecar is a usage error, not a tamper verdict
+        print(f"blind_lock: malformed sidecar ({e.__class__.__name__}): {sidecar}", file=sys.stderr)
+        return 2
+    if not isinstance(recorded, str) or len(recorded) != 64:
+        print(f"blind_lock: sidecar digest is not a sha256 hex string: {recorded!r}", file=sys.stderr)
         return 2
     actual = _sha256(payload)
     if actual == recorded:
@@ -81,21 +90,30 @@ def verify(payload, sidecar):
     return 1
 
 
-def main(argv):
-    if len(argv) >= 2 and argv[0] == "lock":
-        locker = "unknown"
-        args = [a for a in argv[1:] if a != "--locker"]
-        if "--locker" in argv[1:]:
-            i = argv.index("--locker")
-            if i + 1 < len(argv):
-                locker = argv[i + 1]
-                args = argv[1:i] + argv[i + 2:]
-        if len(args) == 1:
-            return lock(args[0], locker)
-    if len(argv) == 3 and argv[0] == "verify":
-        return verify(argv[1], argv[2])
+def _usage():
     print(__doc__.strip(), file=sys.stderr)
     return 2
+
+
+def main(argv):
+    if not argv:
+        return _usage()
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "lock":
+        locker = "unknown"
+        if "--locker" in rest:
+            i = rest.index("--locker")
+            if i + 1 >= len(rest):  # a flag with no value is a usage error, not a silent default
+                print("blind_lock: --locker requires a value", file=sys.stderr)
+                return 2
+            locker = rest[i + 1]
+            rest = rest[:i] + rest[i + 2:]
+        if len(rest) != 1:
+            return _usage()
+        return lock(rest[0], locker)
+    if cmd == "verify" and len(rest) == 2:
+        return verify(rest[0], rest[1])
+    return _usage()
 
 
 if __name__ == "__main__":

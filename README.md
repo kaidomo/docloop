@@ -203,13 +203,17 @@ Two pieces ported (downstream) from the canonical skill repo — same thesis, ne
 **`docloop panel`** — one artifact, several *independent* job-role evaluators (PM · Product Designer ·
 Frontend · Backend · QA, or case-specific roles). A role is a **failure-surface contract**
 (questions · evidence access · abstain conditions), not a job-title persona. Each role runs as its
-**own headless model process**, so isolation is structural — no role can see another's output. An
+**own headless model process**, and role outputs are held outside the review folder until every
+role finishes (the prompt additionally forbids reading PANEL_* files) — process separation on one
+machine, not an air gap. An
 Area Chair synthesis then preserves conflicts and lone criticals, never averages or majority-votes,
 marks same-model agreement as *correlated* (recorded, no confidence boost), and hands the human
 **at most 5 decision items** (role outputs stay as the appendix).
 **`docloop panel`** — 한 산출물을 여러 **독립** 직무 평가자(PM·디자이너·FE·BE·QA 또는 케이스 특화
 역할)가 검토한다. 역할은 직함 페르소나가 아니라 **실패면 계약**(질문·증거 접근·abstain 조건)이다.
-역할마다 **별도 헤드리스 프로세스**로 돌아 격리가 구조적으로 보장되고, Area Chair 합성은 충돌·단독
+역할마다 **별도 헤드리스 프로세스**로 돌고, 역할 출력은 전원이 끝날 때까지 리뷰 폴더 밖에 보관된다
+(프롬프트도 PANEL_* 파일 열람을 금지) — 같은 머신 안의 프로세스 분리이지 물리적 차단은 아니다.
+Area Chair 합성은 충돌·단독
 critical을 보존하며 평균·다수결을 쓰지 않고, 같은 모델끼리의 합의는 correlated로 기록만 한다(확신도
 불상승). 사람 앞에는 **결정 항목 5건 이하**만 놓인다(역할 원본은 부록).
 

@@ -8,7 +8,7 @@ All notable changes to docloop are documented here. This project adheres to
 - **Role-panel review (`docloop panel`)** — ported (downstream) from the canonical
   `cross-functional-review` skill (docuauthring v0.8.0). Independent job-role evaluators
   (default pm · product-designer · frontend · backend · qa; case-specific roles allowed)
-  each run as their **own headless model process** — isolation is structural, not promised —
+  each run as their **own headless model process**, with role outputs held in a private temp dir until every role finishes (and the prompt forbids reading PANEL_* files) — process separation on one machine, not an air gap —
   then an Area Chair synthesis preserves conflicts, abstentions, and lone criticals, never
   averages or majority-votes, records same-model agreement as correlated (no confidence
   boost), and compresses to at most 5 human decision items. New: `lib/panel_review.sh`
@@ -20,7 +20,7 @@ All notable changes to docloop are documented here. This project adheres to
   the outcome exists; re-hash at reveal. Tampered payload → "judge nothing, diagnostic-only".
   Re-lock refused (append-only). Only the primitive is ported — the full learning lifecycle
   (experiment cards, lesson states, human gate) stays upstream. New: `lib/blind_lock.py`.
-- Tests: 126 → 140 (blind_lock lock/verify/tamper/re-lock; panel validation + dry-run smoke).
+- Tests: 126 → 147 (blind_lock lock/verify/tamper/re-lock/malformed-sidecar/quoted-paths; panel validation, dry-run smoke, and real-execution paths via a fake CLI shim: publish-after-validate, failure propagation, empty-output rejection).
 
 ## [0.6.0] — 2026-07-08
 ### Changed

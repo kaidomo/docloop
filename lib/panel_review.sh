@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Role-panel review — review one staged artifact through independent job-role evaluators.
 # Ported (downstream) from the cross-functional-review skill; upstream canonical lives in the
-# private skill repo (docuauthring). Each role runs as its OWN headless model process, so
-# isolation is structural: no role can see another role's output or the author's prior notes.
+# private skill repo (docuauthring). Each role runs as its OWN headless model process, and role
+# outputs are held in a private temp dir until every role finishes — so no role can read another
+# role's output through the review folder. (Process separation on one machine, not an air gap;
+# the prompt additionally forbids reading PANEL_* files.)
 #
 # A role is a failure-surface contract (questions · evidence access · abstain conditions ·
 # output envelope) — not a job-title persona. Synthesis (Area Chair) preserves conflicts and
@@ -12,20 +14,23 @@
 # Usage: panel_review.sh <review-folder> <roundN(number)> [roles...]
 #   <review-folder> must contain REVIEW_BRIEF.md + the staged target (output of stage.py).
 #   Default roles: pm product-designer frontend backend qa
-#   Custom roles: any [A-Za-z0-9_-] name — define its contract in REVIEW_BRIEF.md
-#   (failure surface · key questions · evidence access · abstain conditions), or the
-#   evaluator will abstain for lack of a contract.
+#   Custom roles: any [A-Za-z0-9_-] name (no duplicates) — define its contract in
+#   REVIEW_BRIEF.md (failure surface · key questions · evidence access · abstain conditions),
+#   or the evaluator will abstain for lack of a contract.
 #   Output: PANEL_r<N>_<role>.yaml per role + PANEL_r<N>_SYNTHESIS.md (Area Chair).
+#   Synthesis reads exactly this round's role files (stale files from other runs are ignored).
 #
 # Env:
-#   DOCLOOP_MODEL  codex (default) | claude — which headless CLI runs the evaluators
+#   DOCLOOP_MODEL  codex (default) | claude — which headless CLI runs the evaluators.
+#                  codex runs sandboxed read-only; claude runs with --allowedTools "Read,Glob,Grep"
+#                  (requires a claude CLI that supports --allowedTools).
 #   CODEX_EFFORT   reasoning effort for codex (default high)
 #   CODEX_MODEL    codex model override
 #   FORCE=1        allow overwriting existing PANEL_r<N>_* files (refused by default)
 #   DRY_RUN=1      print the execution plan instead of calling the model (smoke test)
 set -uo pipefail
 
-usage() { sed -n '2,27p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,31p' "$0"; exit "${1:-0}"; }
 { [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; } && usage 0
 
 DIR="${1:?review-folder path required (use -h for help)}"
@@ -40,10 +45,16 @@ FORCE="${FORCE:-0}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENVELOPE="$ROOT/templates/finding-envelope.example.yaml"
 
-# Input validation — these go into filenames, so block injection (path escape / clobber)
+# Input validation — these go into filenames, so block injection (path escape / clobber),
+# and reject duplicates (two processes writing one file is non-deterministic).
 case "$N" in ''|*[!0-9]*) echo "round N must be numeric: '$N'" >&2; exit 2;; esac
 for R in "${ROLES[@]}"; do
   case "$R" in ''|*[!A-Za-z0-9_-]*) echo "role name must be [A-Za-z0-9_-]: '$R'" >&2; exit 2;; esac
+done
+for R in "${ROLES[@]}"; do
+  seen=0
+  for S in "${ROLES[@]}"; do [ "$S" = "$R" ] && seen=$((seen+1)); done
+  [ "$seen" -gt 1 ] && { echo "duplicate role name: '$R'" >&2; exit 2; }
 done
 
 cd "$DIR" || { echo "cd failed: $DIR" >&2; exit 1; }
@@ -67,7 +78,8 @@ role_contract() {
 panel_rules() {
   cat <<'RULES'
 Rules (all roles):
-- You are one axis of an independent parallel panel. Other roles' outputs do not exist for you.
+- You are one axis of an independent parallel panel. Other roles' outputs do not exist for you:
+  do not open, list, or reference any PANEL_* file even if one is present.
 - Do not impersonate a job title's speech style — a role is a failure-surface contract, not a persona.
 - Never render final conclusions in another role's surface (e.g. PM must not conclude technical feasibility).
 - If evidence your contract names is not present in the staged folder, abstain on the judgments that
@@ -77,10 +89,6 @@ Rules (all roles):
 - Every finding needs evidence (section number / quoted line). Findings without evidence are removed at synthesis.
 RULES
 }
-
-# Capture: use -o/--output-last-message if available (avoids stdout pollution), else redirect stdout
-OUT_FLAG=""
-[ "$MODEL" = "codex" ] && codex exec --help 2>/dev/null | grep -q -- '--output-last-message' && OUT_FLAG=1
 
 MODEL_ARG=(); MODEL_DESC=""
 if [ "$MODEL" = "codex" ] && [ -n "${CODEX_MODEL:-}" ]; then MODEL_ARG=(-m "$CODEX_MODEL"); MODEL_DESC=" -m $CODEX_MODEL"; fi
@@ -105,54 +113,78 @@ Your contract: $(role_contract "$role")
 
 $(panel_rules)
 
-Output: exactly one YAML document following the envelope below. The case header is pre-filled —
-use the given values verbatim (do not invent, edit, or blank them). You fill role_header
-(verdict; feasibility + difficulty only if your role is frontend/backend) and the findings array.
+Output: print to stdout exactly one YAML document with the structure of the envelope template
+below (same keys, same nesting — it is a schema skeleton, not content). Set its case-header
+fields to exactly these values (do not invent, edit, or blank them):
+  case_id: "panel-$(basename "$PWD")-r${N}"
+  artifact_id: "staged artifact per REVIEW_BRIEF.md"
+  reviewer_role: "${role}"
+  model_lineage: "${MODEL}"
+  criterion_id: "REVIEW_BRIEF.md"
+You fill role_header (verdict; feasibility + difficulty only if your role is frontend/backend)
+and the findings array. No prose before or after the YAML.
 
-case_id: "panel-$(basename "$PWD")-r${N}"
-artifact_id: "staged artifact per REVIEW_BRIEF.md"
-reviewer_role: "${role}"
-model_lineage: "${MODEL}"
-criterion_id: "REVIEW_BRIEF.md"
-
-Envelope (canonical structure — follow it exactly):
+Envelope template (schema skeleton):
 $(cat "$ENVELOPE")
 EOF
 }
 
-run_one() {  # <role>
+# Role outputs are collected in a private temp dir and moved into the review folder only after
+# every role has finished — an early-finishing role's output is never visible to a running one.
+TMPD=""
+cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
+trap 'kill $(jobs -p) 2>/dev/null; cleanup' INT TERM
+trap 'cleanup' EXIT
+
+run_one() {  # <role> <out-path>
   local role="$1"
-  local out="PANEL_r${N}_${role}.yaml"
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "[dry-run] $MODEL role=$role effort=$EFFORT$MODEL_DESC -> $out"
-    return 0
-  fi
+  local out="$2"
   case "$MODEL" in
     codex)
-      if [ -n "$OUT_FLAG" ]; then
-        codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
-          "${MODEL_ARG[@]}" --output-last-message "$out" "$(role_prompt "$role")" >/dev/null
-      else
-        codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
-          "${MODEL_ARG[@]}" "$(role_prompt "$role")" > "$out"
-      fi ;;
+      codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
+        "${MODEL_ARG[@]}" --output-last-message "$out" "$(role_prompt "$role")" >/dev/null ;;
     claude)
-      claude -p "$(role_prompt "$role")" > "$out" ;;
+      claude -p --allowedTools "Read,Glob,Grep" "$(role_prompt "$role")" > "$out" ;;
     *) echo "unknown DOCLOOP_MODEL '$MODEL' (use codex or claude)" >&2; return 2 ;;
   esac
 }
 
-echo "panel: round r${N}, roles: ${ROLES[*]} (model=$MODEL, isolation=per-process)"
+echo "panel: round r${N}, roles: ${ROLES[*]} (model=$MODEL, per-process; outputs held back until all finish)"
+if [ "$DRY_RUN" = "1" ]; then
+  for R in "${ROLES[@]}"; do echo "[dry-run] $MODEL role=$R effort=$EFFORT$MODEL_DESC -> PANEL_r${N}_${R}.yaml"; done
+  echo "[dry-run] synthesis over exactly: ${ROLES[*]/#/PANEL_r${N}_}"  # suffix added below in real run
+  echo "[dry-run] synthesis -> PANEL_r${N}_SYNTHESIS.md"
+  exit 0
+fi
+
+# codex capture contract: --output-last-message is required (stdout carries the session log)
+if [ "$MODEL" = "codex" ] && ! codex exec --help 2>/dev/null | grep -q -- '--output-last-message'; then
+  echo "panel: this codex CLI lacks --output-last-message; cannot capture role output safely" >&2; exit 1
+fi
+
+TMPD="$(mktemp -d)"
 PIDS=(); FAIL=0
-for R in "${ROLES[@]}"; do run_one "$R" & PIDS+=($!); done
+for R in "${ROLES[@]}"; do run_one "$R" "$TMPD/PANEL_r${N}_${R}.yaml" & PIDS+=($!); done
 for P in "${PIDS[@]}"; do wait "$P" || FAIL=1; done
 [ "$FAIL" = "1" ] && { echo "panel: one or more role runs failed — synthesis skipped" >&2; exit 1; }
-[ "$DRY_RUN" = "1" ] && { echo "[dry-run] synthesis -> PANEL_r${N}_SYNTHESIS.md"; exit 0; }
+
+# Validate before publishing: every role file must exist, be non-empty, and carry the envelope spine.
+for R in "${ROLES[@]}"; do
+  f="$TMPD/PANEL_r${N}_${R}.yaml"
+  [ -s "$f" ] || { echo "panel: role '$R' produced no output — synthesis skipped" >&2; exit 1; }
+  grep -q 'findings:' "$f" && grep -q 'role_header:' "$f" \
+    || { echo "panel: role '$R' output lacks the envelope spine (role_header/findings) — synthesis skipped" >&2; exit 1; }
+done
+for R in "${ROLES[@]}"; do mv "$TMPD/PANEL_r${N}_${R}.yaml" "PANEL_r${N}_${R}.yaml"; done
+
+ROLE_FILES=""
+for R in "${ROLES[@]}"; do ROLE_FILES+="PANEL_r${N}_${R}.yaml "; done
 
 synthesis_prompt() {
   cat <<EOF
-You are the Area Chair for a role-panel review. Inputs: REVIEW_BRIEF.md and the role outputs
-PANEL_r${N}_*.yaml in this folder. The Area Chair is a separate judgment step, not a summarizer.
+You are the Area Chair for a role-panel review. Inputs: REVIEW_BRIEF.md and EXACTLY these
+role outputs from this round: ${ROLE_FILES}— ignore any other PANEL_* file in the folder
+(stale rounds/roles are not this panel). The Area Chair is a separate judgment step, not a summarizer.
 
 Contract:
 - Alias duplicate findings to one canonical finding_id (state your canonical-choice basis).
@@ -166,17 +198,23 @@ Contract:
 - Compress to at most 5 human decision items (merge by theme, never silently drop; the role
   outputs remain the appendix). Record decision_item_count.
 
-Write PANEL_r${N}_SYNTHESIS.md (the ONLY file you may create; edit nothing else) with sections:
-decision table (synthesis_id | source_finding_ids+aliases | representative evidence | impact |
-verdict/feasibility summary | conflict | correlation | decision_owner), lone criticals,
-role conflicts (unresolved), abstentions, removed findings (with reasons), correlated-agreement
-record, and a pointer to the role outputs as appendix.
+Read-only: do not create or edit any file. Print the synthesis document to stdout as markdown,
+with sections: decision table (synthesis_id | source_finding_ids+aliases | representative
+evidence | impact | verdict/feasibility summary | conflict | correlation | decision_owner),
+lone criticals, role conflicts (unresolved), abstentions, removed findings (with reasons),
+correlated-agreement record, decision_item_count, and a pointer to the role outputs as appendix.
 EOF
 }
 
+SYN="PANEL_r${N}_SYNTHESIS.md"
+SYN_TMP="$TMPD/synthesis.md"
 case "$MODEL" in
-  codex)  codex exec --skip-git-repo-check -c model_reasoning_effort="$EFFORT" "${MODEL_ARG[@]}" "$(synthesis_prompt)" ;;
-  claude) claude -p "$(synthesis_prompt)" ;;
+  codex)  codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="$EFFORT" \
+            "${MODEL_ARG[@]}" --output-last-message "$SYN_TMP" "$(synthesis_prompt)" >/dev/null || FAIL=1 ;;
+  claude) claude -p --allowedTools "Read,Glob,Grep" "$(synthesis_prompt)" > "$SYN_TMP" || FAIL=1 ;;
 esac
+{ [ "$FAIL" = "1" ] || [ ! -s "$SYN_TMP" ]; } && { echo "panel: synthesis failed or empty — role outputs kept, no synthesis written" >&2; exit 1; }
+grep -q 'decision_item_count' "$SYN_TMP" || echo "panel: warning — synthesis lacks decision_item_count (check the budget cap by hand)" >&2
+mv "$SYN_TMP" "$SYN"
 
-echo "panel: done — PANEL_r${N}_<role>.yaml + PANEL_r${N}_SYNTHESIS.md (human decisions stay with you)"
+echo "panel: done — ${ROLE_FILES}+ $SYN (human decisions stay with you)"
