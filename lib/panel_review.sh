@@ -138,7 +138,9 @@ cleanup() { [ -n "$TMPD" ] && rm -rf "$TMPD"; }
 # shared with the caller in non-interactive/CI shells), then clean the temp dir.
 # (A child that detaches into its own session is unreachable from here — documented limit.)
 killtree() { local _c; for _c in $(pgrep -P "$1" 2>/dev/null); do killtree "$_c"; done; kill "$1" 2>/dev/null; }
-trap 'trap - INT TERM; for _j in $(jobs -p); do killtree "$_j"; done; cleanup; exit 143' INT TERM
+on_sig() { trap - INT TERM; local _j; for _j in $(jobs -p); do killtree "$_j"; done; cleanup; exit "$1"; }
+trap 'on_sig 130' INT
+trap 'on_sig 143' TERM
 trap 'cleanup' EXIT
 
 run_one() {  # <role> <out-path>
