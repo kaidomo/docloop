@@ -24,7 +24,9 @@ ROW = re.compile(r"^\|\s*(\S+)\s*\|\s*(blob|semantic-port|docloop-native)\s*\|\s
 
 
 def parse_rows(text):
-    return [m.groups() for m in (ROW.match(l) for l in text.splitlines()) if m]
+    # lint_rows와 동일한 정규화(r4-01): 들여쓴 유효 행이 lint는 통과하고
+    # 파싱에선 탈락하는 비대칭 차단
+    return [m.groups() for m in (ROW.match(l.lstrip()) for l in text.splitlines()) if m]
 
 
 def lint_rows(text):
@@ -138,6 +140,16 @@ def selftest():
     lint2 = lint_rows(indented)
     assert lint2, "들여쓴 기형 행이 lint를 통과함(r3-02)"
     print(f"selftest: indented-malformed-row → lint FAIL 발화 ok")
+    # r4-01 end-to-end: 들여쓴 '유효' secondary 행 — lint 통과 + 파싱 포함 + stale 발화
+    raw2 = ("| lib/x.py | blob | src/a | " + H("a") + " | " + H("c") + " |\n"
+            "  | lib/x.py | blob | src/guards | " + H("0") + " | " + H("c") + " |\n")
+    assert lint_rows(raw2) == [], "들여쓴 유효 행이 lint에서 오탐"
+    rows2 = parse_rows(raw2)
+    assert len(rows2) == 2, f"들여쓴 유효 행이 파싱에서 탈락: {len(rows2)}행"
+    errs2 = compare(rows2, up.get, down.get, ["lib/x.py"])
+    assert any("STALE-upstream" in e and "src/guards" in e for e in errs2), \
+        f"들여쓴 stale secondary 미발화: {errs2}"
+    print("selftest: indented-valid-stale-secondary → end-to-end STALE 발화 ok")
     return 0
 
 
