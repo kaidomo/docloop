@@ -1110,7 +1110,7 @@ r = _split_run(w)
 check("guard: foreign marker treated as unmarked non-empty", r.returncode != 0)
 check("guard: foreign-marker dir preserved", os.path.exists(os.path.join(w, "outputs", ".other_tool_marker")))
 
-for bad in ("", ".", "..", "a/b", "/abs/x"):
+for bad in ("", ".", "..", "a/b", "a\\b", "a\x00b", "/abs/x"):
     w = _mkws(); os.makedirs(os.path.join(w, "outputs"))
     r = subprocess.run([sys.executable, "-c",
         f"import sys; sys.path.insert(0, {SCRIPTS!r}); import split; split.MARKER = {bad!r}; "
@@ -1137,8 +1137,35 @@ r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
 check("stage guard: FIFO rejected via special-file branch (bounded)",
       r.returncode == 0 and "not a regular file/directory" in r.stdout)
 check("stage guard: FIFO not staged", not os.path.exists(os.path.join(w, "d", "case", "p.fifo")))
-check("stage guard: _inside incomparable → outside (no traceback)", ST._inside("rel/path", "/abs/base") is False)
-check("stage guard: worktree warning absent outside git", True)
+# ValueError 분기 실실행(r1-05): commonpath를 모킹해 예외 경로를 강제
+_orig_cp = os.path.commonpath
+def _raise(*a, **k):
+    raise ValueError("simulated cross-drive")
+os.path.commonpath = _raise
+try:
+    check("stage guard: _inside ValueError branch → outside", ST._inside("/a/b", "/a") is False)
+finally:
+    os.path.commonpath = _orig_cp
+# FIFO 단독(수락 0건) — 실패 exit + 새 폴더 정리(r1-06)
+w = tempfile.mkdtemp(); os.mkfifo(os.path.join(w, "only.fifo"))
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case0",
+                    "only.fifo", "--dest", os.path.join(w, "d")],
+                   cwd=w, capture_output=True, text=True, timeout=15)
+check("stage guard: zero-accepted (FIFO only) → nonzero exit", r.returncode != 0)
+check("stage guard: zero-accepted new folder cleaned", not os.path.exists(os.path.join(w, "d", "case0")))
+# worktree 경고 실단언(r1-06): git repo 안 dest → 경고 출력, 밖 → 없음
+wt = tempfile.mkdtemp(); subprocess.run(["git", "init", "-q", wt], capture_output=True)
+open(os.path.join(wt, "t.md"), "w").write("x")
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
+                    "t.md", "--dest", os.path.join(wt, "d")],
+                   cwd=wt, capture_output=True, text=True, timeout=15)
+check("stage guard: worktree warning emitted inside git", "inside a Git worktree" in r.stdout)
+nw = tempfile.mkdtemp()
+open(os.path.join(nw, "t.md"), "w").write("x")
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
+                    "t.md", "--dest", os.path.join(nw, "d")],
+                   cwd=nw, capture_output=True, text=True, timeout=15)
+check("stage guard: no worktree warning outside git", "inside a Git worktree" not in r.stdout)
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

@@ -35,8 +35,14 @@ The guard hardening in this PR is ported from upstream `shared/path_guards.py`
 | lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 7524d8ff19172ca0caa38e9e2794f05c3fed1e95 | 6def0fb3ce801ee36513860609d6f71d8489808e | |
 | lib/blind_lock.py | semantic-port | meta-learning-loop (prediction lock) | - | - | v0.7.0 port |
 | lib/panel_review.sh | semantic-port | cross-functional-review | - | - | v0.7.0 port |
-| prompts/atb-*.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
-| prompts/{plan,draft,gap-audit,review}.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/atb-audit.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
+| prompts/atb-author.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
+| prompts/atb-capture.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
+| prompts/atb-chunk.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
+| prompts/plan.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/draft.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/gap-audit.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/review.md | semantic-port | pm-authoring SKILL.md | - | - | |
 | bin/docloop · tests/ · templates/ · docs/ | docloop-native | - | - | - | |
 
 Downstream hashes are recorded at port time; `check_ports.py` fails a blob row
@@ -47,8 +53,8 @@ annotated as intentional divergence.
 
 ## Appendix — public-repo leak-scan spec (hardening plan D4)
 
-- Scope: all tracked + staged + non-ignored candidate files (including this file).
-- Command: `git grep -inE "<private-token-classes>" $(git ls-files)` where the token
+- Scope: all tracked + staged + **non-ignored untracked** candidate files (including this file).
+- Command: `git grep -inE "<private-token-classes>" -- $(git ls-files; git ls-files --others --exclude-standard)` — plain `git ls-files` alone omits untracked candidates (an untracked canary must still fail). The token
   classes are: org/product identifiers of the maintainer's employer, personal
   absolute paths (`/Users/<user>`), private workspace names, credential patterns
   (`AKIA`, `ghp_`, `-----BEGIN`). The concrete token list lives in the PRIVATE

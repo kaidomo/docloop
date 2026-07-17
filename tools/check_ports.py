@@ -33,6 +33,31 @@ def blob_of(path):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def compare(rows, upstream_blob_fn, downstream_blob_fn, tracked_files):
+    """비교 코어(주입식 — selftest가 실제 로직을 실행할 수 있게 분리)."""
+    errors, covered = [], set()
+    for downstream, cls, src, blob, down_blob in rows:
+        covered.add(downstream)
+        if cls != "blob":
+            continue
+        if down_blob in ("-", "(auto)") or len(down_blob) != 40:   # blob 행은 다운스트림 해시 필수
+            errors.append(f"row format: {downstream} blob row lacks a recorded downstream hash")
+        up = upstream_blob_fn(src)
+        if up is None:
+            errors.append(f"missing upstream source: {src}"); continue
+        if up != blob:
+            errors.append(f"STALE-upstream: {downstream} ← {src} ({blob[:9]}→{up[:9]})")
+        if len(down_blob) == 40:
+            cur = downstream_blob_fn(downstream)
+            if cur != down_blob:
+                errors.append(f"STALE-downstream: {downstream} edited without row update "
+                              f"({down_blob[:9]}→{(cur or 'missing')[:9]})")
+    for f in tracked_files:                       # 커버리지: lib/ + prompts/ 전 파일
+        if f not in covered:
+            errors.append(f"coverage: {f} has no PORTS.md row")
+    return errors
+
+
 def main(argv=None):
     args = argv if argv is not None else sys.argv[1:]
     if "--selftest" in args:
@@ -47,26 +72,15 @@ def main(argv=None):
     upref = ref.stdout.strip()
     print(f"upstream main resolved: {upref}")
     rows = parse_rows(open(PORTS, encoding="utf-8").read())
-    errors, covered = [], set()
-    for downstream, cls, src, blob, down_blob in rows:
-        covered.add(downstream)
-        if cls != "blob":
-            continue
+
+    def up_blob(src):
         r = subprocess.run(["git", "-C", UP, "rev-parse", f"{upref}:{src}"],
                            capture_output=True, text=True)
-        if r.returncode != 0:
-            errors.append(f"missing upstream source: {src}"); continue
-        if r.stdout.strip() != blob:
-            errors.append(f"STALE-upstream: {downstream} ← {src} ({blob[:9]}→{r.stdout.strip()[:9]})")
-        if down_blob not in ("-", "(auto)"):
-            cur = blob_of(downstream)
-            if cur != down_blob:
-                errors.append(f"STALE-downstream: {downstream} edited without row update "
-                              f"({down_blob[:9]}→{(cur or 'missing')[:9]})")
-    for f in sorted(os.listdir(os.path.join(ROOT, "lib"))):
-        if not any(d == f"lib/{f}" or (d.startswith("prompts/") and False) for d, *_ in rows):
-            if f"lib/{f}" not in covered:
-                errors.append(f"coverage: lib/{f} has no PORTS.md row")
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    tracked = [f"lib/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "lib")))]
+    tracked += [f"prompts/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "prompts")))]
+    errors = compare(rows, up_blob, blob_of, tracked)
     for e in errors:
         print(f"FAIL {e}")
     print(f"=== {len(errors)} failures ===")
@@ -74,16 +88,29 @@ def main(argv=None):
 
 
 def selftest():
-    """4+1 failure fixtures: stale-upstream / missing-source / coverage / (downstream drift
-    is reported via stale rows after re-port) / secondary-source-only change."""
-    fake = "| lib/split.py | blob | skills/pm-authoring/scripts/split.py | " + "0" * 40 + " | " + "9" * 40 + " |\n"
-    rows = parse_rows(fake)
-    assert rows and rows[0][3] == "0" * 40 and rows[0][4] == "9" * 40, "row 파서 자기검증 실패(양방향 해시)"
-    missing = "| lib/x.py | blob | skills/none/none.py | " + "1" * 40 + " | (auto) |\n"
-    assert parse_rows(missing), "missing-source 픽스처 파서 실패"
-    sec = "| lib/split.py | blob | shared/path_guards.py | " + "2" * 40 + " | (auto) |\n"
-    assert parse_rows(sec), "secondary-source 픽스처 파서 실패"
-    print("selftest: parser fixtures ok (stale/missing/secondary rows are representable and comparable)")
+    """실제 비교 로직에 주입 픽스처로 5개 실패 모드를 각각 발화시켜 증명(r1-03)."""
+    H = lambda c: c * 40
+    up = {"src/a": H("a"), "src/guards": H("b")}
+    down = {"lib/x.py": H("c")}
+    ok_rows = [("lib/x.py", "blob", "src/a", H("a"), H("c")),
+               ("lib/x.py", "blob", "src/guards", H("b"), H("c"))]
+    base = compare(ok_rows, up.get, down.get, ["lib/x.py"])
+    assert base == [], f"기준 픽스처가 실패함: {base}"
+    cases = {
+        "changed-upstream": ([("lib/x.py", "blob", "src/a", H("0"), H("c"))], up.get, down.get, ["lib/x.py"]),
+        "changed-downstream": ([("lib/x.py", "blob", "src/a", H("a"), H("9"))], up.get, down.get, ["lib/x.py"]),
+        "missing-source": ([("lib/x.py", "blob", "src/none", H("a"), H("c"))], up.get, down.get, ["lib/x.py"]),
+        "incomplete-coverage": (ok_rows, up.get, down.get, ["lib/x.py", "prompts/new.md"]),
+        "secondary-source-only": ([("lib/x.py", "blob", "src/a", H("a"), H("c")),
+                                   ("lib/x.py", "blob", "src/guards", H("0"), H("c"))],
+                                  up.get, down.get, ["lib/x.py"]),
+        "auto-downstream-disallowed": ([("lib/x.py", "blob", "src/a", H("a"), "(auto)")],
+                                       up.get, down.get, ["lib/x.py"]),
+    }
+    for name, (rows, u, d, tr) in cases.items():
+        errs = compare(rows, u, d, tr)
+        assert errs, f"실패 모드 미발화: {name}"
+        print(f"selftest: {name} → FAIL 발화 ok ({errs[0][:60]}…)")
     return 0
 
 
