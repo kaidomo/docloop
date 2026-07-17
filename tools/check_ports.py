@@ -20,11 +20,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORTS = os.path.join(ROOT, "docs", "PORTS.md")
 UP = os.path.expanduser(os.environ.get("DOCUAUTHRING_ROOT", "~/docuauthring"))
 
-ROW = re.compile(r"^\|\s*(\S+)\s*\|\s*(blob|semantic-port|docloop-native)\s*\|\s*([^|]+?)\s*\|\s*([0-9a-f]{40}|-)\s*\|")
+ROW = re.compile(r"^\|\s*(\S+)\s*\|\s*(blob|semantic-port|docloop-native)\s*\|\s*([^|]+?)\s*\|\s*([0-9a-f]{40}|-)\s*\|\s*([0-9a-f]{40}|\(auto\)|-)\s*\|")
 
 
 def parse_rows(text):
     return [m.groups() for m in (ROW.match(l) for l in text.splitlines()) if m]
+
+
+def blob_of(path):
+    r = subprocess.run(["git", "hash-object", os.path.join(ROOT, path)],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
 
 
 def main(argv=None):
@@ -42,7 +48,7 @@ def main(argv=None):
     print(f"upstream main resolved: {upref}")
     rows = parse_rows(open(PORTS, encoding="utf-8").read())
     errors, covered = [], set()
-    for downstream, cls, src, blob in rows:
+    for downstream, cls, src, blob, down_blob in rows:
         covered.add(downstream)
         if cls != "blob":
             continue
@@ -51,7 +57,12 @@ def main(argv=None):
         if r.returncode != 0:
             errors.append(f"missing upstream source: {src}"); continue
         if r.stdout.strip() != blob:
-            errors.append(f"STALE: {downstream} ← {src} (upstream moved {blob[:9]}→{r.stdout.strip()[:9]})")
+            errors.append(f"STALE-upstream: {downstream} ← {src} ({blob[:9]}→{r.stdout.strip()[:9]})")
+        if down_blob not in ("-", "(auto)"):
+            cur = blob_of(downstream)
+            if cur != down_blob:
+                errors.append(f"STALE-downstream: {downstream} edited without row update "
+                              f"({down_blob[:9]}→{(cur or 'missing')[:9]})")
     for f in sorted(os.listdir(os.path.join(ROOT, "lib"))):
         if not any(d == f"lib/{f}" or (d.startswith("prompts/") and False) for d, *_ in rows):
             if f"lib/{f}" not in covered:
@@ -65,9 +76,9 @@ def main(argv=None):
 def selftest():
     """4+1 failure fixtures: stale-upstream / missing-source / coverage / (downstream drift
     is reported via stale rows after re-port) / secondary-source-only change."""
-    fake = "| lib/split.py | blob | skills/pm-authoring/scripts/split.py | " + "0" * 40 + " | (auto) |\n"
+    fake = "| lib/split.py | blob | skills/pm-authoring/scripts/split.py | " + "0" * 40 + " | " + "9" * 40 + " |\n"
     rows = parse_rows(fake)
-    assert rows and rows[0][3] == "0" * 40, "row 파서 자기검증 실패"
+    assert rows and rows[0][3] == "0" * 40 and rows[0][4] == "9" * 40, "row 파서 자기검증 실패(양방향 해시)"
     missing = "| lib/x.py | blob | skills/none/none.py | " + "1" * 40 + " | (auto) |\n"
     assert parse_rows(missing), "missing-source 픽스처 파서 실패"
     sec = "| lib/split.py | blob | shared/path_guards.py | " + "2" * 40 + " | (auto) |\n"
