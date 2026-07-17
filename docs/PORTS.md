@@ -19,12 +19,19 @@ Seeded 2026-07-17 against upstream `main` = `6a32ef5a56e986c3e4a1207010cc5ee6277
 The guard hardening in this PR is ported from upstream `shared/path_guards.py`
 (secondary source on composite rows).
 
+Peer-review rows re-ported 2026-07-17 against upstream `main` =
+`55a0eddb9d553a118d5d7e35d6990d47ae81bb34` (upstream moved its staging logic into
+a vendored `_staging_lib.py`; docloop ports the semantics — round-conflict rule,
+prompt-block contract — while staying single-file, so that lib is a secondary
+source on the `lib/stage.py` composite row).
+
 | downstream | class | upstream source(s) | upstream blob | downstream blob | notes |
 |---|---|---|---|---|---|
 | lib/split.py | blob | skills/pm-authoring/scripts/split.py | 647eea10e03dddd30738903135f61c32d33d2fd3 | 2774874bb1206e9487831a9f7e9c516c565f8cae | composite |
 | lib/split.py | blob | shared/path_guards.py | f1d2916ca936a90cadc4fc32af6f0d635845a67c | 2774874bb1206e9487831a9f7e9c516c565f8cae | guard contract (secondary) |
-| lib/stage.py | blob | skills/peer-review/scripts/stage.py | cf0fe637b0d828cfe1be1c8a9c6666d161c39732 | 528967ff4fbd65abd25825bf3411f6f84cb88ef5 | composite |
-| lib/stage.py | blob | shared/path_guards.py | f1d2916ca936a90cadc4fc32af6f0d635845a67c | 528967ff4fbd65abd25825bf3411f6f84cb88ef5 | containment contract (secondary) |
+| lib/stage.py | blob | skills/peer-review/scripts/stage.py | 11fd275ead107b0743040bceb592b93b357a0219 | ea7bf528857db8e5ae0135993a0a85278553eb83 | composite |
+| lib/stage.py | blob | skills/peer-review/scripts/_staging_lib.py | 913a1196a92bace3ebd049bac1f94b2e0703d772 | ea7bf528857db8e5ae0135993a0a85278553eb83 | staging behavior canon (secondary) |
+| lib/stage.py | blob | shared/path_guards.py | f1d2916ca936a90cadc4fc32af6f0d635845a67c | ea7bf528857db8e5ae0135993a0a85278553eb83 | containment contract (secondary) |
 | lib/init_workspace.py | blob | skills/asistobe-authoring/scripts/init_workspace.py | c64bb35080ca6d49042be9f6894f3a5f0567ea04 | e0393a174d353dfba1a7cb11f6ab4cda1dbe9ed9 | |
 | lib/validate_manifest.py | blob | skills/pm-authoring/scripts/validate_manifest.py | 838f345e2178d325171454d803284c4476a5dbe1 | 36bc962534f3323944007150b34b3adf70e01aac | |
 | lib/gap_audit.py | blob | skills/pm-authoring/scripts/gap_audit.py | ac5297c945b0c76e915317a940e9f329bcdbd7d0 | 3e2b676c70ef9a05de44650a0d0905533865927f | |
@@ -32,7 +39,7 @@ The guard hardening in this PR is ported from upstream `shared/path_guards.py`
 | lib/approval_brief.py | blob | skills/pm-authoring/scripts/approval_brief.py | 62ba54c413742ac97ce9e0916b37e708b5dde56c | 90a9d9ff07eba81acf260b69923864147de655d7 | |
 | lib/score_report.py | blob | skills/pm-authoring/scripts/score_report.py | c35cb3d17784dc86b4a17efe6613d02d4acabc98 | 1c00597234a6cd12dcc82cd0ad1248de604dfa1d | |
 | lib/verbatim_check.py | blob | skills/pm-authoring/scripts/verbatim_check.py | adb02d273cf0d33d53eeb6712b2ceaaeb9f169ee | 520d18ae39a531d2cd0364bf904065b3bb23ba1c | |
-| lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 7524d8ff19172ca0caa38e9e2794f05c3fed1e95 | 6def0fb3ce801ee36513860609d6f71d8489808e | |
+| lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 47a8a0e6a86106e21b929da8e2a1a393c2f16c9a | 371d3a392ada06407329947d3023660e19d8d8db | |
 | lib/blind_lock.py | semantic-port | meta-learning-loop (prediction lock) | - | - | v0.7.0 port |
 | lib/panel_review.sh | semantic-port | cross-functional-review | - | - | v0.7.0 port |
 | prompts/atb-audit.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
