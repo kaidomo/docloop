@@ -54,12 +54,11 @@ annotated as intentional divergence.
 ## Appendix — public-repo leak-scan spec (hardening plan D4)
 
 - Scope: all tracked + staged + **non-ignored untracked** candidate files (including this file).
-- Command (filename-safe — no command substitution):
-  `git grep --untracked -inE "<private-token-classes>"` (worktree incl. non-ignored
-  untracked contents) **and** `git grep --cached -inE "<private-token-classes>"`
-  (staged index). Note: passing untracked names as pathspecs does NOT make
-  `git grep` read their contents — `--untracked` is required (an untracked canary
-  must fail the scan). The token
+- Command: `tools/leak_scan.sh '<private-token-classes>'` — an executable wrapper
+  over `git grep --untracked` (worktree incl. non-ignored untracked contents) and
+  `git grep --cached` (staged index), because raw `git grep` exits 0 ON a match:
+  the wrapper inverts this to the release contract (0 = clean, 1 = any match,
+  2 = scan error). An untracked canary must make it exit 1. The token
   classes are: org/product identifiers of the maintainer's employer, personal
   absolute paths (`/Users/<user>`), private workspace names, credential patterns
   (`AKIA`, `ghp_`, `-----BEGIN`). The concrete token list lives in the PRIVATE

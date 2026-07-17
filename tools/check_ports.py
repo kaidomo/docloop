@@ -32,7 +32,7 @@ def lint_rows(text):
     유효한 ROW여야 한다 — 조용한 탈락(secondary 소스 무오류 소실) 차단."""
     errors = []
     for line in text.splitlines():
-        if re.match(r"^\|\s*(lib/|prompts/)", line) and not ROW.match(line):
+        if re.match(r"^\s*\|\s*(lib/|prompts/)", line) and not ROW.match(line.lstrip()):
             errors.append(f"malformed PORTS row (fail-closed): {line.strip()[:80]}")
     return errors
 
@@ -134,6 +134,10 @@ def selftest():
     lint = lint_rows(raw)
     assert lint, "기형 secondary 행이 lint를 통과함(fail-open)"
     print(f"selftest: malformed-secondary-row → lint FAIL 발화 ok ({lint[0][:60]}…)")
+    indented = " | lib/split.py | blob | src/guards | " + H("b") + " | (AUTO) |\n"
+    lint2 = lint_rows(indented)
+    assert lint2, "들여쓴 기형 행이 lint를 통과함(r3-02)"
+    print(f"selftest: indented-malformed-row → lint FAIL 발화 ok")
     return 0
 
 
