@@ -6,13 +6,22 @@ Usage: python3 stage.py <name> <target-path...> [--dest DIR]
 - name must be a single folder name (no path separators / .. / absolute paths).
 - Deletes and copies are confined to the review folder (symlinks can't escape).
 - Copies are atomic (temp→replace), internal symlinks are excluded, original↔copy mapping is in STAGE_MANIFEST.md."""
-import sys, os, shutil, argparse
+import sys, os, shutil, argparse, stat, subprocess
 
 DEFAULT_DEST = os.path.expanduser(os.environ.get("DOCLOOP_REVIEW_DIR", "~/.docloop/reviews"))
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "templates", "REVIEW_BRIEF.template.md")
 BRIEF_NAME = "REVIEW_BRIEF.md"
 MANIFEST_NAME = "STAGE_MANIFEST.md"
+
+
+def _inside(path, base):
+    """realpath containment; incomparable paths (ValueError, e.g. cross-drive) count as outside."""
+    try:
+        rp, rb = os.path.realpath(path), os.path.realpath(base)
+        return os.path.commonpath([rp, rb]) == rb
+    except ValueError:
+        return False
 
 
 def _ignore(src, names):
@@ -58,11 +67,18 @@ def main():
     created = not os.path.exists(review_dir)
     os.makedirs(review_dir, exist_ok=True)
     review_real = os.path.realpath(review_dir)
-    if os.path.commonpath([dest, review_real]) != dest:   # confirm review_dir is actually under dest
+    if not _inside(review_real, dest):   # confirm review_dir is actually under dest (ValueError-safe)
         if created:
             try: os.rmdir(review_dir)
             except OSError: pass
         sys.exit(f"[abort] review_dir resolved outside dest: {review_real}")
+
+    # Hygiene warning: staging inside a Git worktree risks accidental commits of
+    # review artifacts (staged targets have arbitrary names .gitignore cannot anticipate).
+    probe = subprocess.run(["git", "-C", review_real, "rev-parse", "--is-inside-work-tree"],
+                           capture_output=True, text=True)
+    if probe.returncode == 0 and probe.stdout.strip() == "true":
+        print(f"  ! warning: review destination is inside a Git worktree — review artifacts may get committed: {review_real}")
 
     copied, seen, manifest_pairs = [], set(), []
     for t in a.targets:
@@ -72,10 +88,12 @@ def main():
         # r4-R1: top-level symlink targets are risky to dereference → reject (prevents pulling in external content)
         if os.path.islink(t):
             print(f"  ! target is a symlink — rejected (prevents pulling in external content): {t}"); continue
+        mode = os.lstat(t).st_mode
+        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):   # devices/FIFOs/sockets: copying can hang or exhaust storage
+            print(f"  ! target is not a regular file/directory — rejected: {t}"); continue
         # r4-R2/r5-B1: reject if target and review_dir overlap (ancestor/self/descendant) — prevents self-copy or deletion of the original (both directions)
         t_real = os.path.realpath(t)
-        cp = os.path.commonpath([t_real, review_real])
-        if cp == t_real or cp == review_real:
+        if _inside(t_real, review_real) or _inside(review_real, t_real):
             print(f"  ! target overlaps the review folder (ancestor/self/descendant) — rejected: {t}"); continue
         base = os.path.basename(t.rstrip("/"))
         # r4-B1: empty basename (e.g. root path) would make dst==review_dir, risking deletion of the review folder → reject
@@ -86,7 +104,7 @@ def main():
         if base in seen:                             # basename collision
             print(f"  ! basename clash '{base}' — keeping the first target, skipped: {t}"); continue
         dst = os.path.join(review_real, base)
-        if os.path.commonpath([review_real, os.path.realpath(dst)]) != review_real:
+        if not _inside(os.path.realpath(dst), review_real):
             print(f"  ! dst is outside the review folder — skipped: {dst}"); continue
         # Copy to temp first → replace the existing dst only on success. For directories, the existing dst
         # is removed before rename, so that brief window is not fully atomic (an interrupted run may leave
