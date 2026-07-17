@@ -27,6 +27,16 @@ def parse_rows(text):
     return [m.groups() for m in (ROW.match(l) for l in text.splitlines()) if m]
 
 
+def lint_rows(text):
+    """기형 행 fail-closed(impl r2-02): lib/·prompts/로 시작하는 표 행은 반드시
+    유효한 ROW여야 한다 — 조용한 탈락(secondary 소스 무오류 소실) 차단."""
+    errors = []
+    for line in text.splitlines():
+        if re.match(r"^\|\s*(lib/|prompts/)", line) and not ROW.match(line):
+            errors.append(f"malformed PORTS row (fail-closed): {line.strip()[:80]}")
+    return errors
+
+
 def blob_of(path):
     r = subprocess.run(["git", "hash-object", os.path.join(ROOT, path)],
                        capture_output=True, text=True)
@@ -71,7 +81,14 @@ def main(argv=None):
         print("ERROR: cannot resolve upstream main"); return 2
     upref = ref.stdout.strip()
     print(f"upstream main resolved: {upref}")
-    rows = parse_rows(open(PORTS, encoding="utf-8").read())
+    ports_text = open(PORTS, encoding="utf-8").read()
+    lint = lint_rows(ports_text)
+    if lint:
+        for e in lint:
+            print(f"FAIL {e}")
+        print(f"=== {len(lint)} failures (row lint) ===")
+        return 1
+    rows = parse_rows(ports_text)
 
     def up_blob(src):
         r = subprocess.run(["git", "-C", UP, "rev-parse", f"{upref}:{src}"],
@@ -111,6 +128,12 @@ def selftest():
         errs = compare(rows, u, d, tr)
         assert errs, f"실패 모드 미발화: {name}"
         print(f"selftest: {name} → FAIL 발화 ok ({errs[0][:60]}…)")
+    # r2-02: 기형 secondary 행이 파서에서 조용히 탈락하지 않고 lint로 실패
+    raw = ("| lib/split.py | blob | src/a | " + H("a") + " | " + H("c") + " |\n"
+           "| lib/split.py | blob | src/guards | " + H("b") + " | (AUTO) |\n")
+    lint = lint_rows(raw)
+    assert lint, "기형 secondary 행이 lint를 통과함(fail-open)"
+    print(f"selftest: malformed-secondary-row → lint FAIL 발화 ok ({lint[0][:60]}…)")
     return 0
 
 
