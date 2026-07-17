@@ -5,14 +5,39 @@ Usage: python3 stage.py <name> <target-path...> [--dest DIR]
 - An existing REVIEW_BRIEF.md is never overwritten (rounds accumulate).
 - name must be a single folder name (no path separators / .. / absolute paths).
 - Deletes and copies are confined to the review folder (symlinks can't escape).
-- Copies are atomic (temp→replace), internal symlinks are excluded, original↔copy mapping is in STAGE_MANIFEST.md."""
-import sys, os, shutil, argparse, stat, subprocess
+- Copies are atomic (temp→replace), internal symlinks are excluded, original↔copy mapping is in STAGE_MANIFEST.md.
+Round-conflict rule (shared contract): round N is occupied if ANY of its artifact
+families exists — matched by name prefix (PROMPT_*_r<N>* · *REVIEW_r<N>* · TRIAGE_r<N>*),
+deliberately over-conservative: sidecar artifacts (e.g. REVIEW_r<N>_*.md.log/.err from a
+failed lens run) also hold the round — skipping a number is safe, clobbering evidence is not.
+next_round() is the single implementation of this rule."""
+import sys, os, re, shutil, argparse, stat, subprocess
 
 DEFAULT_DEST = os.path.expanduser(os.environ.get("DOCLOOP_REVIEW_DIR", "~/.docloop/reviews"))
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "templates", "REVIEW_BRIEF.template.md")
 BRIEF_NAME = "REVIEW_BRIEF.md"
 MANIFEST_NAME = "STAGE_MANIFEST.md"
+
+
+def next_round(review_dir):
+    """Next unused round N — single implementation of the round-conflict rule
+    (see module docstring: name-prefix match, over-conservative by design).
+    An unreadable folder counts as empty (round 1)."""
+    occupied = set()
+    try:
+        names = os.listdir(review_dir)
+    except OSError:
+        return 1
+    for n in names:
+        m = (re.match(r"PROMPT_.*_r(\d+)", n) or re.match(r".*REVIEW_r(\d+)", n)
+             or re.match(r"TRIAGE_r(\d+)", n))
+        if m:
+            occupied.add(int(m.group(1)))
+    n = 1
+    while n in occupied:
+        n += 1
+    return n
 
 
 def _inside(path, base):
@@ -150,10 +175,12 @@ def main():
     print(f"review folder: {review_dir}")
     print(f"copied: {copied}")
     print(f"REVIEW_BRIEF.md: {brief_status}")
+    n = next_round(review_real)
     print("\nNext (see prompts/review.md for the full loop):")
     print("  1) Fill REVIEW_BRIEF.md (what it is, decisions already made, what to look at).")
-    print(f"  2) cd '{review_dir}' && codex exec --skip-git-repo-check --sandbox read-only - > REVIEW_r1.md")
+    print(f"  2) cd '{review_dir}' && codex exec --skip-git-repo-check --sandbox read-only - > REVIEW_r{n}.md")
     print("     ('-' is stdin — feed the review prompt from prompts/review.md step 2. No empty input.)")
+    print(f"     (r{n} = next unused round — any PROMPT_*_r<K>*, *REVIEW_r<K>*, or TRIAGE_r<K>* artifact occupies round K.)")
     print("  3) Triage findings -> ⛔ human approval -> apply+test -> record 'Applied (vN)' -> repeat if needed.")
 
 
