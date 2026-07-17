@@ -6,7 +6,7 @@
 
 "베테랑 PM 판정"의 정의 = **특정 문서에 대한, 사람이 내린 finding별 처분.** 그 처분 부산물은 이미 매 리뷰마다 생산돼 왔다:
 
-- `~/claude_codex_review/reviews/*/` 의 `TRIAGE_r*.md` / REVIEW_BRIEF triage — finding마다 사람이 `apply/reject/invalid/defer` 처분 (예: 이번 docloop-direction r1의 6건).
+- 리뷰 작업 폴더(로컬, repo 밖)의 `TRIAGE_r*.md` / REVIEW_BRIEF triage — finding마다 사람이 `apply/reject/invalid/defer` 처분 (예: 이번 docloop-direction r1의 6건).
 - docloop repo의 `REVIEW_r*.md` (r1~r3) + gap 리포트.
 - pm-authoring `_gap_report.md`, asistobe `_ground_report.md` 등 감사 산출물.
 

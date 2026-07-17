@@ -1054,5 +1054,118 @@ check("panel(real path, codex shim): output captured via --output-last-message, 
       r.returncode == 0 and os.path.isfile(os.path.join(d, "PANEL_r1_pm.yaml"))
       and os.path.isfile(os.path.join(d, "PANEL_r1_SYNTHESIS.md")))
 
+
+# ── D2: upstream-ported guard behaviors (hardening plan 2026-07-17) ──
+
+def _mkws():
+    """minimal manifest+ssot workspace for split guard tests."""
+    w = tempfile.mkdtemp()
+    open(os.path.join(w, "m.yaml"), "w").write(
+        "project: {product: T, title: T, ssot: b.md, output_dir: outputs, doc_type: prd}\n"
+        "sections:\n  - {id: goals, title: \"목표\", status: approved}\n")
+    open(os.path.join(w, "b.md"), "w").write("# 목표\n\n본문\n")
+    return w
+
+def _split_run(w):
+    return subprocess.run([sys.executable, os.path.join(SCRIPTS, "split.py"), "m.yaml"],
+                          cwd=w, capture_output=True, text=True, timeout=30)
+
+w = _mkws()
+victim = os.path.join(w, "victim"); os.makedirs(victim)
+open(os.path.join(victim, ".docloop_output"), "w").close()
+open(os.path.join(victim, "keep.md"), "w").write("피해 대상")
+os.symlink(victim, os.path.join(w, "outputs"))
+r = _split_run(w)
+check("guard: symlink out_dir rejected (lexical islink)", r.returncode != 0 and "symlink" in r.stderr)
+check("guard: symlink target preserved", os.path.exists(os.path.join(victim, "keep.md")))
+
+# trailing-slash bypass variant — the exact upstream bug: 'outputs/' makes plain islink() False
+w = _mkws()
+victim2 = os.path.join(w, "victim2"); os.makedirs(victim2)
+open(os.path.join(victim2, ".docloop_output"), "w").close()
+open(os.path.join(victim2, "keep.md"), "w").write("피해 대상")
+os.symlink(victim2, os.path.join(w, "outputs"))
+open(os.path.join(w, "m.yaml"), "w").write(
+    "project: {product: T, title: T, ssot: b.md, output_dir: 'outputs/', doc_type: prd}\n"
+    "sections:\n  - {id: goals, title: \"목표\", status: approved}\n")
+r = _split_run(w)
+check("guard: trailing-slash symlink bypass rejected", r.returncode != 0 and "symlink" in r.stderr)
+check("guard: trailing-slash victim preserved", os.path.exists(os.path.join(victim2, "keep.md")))
+
+w = _mkws(); os.makedirs(os.path.join(w, "outputs"))
+open(os.path.join(w, "outputs", "precious.txt"), "w").write("보존")
+r = _split_run(w)
+check("guard: unmarked non-empty refused", r.returncode != 0)
+check("guard: refused dir contents preserved", open(os.path.join(w, "outputs", "precious.txt")).read() == "보존")
+
+w = _mkws(); r1 = _split_run(w); r2 = _split_run(w)
+check("guard: marked dir regenerated (rerun ok)", r1.returncode == 0 and r2.returncode == 0)
+
+w = _mkws(); os.makedirs(os.path.join(w, "outputs")); r = _split_run(w)
+check("guard: empty dir adopted", r.returncode == 0)
+
+w = _mkws(); os.makedirs(os.path.join(w, "outputs"))
+open(os.path.join(w, "outputs", ".other_tool_marker"), "w").close()
+r = _split_run(w)
+check("guard: foreign marker treated as unmarked non-empty", r.returncode != 0)
+check("guard: foreign-marker dir preserved", os.path.exists(os.path.join(w, "outputs", ".other_tool_marker")))
+
+for bad in ("", ".", "..", "a/b", "a\\b", "a\x00b", "/abs/x"):
+    w = _mkws(); os.makedirs(os.path.join(w, "outputs"))
+    r = subprocess.run([sys.executable, "-c",
+        f"import sys; sys.path.insert(0, {SCRIPTS!r}); import split; split.MARKER = {bad!r}; "
+        f"sys.argv = ['split.py', 'm.yaml']; split.main()"],
+        cwd=w, capture_output=True, text=True, timeout=30)
+    check(f"guard: invalid marker {bad!r} rejected via marker branch",
+          r.returncode != 0 and "invalid generation marker" in r.stderr)
+    check(f"guard: invalid marker {bad!r} left dir untouched", os.listdir(os.path.join(w, "outputs")) == [])
+
+for od in ("deep/outputs", "..", "."):
+    w = _mkws(); os.makedirs(os.path.join(w, "deep"), exist_ok=True)
+    open(os.path.join(w, "m.yaml"), "w").write(
+        f"project: {{product: T, title: T, ssot: b.md, output_dir: '{od}', doc_type: prd}}\n"
+        "sections:\n  - {id: goals, title: \"목표\", status: approved}\n")
+    r = _split_run(w)
+    check(f"guard: out_dir '{od}' rejected (boundary)", r.returncode != 0)
+
+import stage as ST
+w = tempfile.mkdtemp(); os.mkfifo(os.path.join(w, "p.fifo"))
+open(os.path.join(w, "ok.md"), "w").write("x")
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
+                    "p.fifo", "ok.md", "--dest", os.path.join(w, "d")],
+                   cwd=w, capture_output=True, text=True, timeout=15)
+check("stage guard: FIFO rejected via special-file branch (bounded)",
+      r.returncode == 0 and "not a regular file/directory" in r.stdout)
+check("stage guard: FIFO not staged", not os.path.exists(os.path.join(w, "d", "case", "p.fifo")))
+# ValueError 분기 실실행(r1-05): commonpath를 모킹해 예외 경로를 강제
+_orig_cp = os.path.commonpath
+def _raise(*a, **k):
+    raise ValueError("simulated cross-drive")
+os.path.commonpath = _raise
+try:
+    check("stage guard: _inside ValueError branch → outside", ST._inside("/a/b", "/a") is False)
+finally:
+    os.path.commonpath = _orig_cp
+# FIFO 단독(수락 0건) — 실패 exit + 새 폴더 정리(r1-06)
+w = tempfile.mkdtemp(); os.mkfifo(os.path.join(w, "only.fifo"))
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case0",
+                    "only.fifo", "--dest", os.path.join(w, "d")],
+                   cwd=w, capture_output=True, text=True, timeout=15)
+check("stage guard: zero-accepted (FIFO only) → nonzero exit", r.returncode != 0)
+check("stage guard: zero-accepted new folder cleaned", not os.path.exists(os.path.join(w, "d", "case0")))
+# worktree 경고 실단언(r1-06): git repo 안 dest → 경고 출력, 밖 → 없음
+wt = tempfile.mkdtemp(); subprocess.run(["git", "init", "-q", wt], capture_output=True)
+open(os.path.join(wt, "t.md"), "w").write("x")
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
+                    "t.md", "--dest", os.path.join(wt, "d")],
+                   cwd=wt, capture_output=True, text=True, timeout=15)
+check("stage guard: worktree warning emitted inside git", "inside a Git worktree" in r.stdout)
+nw = tempfile.mkdtemp()
+open(os.path.join(nw, "t.md"), "w").write("x")
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
+                    "t.md", "--dest", os.path.join(nw, "d")],
+                   cwd=nw, capture_output=True, text=True, timeout=15)
+check("stage guard: no worktree warning outside git", "inside a Git worktree" not in r.stdout)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

@@ -196,7 +196,14 @@ def main():
     if (os.path.dirname(abs_out) != abs_base
             or os.path.basename(abs_out) in ("", ".", "..")):
         sys.exit(f"[abort] output_dir safety check failed: '{out_dir}' — must be a dedicated subfolder directly under the manifest folder (symlinks checked by real path).")
-    if os.path.islink(out_dir):
+    # Marker must be a single filename component — an empty/'.'/'..'/separator marker
+    # would make any existing non-empty folder look "marked" and disable the rmtree guard.
+    if (not MARKER or MARKER in (".", "..") or os.path.isabs(MARKER)
+            or os.path.basename(MARKER) != MARKER or "/" in MARKER or "\\" in MARKER or "\x00" in MARKER):
+        sys.exit(f"[abort] invalid generation marker name: {MARKER!r} — must be a single filename component.")
+    # Lexically-normalized symlink check: 'alias/' or 'alias/.' would make islink(out_dir)
+    # return false and delegate rmtree to the symlink target (upstream-hardened guard).
+    if os.path.islink(os.path.normpath(os.path.abspath(out_dir))):
         sys.exit(f"[abort] output_dir '{out_dir}' is a symlink — rejected (boundary can't be guaranteed; use a real folder).")
     if os.path.isdir(abs_out):
         if os.path.exists(os.path.join(abs_out, MARKER)):
