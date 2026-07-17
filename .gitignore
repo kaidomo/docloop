@@ -21,6 +21,9 @@ reports/
 
 # peer-review staging artifacts (should never be in the repo)
 STAGE_MANIFEST.md
+REVIEW_BRIEF.md
 REVIEW_r*.md
 REVIEW_*.err
+PANEL_r*_*.yaml
+PANEL_r*_SYNTHESIS.md
 .omx/
