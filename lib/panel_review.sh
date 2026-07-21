@@ -17,6 +17,11 @@
 #   Custom roles: any [A-Za-z0-9_-] name (no duplicates) — define its contract in
 #   REVIEW_BRIEF.md (failure surface · key questions · evidence access · abstain conditions),
 #   or the evaluator will abstain for lack of a contract.
+#   Risk-signal for picking roles (advisory — not a fixed mapping, and not exclusive): if
+#   transcription accuracy (bulk-copying tables/records) is the main risk, prioritize `qa` as a
+#   candidate; if claim<->evidence loss (a derived claim/summary dropping the source's
+#   provenance/strength/freshness) is the main risk, consider an `evidence-auditor` custom role
+#   (contract in the brief) as a candidate. Combine with pm/be/designer per the risk — none is excluded.
 #   Output: PANEL_r<N>_<role>.yaml per role + PANEL_r<N>_SYNTHESIS.md (Area Chair).
 #   Synthesis reads exactly this round's role files (stale files from other runs are ignored).
 #
