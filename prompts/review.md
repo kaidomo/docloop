@@ -32,6 +32,26 @@ used/verified, **decisions already made** (so the reviewer won't relitigate them
 recorded once at brief creation, re-stated in `## Loop closed` for audit). Never
 overwrite an existing brief — rounds accumulate.
 
+**Packet hygiene (pre-flight).** Before handing the staged packet to the reviewer, verify it is
+self-contained and reproducible — the reviewer sees only what you stage, so a silent gap can make
+the review incomplete, unsupported, or wrong. This is an input-hygiene check on what you stage, a
+completeness guard, not a review rubric or lens. Check:
+- **claim → source inventory**: every key claim the review must judge has its source-of-truth
+  excerpt actually staged, not merely referenced by path.
+- **oral-decision provenance**: decisions made in conversation are captured with their source, not
+  asserted bare.
+- **absence claims carry search scope**: any "X does not exist / nothing does Y" states where and
+  how that was searched.
+- **generated stats carry inputs**: any count or metric preserves the input, command, and
+  assumptions so the reviewer can reproduce it.
+
+If an essential check fails, stop with `blocked_missing_input` (§6) or narrow the review scope —
+do not hand off a packet known to be missing evidence the review depends on. Disclosure-and-proceed
+(noting the gap in the brief) is only for explicitly nonessential gaps. This guard covers packet
+*completeness* only — it does not catch a citation that misquotes its source (that is the
+source-collation axis above) or a discarded option still lingering in a change log (an
+authoring-side propagation issue, upstream of review).
+
 ### 2) Invoke — run the reviewer command (you or the launcher run it)
 From the review folder:
 ```

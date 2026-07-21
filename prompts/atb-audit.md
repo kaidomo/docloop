@@ -48,6 +48,29 @@ completion gate (log the collation results into `reports/_ground_report.md`):
 4. **Insertion safety** — an insertion-type change (adding a row/block) must show **the original
    plus the new content together** in the to-be, presented as "leave it like this". Writing only
    the new row risks deleting the original if it is pasted in as a replacement.
+5. **Evidence-transfer fidelity** — when you carry evidence into a derived claim or a location,
+   preserve three properties that silently drop in transit.
+   - **provenance**: when you promote the source's own *judgement/label* (exception / temporary /
+     unresolved / technical-constraint) into a rule or to-be, confirm the label still holds under
+     the current definition (the as-is quote itself stays verbatim). If the document is old, check
+     the version history for whether the concept shifted after that phrasing was introduced.
+   - **modality**: when you carry over an investigation/review result, place the original verdict
+     and your sentence side by side and compare strength — do not raise ⚠️/❓→✅/❌,
+     conditional→assertion, or interpretation→fact. "only / all / no problem" must actually appear
+     in the source.
+   - **freshness**: re-confirm just-in-time only the *mutable locators you actually edit or verify
+     by* (line numbers, movable paths); revision-pinned permalinks and illustrative refs are exempt. On a
+     mismatch, replace with a string + section/symbol, and log the warning in the current
+     artifact / audit report (never edit the read-only source input).
+6. **Change-impact propagation** — when a decision / state / wording changes, update every place
+   that references, summarizes, or presupposes it.
+   - search the decision id or key phrase and sync the **summary / change-log / execution order /
+     DoD / downstream refs**, and confirm no discarded option still lingers.
+   - **structural summaries propagate too** — headings, lists, tables, and **count expressions**
+     ("2 gates"). If you add or drop a sub-item, fix the sentence that counts it.
+   - carry over any **linked / derivative edits** the source names (a regression this edit creates).
+   - a full re-read is conditional on long / high-risk work; a short propagation check (by
+     decision-id / key-phrase search) is the default.
 
 ## Output
 Run the report script (it lives in the docloop install, NOT in the work folder — use the lib
@@ -57,7 +80,12 @@ It writes `reports/_ground_report.md`. Equivalently, the launcher wraps this as 
 
 Add `--strict` before handoff: ungrounded to-be / untraceable to-be / missing order_rationale /
 missing as-is / pending chunks → exit 1. Then stop at the human gate — the human confirms the
-to-be direction and priority, and applies the fixes by hand. The script scaffolds the report;
+to-be direction and priority, and applies the fixes by hand.
+
+**`--strict` pass = a structure check** (field presence, reference integrity, evidence links) —
+it does NOT check semantic consistency, assertion strength, or self-contradiction. Those are the
+close-reading pass above (especially 5 evidence-transfer fidelity · 6 change-impact propagation)
+and the human audit. A green `--strict` (pending 0) does not mean the review is done. The script scaffolds the report;
 *you* verify as-is via the fan-out above and record `verified`/`sources` in the manifest.
 
 **Completion:** clearing the ground-audit *and* the close-reading pass above still leaves the

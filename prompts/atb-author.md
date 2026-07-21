@@ -39,4 +39,24 @@ human reads and applies by hand — not an agent handoff.
 - To-be is normative, not implementation-following. Forbidden words come from the change-plan policy.
 - Idempotent: re-running re-authors only chunks whose status/evidence changed.
 
+## Executable apply-instruction contract (execution-oriented output only)
+"Summarizing into" and "transcribing for paste" are different jobs easily done with the same
+hand. When the output is an instruction a human or agent executes verbatim — an apply-instruction,
+integration plan, or migration worklist (i.e. `consumer: agent` or an execution worklist, NOT a
+design/review as-is/to-be body) — it must satisfy an **executable contract**, not "force the full
+text". Per item:
+- **target location** + a **stable current anchor** (the current value string as-is; if the same
+  value occurs several times, disambiguate by task/class so the anchor search is unique).
+- an **exact replacement** (the finished substitute text) **or** a precise pointer to the single
+  canonical clause it is copied from (which file, which section). No ellipsis (`…`) and no
+  partial-edit instruction ("delete X → Y") — punctuation and context break.
+- a **source→target reconciliation** (census etc.) carries its scope and the **expected result**
+  (how many should change).
+- **placeholders / unconfirmed values** are marked (dates, dev-confirmation pending — not written
+  as if settled).
+- **derivative edits** and **dependent edits** (an atomic pair / a strict consecutive order) are shown.
+- the **DoD checks the source structure's unit/count is lossless** — for table/record
+  transcription, down to the **row and cell cardinality** of source vs target (cells, not just
+  rows); for a non-table worklist, by item count / dependency-pair count or whatever unit fits.
+
 Write the body to `project.ssot`, fill each authored chunk's `asis`/`tobe` and set its `status` to `draft`, and return a summary as your final message.

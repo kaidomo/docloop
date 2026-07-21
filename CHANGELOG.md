@@ -3,6 +3,29 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.8.0] — 2026-07-21
+### Added
+- **Change-plan audit gains two close-reading gates** (re-port from the canonical upstream
+  `asistobe-authoring` skill): `atb-audit` items 5) **evidence-transfer fidelity** — provenance /
+  modality / freshness, the three properties that silently drop when evidence is carried into a
+  derived claim or a locator — and 6) **change-impact propagation** — sync summaries / change-logs /
+  counts and confirm no discarded option lingers when a decision changes.
+- **Executable apply-instruction contract** in `atb-author` for execution-oriented output only:
+  stable anchors, an exact replacement or a canonical clause pointer (no ellipsis / partial-edit),
+  census + expected result, marked placeholders, dependent edits, and a row+cell-cardinality-
+  lossless DoD.
+- **Packet hygiene (pre-flight)** in `review` — before handing a staged packet to the reviewer,
+  verify it is self-contained/reproducible (claim→source inventory, oral-decision provenance,
+  absence-claim search scope, reproducible generated stats); an essential gap stops with
+  `blocked_missing_input`.
+- **Role-selection risk-signal** in `panel_review` (advisory): transcription-accuracy risk →
+  `qa` candidate; claim↔evidence-loss risk → an `evidence-auditor` candidate.
+### Notes
+- `--strict` clarified as a **structure check only** (not semantic consistency / assertion
+  strength / self-contradiction — those are the close-reading pass and human audit).
+- Semantic-port rows only; no blob/script logic changed (`check_ports` 0 failures against upstream
+  `main`). Codex re-port review r1 (3 fidelity findings applied). Tests 185/0.
+
 ## [0.7.0] — 2026-07-17
 ### Added
 - **Role-panel review (`docloop panel`)** — ported (downstream) from the canonical
