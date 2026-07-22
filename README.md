@@ -1,18 +1,22 @@
 # docloop
 
 **Write your planning docs, and docloop catches what's off — before your reviewer does.**
-Draft a PRD, a policy, or a change plan, then run docloop from the AI CLI you already
-use (`codex` or `claude -p`): it finds contradictions between documents, claims with no
-source behind them, and quotes that differ from the original — and reports them. Nothing
-is applied to the document unless you approve it.
+Draft a PRD, a policy, or a change plan, then run docloop in your terminal — it drives
+the AI CLI you already use (`codex` or `claude -p`) for you. It reports contradictions
+between your documents, flags change-plan claims that have no evidence behind them, and
+a companion check catches quotes that drifted from the original. Nothing is applied to
+the document unless you approve it.
 **기획 문서를 쓰면, 리뷰어보다 먼저 docloop이 어긋난 곳을 잡아준다.** PRD·정책서·변경계획을
-쓰고 나서 돌리면 — 문서끼리 모순, 출처 없는 주장, 원본과 다른 인용을 찾아 보고하고, 반영은
-당신이 승인한 것만 한다. 이미 쓰는 AI CLI(`codex` 또는 `claude -p`) 위에서 돈다.
+쓰고 나서 터미널에서 docloop을 돌리면 — 이미 쓰는 AI CLI(`codex` 또는 `claude -p`)는 docloop이
+대신 구동한다 — 문서끼리 모순을 보고하고, 변경계획의 근거 없는 주장을 표시하며, 동반 검사가
+원본과 달라진 인용을 잡는다. 반영은 당신이 승인한 것만 한다.
 
-> Under the hood: **a verification-first document kernel**. Writing has no single oracle,
-> so docloop checks only what can be checked, surfaces the gaps, and stops — judgment stays with the human.
-> 속은 **검증 우선 문서 커널**이다. 글에는 단일 오라클이 없으므로 검증 가능한 것만 점검해
-> 빈틈을 드러내고 멈춘다 — 판단은 사람의 몫이다.
+> Under the hood: **a verification-first document kernel**. Writing has no single oracle
+> (an automatic judge of "correct", the way a compiler judges code), so docloop checks only
+> what can be checked, surfaces the gaps, and stops — judgment stays with the human.
+> 속은 **검증 우선 문서 커널**이다. 글에는 단일 오라클(코드의 컴파일러처럼 "맞다"를 판정해
+> 주는 자동 심판)이 없으므로, 검증 가능한 것만 점검해 빈틈을 드러내고 멈춘다 — 판단은
+> 사람의 몫이다.
 
 ## What you can do · 뭘 할 수 있나
 
@@ -29,7 +33,7 @@ is applied to the document unless you approve it.
   quote against its source (spacing differences ignored) and flags the ones that
   drifted; run it alongside the gate.
   <br>**인용이 원본과 달라지면 잡는다** — 별도 검사가 인용을 출처와 대조해(띄어쓰기 차이는
-  무시) 어긋난 것을 표시한다. 게이트와 별도로 돌리는 검사다.
+  무시) 어긋난 것을 표시한다. 게이트와 나란히, 함께 돌려 쓰는 별도 검사다.
 - **Let an external AI attack your draft — and apply only what you approve** — every
   finding gets an ID and a keep/drop decision, and nothing lands in the document
   without your sign-off.
@@ -38,22 +42,24 @@ is applied to the document unless you approve it.
 - **Get the draft reviewed from several job perspectives at once** — PM · designer ·
   frontend · backend · QA by default (custom roles work too), each reviewing
   independently; a chair role sums them up with no averaging and no majority vote, so a
-  lone critical objection survives.
+  lone critical objection survives. The roles are AI passes, not human experts — treat
+  them as prepared perspectives; the decision stays with you.
   <br>**여러 직무의 눈으로 한 번에 검토받는다** — 기본 PM·디자이너·FE·BE·QA(커스텀 역할
   가능)가 각자 독립적으로 보고, 의장 역할이 종합한다(평균·다수결 없음) — 혼자 나온 치명적
-  지적도 살아남는다.
+  지적도 살아남는다. 역할들도 결국 AI가 관점을 나눠 본 것이지 사람 전문가가 아니다 —
+  준비된 관점으로 쓰고, 결정은 당신 몫이다.
 - **Keep "I knew it" honest** — seal a prediction before the result exists (`lock`),
   and check it was untouched when you open it (`verify`). A record for yourself — it
   judges nothing on its own.
   <br>**"그럴 줄 알았다"를 기록으로 남긴다** — 결과가 나오기 전에 예측을 봉인하고(`lock`),
   열어볼 때 그대로였는지 확인한다(`verify`). 스스로를 위한 기록이지, 그 자체로 판정하지
   않는다.
-- **Turn the checked master document into pages for Confluence and the like** — run the
-  checks (`gate`) first, then `split` cuts the pages from the one master copy;
-  regenerate the deliverables anytime.
-  <br>**검사를 통과시킨 정본 문서를 컨플루언스 등에 올릴 페이지로 쪼갠다** — 먼저 `gate`로
-  검사하고, `split`이 하나뿐인 정본에서 페이지를 잘라낸다 — 정본은 하나, 배포본은 언제든
-  재생성.
+- **Cut the master document into pages for Confluence and the like** — the intended
+  order is checks first (`gate`), then `split` cuts the pages from the one master copy
+  (the order is a workflow, not enforced by the tool); regenerate the deliverables anytime.
+  <br>**정본 문서를 컨플루언스 등에 올릴 페이지로 쪼갠다** — 의도된 순서는 먼저 `gate`로
+  검사, 그다음 `split`이 하나뿐인 정본에서 페이지를 잘라내는 것(도구가 강제하지는 않는다) —
+  정본은 하나, 배포본은 언제든 재생성.
 
 ## Get started · 시작하기
 
@@ -63,7 +69,7 @@ is applied to the document unless you approve it.
 git clone https://github.com/kaidomo/docloop && cd docloop
 pip install -r requirements.txt       # the one library the checks need (PyYAML)
 chmod +x bin/docloop
-export PATH="$PWD/bin:$PATH"          # make the docloop command available anywhere
+export PATH="$PWD/bin:$PATH"          # use docloop in this terminal session (add this line to your shell profile to keep it)
 export DOCLOOP_MODEL=codex            # which AI CLI docloop should drive: codex or claude
 ```
 
@@ -74,14 +80,14 @@ Requirements: Python 3 + PyYAML (`pip install -r requirements.txt`), and one of 
 ### Quick start · 빠른 시작
 
 ```bash
-docloop init ~/work/case-submission ./submission-policy.md   # make a work folder (your originals are not touched)
+docloop init ~/work/case-submission ./submission-policy.md   # make a work folder (the input files you pass are MOVED into its inputs/)
 cd ~/work/case-submission
 cp /path/to/docloop/templates/policy.example.yaml ./policy.yaml   # your org's document rules — edit to fit
 
 docloop plan  "PRD for the case submission flow"   # short interview: agree on what to write
 docloop draft                                       # write, using only what the sources support
 docloop audit                                       # find contradictions between documents
-docloop review case-submission ./PRD_*.md           # an external AI attacks the draft
+docloop review case-submission ./PRD_*.md           # set up the external-AI cross-review (it guides the attack run as the next step)
 docloop gate                                        # final check: unresolved problems block it
 docloop split                                       # cut the master doc into publish pages
 ```
@@ -90,9 +96,9 @@ docloop split                                       # cut the master doc into pu
 flowchart LR
   P["plan<br/>decide what to write (interview)<br/>뭘 쓸지 인터뷰로 정리"] --> D["draft<br/>write only what has evidence<br/>근거 있는 것만 쓴다"]
   D --> A["audit<br/>find contradictions between docs<br/>문서끼리 모순 찾기"]
-  A --> R["review<br/>external AI attacks the draft<br/>외부 AI가 초안 공격"]
+  A --> R["review<br/>external-AI cross-review (staged, then run)<br/>외부 AI 교차 리뷰(준비 후 실행)"]
   R --> G["gate<br/>block if problems remain<br/>안 풀린 문제 있으면 막기"]
-  G --> S["split<br/>passed doc → publish pages<br/>통과분을 배포 페이지로"]
+  G --> S["split<br/>master doc → publish pages<br/>정본을 배포 페이지로"]
 ```
 
 ## What's inside · 안에 있는 것
