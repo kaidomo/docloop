@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docloop — a thin writing harness.
+# docloop — a verification-first document kernel (thin launcher).
 #
 # It does NOT add a runtime or an agent. It wraps the model CLI you already use
 # (codex or claude -p) and feeds it docloop's stage prompts + your work-folder
@@ -49,7 +49,7 @@ stage_prompt() {
 
 usage() {
   cat <<EOF
-docloop — a thin writing harness (wraps codex / claude -p)
+docloop — a verification-first document kernel (wraps codex / claude -p)
 
   docloop init <folder> [inputs...]   scaffold a work folder (inputs/ work/ outputs/ reports/)
   docloop plan   [request...]         vague ask -> structured manifest (intake interview)
