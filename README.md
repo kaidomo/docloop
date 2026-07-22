@@ -1,51 +1,59 @@
 # docloop
 
-**A verification-first document kernel** — mechanical gates and model-assisted audits
-for documents (PRDs, specs, policies, change plans), wrapped around a model CLI you
-already use (`codex` or `claude -p`). The authoring layer is a client of the kernel,
-not the kernel itself.
-**검증 우선 문서 커널** — 문서(PRD·명세서·정책서·변경계획)를 위한 기계 게이트와 모델 보조
-감사를, 이미 쓰는 모델 CLI(`codex` 또는 `claude -p`) 위에 얹는다. 저작(글쓰기) 레이어는
-커널의 클라이언트이지 커널 자체가 아니다.
+**Write your planning docs, and docloop catches what's off — before your reviewer does.**
+Draft a PRD, a policy, or a change plan, then run docloop from the AI CLI you already
+use (`codex` or `claude -p`): it finds contradictions between documents, claims with no
+source behind them, and quotes that differ from the original — and reports them. Nothing
+is applied to the document unless you approve it.
+**기획 문서를 쓰면, 리뷰어보다 먼저 docloop이 어긋난 곳을 잡아준다.** PRD·정책서·변경계획을
+쓰고 나서 돌리면 — 문서끼리 모순, 출처 없는 주장, 원본과 다른 인용을 찾아 보고하고, 반영은
+당신이 승인한 것만 한다. 이미 쓰는 AI CLI(`codex` 또는 `claude -p`) 위에서 돈다.
 
-> **Writing has no single oracle** — so docloop is built the other way around: check what
-> can be checked (source-grounded accuracy, consistency, policy), surface the gaps, and
-> stop; judgment stays with the human. The kernel is the checking layer; authoring flows
-> are clients built on it.
-> **글에는 단일 오라클이 없다** — 그래서 docloop은 반대 방향으로 지어졌다. 검증 가능한 것
-> (출처 대비 정확성·정합·정책)만 점검해 빈틈을 드러내고 멈춘다. 판단은 사람의 몫이다.
-> 커널은 점검 레이어이고, 저작 플로우는 그 위에 지어진 클라이언트다.
+> Under the hood: **a verification-first document kernel**. Writing has no single oracle,
+> so docloop checks only what can be checked, surfaces the gaps, and stops — judgment stays with the human.
+> 속은 **검증 우선 문서 커널**이다. 글에는 단일 오라클이 없으므로 검증 가능한 것만 점검해
+> 빈틈을 드러내고 멈춘다 — 판단은 사람의 몫이다.
 
 ## What you can do · 뭘 할 수 있나
 
-- **Get a contradiction report across your PRD, storyboard, and manual** — gap-audit
-  fans out and reports where documents disagree (model-assisted).
-  <br>**PRD↔스토리보드↔매뉴얼의 불일치를 리포트로 받는다** — gap-audit이 팬아웃으로 문서 간
-  어긋남을 보고한다(모델 보조).
-- **Audit whether every as-is claim in a change plan has real evidence** — an as-is with
-  no source is blocked by ground-audit (change-plan mode).
-  <br>**변경계획의 as-is 주장마다 증거가 실존하는지 감사한다** — 출처 없는 as-is는
-  ground-audit이 막는다(변경계획 모드).
-- **Catch quotes that drift from their source** — whitespace-normalized verbatim
-  comparison flags drifted quotes (a separate check, run alongside the gate).
-  <br>**인용이 출처에서 어긋나면 잡는다** — 공백 정규화 기반 verbatim 대조가 어긋난 인용을
-  표시한다(게이트와 별도로 돌리는 검사).
-- **Have an external model attack your draft, and apply only what you approve** — the
-  review loop runs on finding IDs, triage, and a human approval gate.
-  <br>**외부 모델이 초안을 공격하고, 반영은 사람이 승인한 것만** — review 루프는 finding
-  ID·triage·사람 승인 게이트로 돈다.
-- **Get independent job-role reviews with conflicts preserved** — `panel` runs each role
-  as its own process; the Area Chair synthesis never averages or majority-votes.
-  <br>**직무 역할들이 독립적으로 뜯어본다(충돌 보존)** — `panel`은 역할마다 별도 프로세스로
-  돌리고, Area Chair 합성은 평균·다수결을 쓰지 않는다.
-- **Make "I knew it" falsifiable** — `lock` seals a prediction before the outcome exists;
-  `verify` re-hashes at reveal (diagnostic-only).
-  <br>**"그럴 줄 알았다"를 반증 가능하게 만든다** — `lock`이 결과가 나오기 전에 예측을
-  봉인하고, `verify`가 공개 시점에 재해시한다(진단 전용).
-- **Regenerate publish pages from approved sections** — run `gate` first, then `split`
-  rebuilds the publish pages from the SSOT.
-  <br>**승인된 섹션으로 배포 페이지를 재생성한다** — 먼저 `gate`를 통과시키고, `split`이
-  SSOT에서 배포 페이지를 다시 만든다.
+- **See where your PRD, storyboard, and manual disagree** — `audit` compares your
+  documents and reports the contradictions. An AI model does the reading, so treat the
+  report as a sharp-eyed assistant, not a verdict.
+  <br>**PRD·스토리보드·매뉴얼이 서로 어긋난 곳을 리포트로 받는다** — `audit`가 문서들을
+  대조해 모순을 보고한다. AI가 읽어서 찾는 것이므로, 판정이 아니라 검토 보조로 쓴다.
+- **Check that every "as-is" claim in a change plan has real evidence** — a claim with
+  no source behind it is blocked before the plan is handed off (change-plan mode).
+  <br>**변경계획의 as-is 주장마다 근거가 실제로 있는지 확인한다** — 출처 없는 주장은
+  계획을 넘기기 전에 걸린다(변경계획 모드).
+- **Catch quotes that no longer match the original** — a separate check compares each
+  quote against its source (spacing differences ignored) and flags the ones that
+  drifted; run it alongside the gate.
+  <br>**인용이 원본과 달라지면 잡는다** — 별도 검사가 인용을 출처와 대조해(띄어쓰기 차이는
+  무시) 어긋난 것을 표시한다. 게이트와 별도로 돌리는 검사다.
+- **Let an external AI attack your draft — and apply only what you approve** — every
+  finding gets an ID and a keep/drop decision, and nothing lands in the document
+  without your sign-off.
+  <br>**외부 AI가 초안을 공격하게 하고, 반영은 당신이 승인한 것만** — 지적마다 번호가 붙고
+  반영/기각을 정하며, 승인 없이는 문서에 들어가지 않는다.
+- **Get the draft reviewed from several job perspectives at once** — PM · designer ·
+  frontend · backend · QA by default (custom roles work too), each reviewing
+  independently; a chair role sums them up with no averaging and no majority vote, so a
+  lone critical objection survives.
+  <br>**여러 직무의 눈으로 한 번에 검토받는다** — 기본 PM·디자이너·FE·BE·QA(커스텀 역할
+  가능)가 각자 독립적으로 보고, 의장 역할이 종합한다(평균·다수결 없음) — 혼자 나온 치명적
+  지적도 살아남는다.
+- **Keep "I knew it" honest** — seal a prediction before the result exists (`lock`),
+  and check it was untouched when you open it (`verify`). A record for yourself — it
+  judges nothing on its own.
+  <br>**"그럴 줄 알았다"를 기록으로 남긴다** — 결과가 나오기 전에 예측을 봉인하고(`lock`),
+  열어볼 때 그대로였는지 확인한다(`verify`). 스스로를 위한 기록이지, 그 자체로 판정하지
+  않는다.
+- **Turn the checked master document into pages for Confluence and the like** — run the
+  checks (`gate`) first, then `split` cuts the pages from the one master copy;
+  regenerate the deliverables anytime.
+  <br>**검사를 통과시킨 정본 문서를 컨플루언스 등에 올릴 페이지로 쪼갠다** — 먼저 `gate`로
+  검사하고, `split`이 하나뿐인 정본에서 페이지를 잘라낸다 — 정본은 하나, 배포본은 언제든
+  재생성.
 
 ## Get started · 시작하기
 
@@ -53,10 +61,10 @@ not the kernel itself.
 
 ```bash
 git clone https://github.com/kaidomo/docloop && cd docloop
-pip install -r requirements.txt       # PyYAML (used by the lib/ scripts)
+pip install -r requirements.txt       # the one library the checks need (PyYAML)
 chmod +x bin/docloop
-export PATH="$PWD/bin:$PATH"          # or symlink bin/docloop onto your PATH
-export DOCLOOP_MODEL=codex            # or: claude   (default: codex)
+export PATH="$PWD/bin:$PATH"          # make the docloop command available anywhere
+export DOCLOOP_MODEL=codex            # which AI CLI docloop should drive: codex or claude
 ```
 
 Requirements: Python 3 + PyYAML (`pip install -r requirements.txt`), and one of the
@@ -66,31 +74,37 @@ Requirements: Python 3 + PyYAML (`pip install -r requirements.txt`), and one of 
 ### Quick start · 빠른 시작
 
 ```bash
-docloop init ~/work/case-submission ./submission-policy.md   # scaffold + isolate inputs
+docloop init ~/work/case-submission ./submission-policy.md   # make a work folder (your originals are not touched)
 cd ~/work/case-submission
-cp /path/to/docloop/templates/policy.example.yaml ./policy.yaml   # edit to your house style
+cp /path/to/docloop/templates/policy.example.yaml ./policy.yaml   # your org's document rules — edit to fit
 
-docloop plan  "PRD for the case submission flow"   # interview -> manifest
-docloop draft                                       # write grounded sections
-docloop audit                                       # find contradictions, report
-docloop review case-submission ./PRD_*.md           # attention test: external-model cross-review
-docloop gate                                        # release gate (strict)
-docloop split                                       # regenerate publish pages
+docloop plan  "PRD for the case submission flow"   # short interview: agree on what to write
+docloop draft                                       # write, using only what the sources support
+docloop audit                                       # find contradictions between documents
+docloop review case-submission ./PRD_*.md           # an external AI attacks the draft
+docloop gate                                        # final check: unresolved problems block it
+docloop split                                       # cut the master doc into publish pages
 ```
 
 ```mermaid
 flowchart LR
-  P["plan<br/>ask → manifest<br/>요구 → manifest"] --> D["draft<br/>writes from evidence<br/>근거로 작성"]
-  D --> A["audit<br/>catches contradictions<br/>모순을 잡는다"]
-  A --> R["review<br/>external model attacks<br/>외부 모델이 공격"]
-  R --> G["gate<br/>blocks unresolved gaps<br/>빈틈을 막는다"]
-  G --> S["split<br/>rebuild publish pages<br/>배포 페이지 재생성"]
+  P["plan<br/>decide what to write (interview)<br/>뭘 쓸지 인터뷰로 정리"] --> D["draft<br/>write only what has evidence<br/>근거 있는 것만 쓴다"]
+  D --> A["audit<br/>find contradictions between docs<br/>문서끼리 모순 찾기"]
+  A --> R["review<br/>external AI attacks the draft<br/>외부 AI가 초안 공격"]
+  R --> G["gate<br/>block if problems remain<br/>안 풀린 문제 있으면 막기"]
+  G --> S["split<br/>passed doc → publish pages<br/>통과분을 배포 페이지로"]
 ```
 
 ## What's inside · 안에 있는 것
 
 docloop adds **no new runtime and no new agent.** The value is in three things:
 docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
+
+(Two terms, once: the **kernel** is the checking layer everything else sits on; a
+**manifest** is the work-state file that records what the document promised and what
+was checked.)
+(용어 두 개만: **커널**=나머지가 그 위에 얹히는 점검 레이어. **manifest**=문서가 뭘
+약속했고 뭘 검사했는지 기록하는 작업 상태 파일.)
 
 1. **The checks & gates** (`lib/`) — fan-out audits (model-assisted: gap-audit for
    consistency, ground-audit for evidence grounding) feeding deterministic manifest
