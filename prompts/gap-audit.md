@@ -47,6 +47,45 @@ source. This is how you audit big inputs without a token blowout.
   expose to the gate. No auto-verdict.
 - **D/E ambiguous:** default to E (open_questions). No fake confirmation.
 
+## Read visibility — the report says what you actually compared
+
+The coverage warning only works at the **registration** layer: if a registered artifact is
+one you can't really read, you simply file fewer gaps and **nothing signals it**. To hold
+"what wasn't read is reported as not read" at the **reading** layer too, every agent that
+reads a downstream artifact writes **one line per downstream** (first line of
+`work/gaps-<source>.md` → folded into a "compared units" block of `reports/_gap_report.md`
+when you take it to the gate):
+
+```
+storyboard (case-submit.html): 12 screens identified · compared
+manual (manual.md): unit identification FAILED — compared at whole-document level only
+  ↳ Suggestion: a stable identifier per section would let this be compared unit by unit.
+     e.g. fix a number in the heading (`## [M-03] Submit`) or give it an id in front matter.
+     The storyboard in this repo exposes screen units via the `data-screen-id` attribute.
+```
+
+- Write **either the number of units you actually compared** (what you took as the unit, and
+  how many) **or "unit identification FAILED"**. If it's ambiguous, write FAILED — no fake success.
+- **The comparison scope does not change.** Comparing by unit only changes the **granularity
+  and the address** of the result — the whole-document scan for omissions is still performed.
+  Do NOT walk units only and skip document-level omissions (a whole clause dropped, a
+  requirement that exists in the PRD alone).
+- **There is no declaration schema.** The artifact does not declare how to cut it into units;
+  you read it and decide (the reader is a model, so a format declaration is mostly unnecessary
+  — the storyboard's `data-screen-id` exists for the **CSV parser**, not for the model).
+- **The suggestion (↳) is only for the FAILED case**, one line. It is **not a mandate, not a
+  schema, not a gate** — it's advice for a human to judge; adding it on success is noise. Cite
+  the repo's storyboard (`data-screen-id`) as a concrete example of good structure.
+- **State the limit in the report itself**: "this line is a **model report** — that this many
+  units were really compared is NOT mechanically guaranteed." (Overconfidence guard. If a
+  mechanical guarantee is ever needed, that's when a parser gets discussed.)
+
+Note that `gap_audit.py` counts downstream coverage as **readable real files** — registering a
+path that doesn't exist, or that points at a directory, counts 0 and keeps the cross-blind
+warning / `--strict-cross-audit` failure. Key names are irrelevant to coverage; the allowlist
+(`storyboard` / `manual_manifest` / `policy_docs`) only drives the typo warning. A registered
+downstream the script could not read is reported separately and fails `--strict-cross-audit`.
+
 ## Output
 Run the report script (it lives in the docloop install, NOT in the work folder —
 use the lib path given in this prompt's "Run context", e.g.
