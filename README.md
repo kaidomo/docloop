@@ -16,77 +16,35 @@ not the kernel itself.
 > (출처 대비 정확성·정합·정책)만 점검해 빈틈을 드러내고 멈춘다. 판단은 사람의 몫이다.
 > 커널은 점검 레이어이고, 저작 플로우는 그 위에 지어진 클라이언트다.
 
-docloop adds **no new runtime and no new agent.** The value is in three things:
-docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
+## What you can do · 뭘 할 수 있나
 
-1. **The checks & gates** (`lib/`) — fan-out audits (model-assisted: gap-audit for
-   consistency, ground-audit for evidence grounding) feeding deterministic manifest
-   validation, release gates, verbatim comparison, and prediction-file integrity
-   (lock/verify; diagnostic-only). Deterministic where applicable; otherwise fail-honest.
-   <br>**점검기와 게이트** (`lib/`) — 팬아웃 감사(모델 보조: 정합의 gap-audit, 증거 근거성의
-   ground-audit)가 결정론적 manifest 검증·릴리스 게이트·verbatim 대조·예측 파일 무결성
-   확인(lock/verify, 진단 전용)으로 이어진다. 가능한 점검은 결정론적으로 수행하고, 그렇지
-   않은 점검은 성공을 가장하지 않고 한계를 드러낸다.
-2. **The review protocols** — external-model cross-review (`prompts/review.md`: finding
-   IDs, triage, a human approval gate, explicit termination states) and role-panel review
-   (`panel`: independent role runs, Area Chair synthesis, human decision handoff).
-   <br>**리뷰 프로토콜** — 외부 모델 교차 리뷰(`prompts/review.md`: finding ID·triage·사람
-   승인 게이트·명시적 종료 상태)와 역할 패널 리뷰(`panel`: 독립 역할 실행·Area Chair 합성·
-   사람 결정 핸드오프).
-3. **The authoring pipelines** (`prompts/`) — the authoring layer is a client of the
-   kernel; it currently contains two pipelines: doc mode (plan → draft → audit → review →
-   gate → split) and change-plan mode (`atb-*`).
-   <br>**저작 파이프라인** (`prompts/`) — 저작 레이어는 커널의 클라이언트이며, 현재 두
-   파이프라인을 담는다: 문서 모드(plan → draft → audit → review → gate → split)와
-   변경계획 모드(`atb-*`).
-
-## Why documents need a verification kernel (not just a writing loop) · 왜 문서에는 (글쓰기 루프가 아니라) 검증 커널이 필요한가
-
-Coding harnesses work because code has an **oracle**: the compiler and the test suite
-tell you, objectively, whether the loop converged. An agent can grind away because
-something outside it can say "still wrong."
-코딩 하네스가 동작하는 것은 코드에 **Oracle**(정답 판정자)이 있기 때문이다 — 컴파일러와
-테스트가 루프의 수렴 여부를 객관적으로 알려준다. 에이전트 밖에서 "아직 틀렸다"고 말해 줄
-무언가가 있기에 루프를 계속 돌릴 수 있다.
-
-**Writing has no oracle.** There is no compiler for a PRD, so a naive
-"write → self-check → rewrite" loop just converges on its own confident prose.
-**글에는 Oracle이 없다.** PRD를 위한 컴파일러는 없으므로, 단순한 "작성 → 자가검토 → 재작성"
-루프는 스스로 확신에 찬 문장으로 수렴할 뿐이다.
-
-docloop's answer — and the reason its core is a verification kernel — is to split the problem:
-docloop의 해법은 — core가 검증 커널인 이유이기도 하다 — 문제를 둘로 쪼개는 것이다:
-
-- **What *can* be made convergent** — source-grounded accuracy (agreement with selected
-  sources), internal/cross-document consistency, policy compliance — is driven by loops
-  with real checks: gap-audit (fan-out consistency), scripted release gates, and an
-  **external model as independent pressure** (the review stage: Codex/Gemini/another Claude
-  attacks the draft — an *attention* test, not a *truth* test, since a second model shares
-  the first's blind spots). docloop detects drift from the selected sources; it does not
-  prove those sources are true or current.
-  <br>**수렴시킬 수 있는 것**(출처 대비 정확성=선택한 출처와의 일치, 문서 내·문서 간 정합, 정책 준수)은
-  실제 점검이 있는 루프로 돌린다: gap-audit(팬아웃 정합 점검), 스크립트 릴리스 게이트, 그리고 **외부
-  모델을 독립적 압력으로** 둔다(review 단계에서 Codex·Gemini·다른 Claude가 초안을 공격 — 두 번째 모델도
-  첫 모델의 맹점을 상당 부분 공유하므로 진짜 Oracle은 아니고, 정답 판정이 아니라 주의환기 점검).
-  docloop은 선택한 출처로부터의 드리프트를 잡을 뿐, 그 출처가 참이거나 최신임을 증명하지는 않는다.
-- **What can't** — voice, judgment, the actual decisions — stays **outside the loop,
-  with the human.** The kernel surfaces gaps and stops; it never manufactures consensus.
-  <br>**수렴시킬 수 없는 것**(문체, 판단, 실제 의사결정)은 **루프 밖, 사람의 몫**으로 둔다.
-  커널은 빈틈을 드러내고 멈출 뿐, 합의를 지어내지 않는다.
-
-See [`docs/design.md`](docs/design.md) for the full argument.
-전체 논의는 [`docs/design.md`](docs/design.md)에서 다룬다.
-
-## Where docloop draws the line · docloop이 긋는 선
-
-docloop owns only the shared validation/execution protocol kernel — manifest state, gap-audit,
-gate, split; org rules live in `policy.yaml`; the core imports no document type. See
-[`docs/design.md`](docs/design.md) for the full argument, and the **Direction (planned)**
-section below for the pieces that remain planned.
-
-docloop은 공용 검증/실행 프로토콜 커널만 소유한다 — manifest 상태, gap-audit, gate, split. 조직
-규칙은 `policy.yaml`에 두고, core는 어떤 문서 타입도 import하지 않는다. 전체 논의는
-[`docs/design.md`](docs/design.md), 아직 계획 단계인 조각들은 아래 **Direction(계획)** 섹션 참고.
+- **Get a contradiction report across your PRD, storyboard, and manual** — gap-audit
+  fans out and reports where documents disagree (model-assisted).
+  <br>**PRD↔스토리보드↔매뉴얼의 불일치를 리포트로 받는다** — gap-audit이 팬아웃으로 문서 간
+  어긋남을 보고한다(모델 보조).
+- **Audit whether every as-is claim in a change plan has real evidence** — an as-is with
+  no source is blocked by ground-audit (change-plan mode).
+  <br>**변경계획의 as-is 주장마다 증거가 실존하는지 감사한다** — 출처 없는 as-is는
+  ground-audit이 막는다(변경계획 모드).
+- **Catch a quote that drifts from its source by even one character** — verbatim
+  comparison feeds the release gate.
+  <br>**인용이 출처와 한 글자라도 다르면 잡는다** — verbatim 대조가 릴리스 게이트로 이어진다.
+- **Have an external model attack your draft, and apply only what you approve** — the
+  review loop runs on finding IDs, triage, and a human approval gate.
+  <br>**외부 모델이 초안을 공격하고, 반영은 사람이 승인한 것만** — review 루프는 finding
+  ID·triage·사람 승인 게이트로 돈다.
+- **Get independent job-role reviews with conflicts preserved** — `panel` runs each role
+  as its own process; the Area Chair synthesis never averages or majority-votes.
+  <br>**직무 역할들이 독립적으로 뜯어본다(충돌 보존)** — `panel`은 역할마다 별도 프로세스로
+  돌리고, Area Chair 합성은 평균·다수결을 쓰지 않는다.
+- **Make "I knew it" falsifiable** — `lock` seals a prediction before the outcome exists;
+  `verify` re-hashes at reveal (diagnostic-only).
+  <br>**"그럴 줄 알았다"를 반증 가능하게 만든다** — `lock`이 결과가 나오기 전에 예측을
+  봉인하고, `verify`가 공개 시점에 재해시한다(진단 전용).
+- **Ship only what passes the release gate** — `split` regenerates publish pages from
+  the SSOT.
+  <br>**릴리스 게이트 통과분만 배포 페이지로 분할한다** — `split`이 SSOT에서 배포 페이지를
+  재생성한다.
 
 ## Install · 설치
 
@@ -116,6 +74,74 @@ docloop review case-submission ./PRD_*.md           # attention test: external-m
 docloop gate                                        # release gate (strict)
 docloop split                                       # regenerate publish pages
 ```
+
+```mermaid
+flowchart LR
+  P["plan<br/>ask → manifest<br/>요구 → manifest"] --> D["draft<br/>writes from evidence<br/>근거로 작성"]
+  D --> A["audit<br/>catches contradictions<br/>모순을 잡는다"]
+  A --> R["review<br/>external model attacks<br/>외부 모델이 공격"]
+  R --> G["gate<br/>blocks unresolved gaps<br/>빈틈을 막는다"]
+  G --> S["split<br/>publish only past the gate<br/>통과분만 배포 분할"]
+```
+
+## What's inside · 안에 있는 것
+
+docloop adds **no new runtime and no new agent.** The value is in three things:
+docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
+
+1. **The checks & gates** (`lib/`) — fan-out audits (model-assisted: gap-audit for
+   consistency, ground-audit for evidence grounding) feeding deterministic manifest
+   validation, release gates, verbatim comparison, and prediction-file integrity
+   (lock/verify; diagnostic-only). Deterministic where applicable; otherwise fail-honest.
+   <br>**점검기와 게이트** (`lib/`) — 팬아웃 감사(모델 보조: 정합의 gap-audit, 증거 근거성의
+   ground-audit)가 결정론적 manifest 검증·릴리스 게이트·verbatim 대조·예측 파일 무결성
+   확인(lock/verify, 진단 전용)으로 이어진다. 가능한 점검은 결정론적으로 수행하고, 그렇지
+   않은 점검은 성공을 가장하지 않고 한계를 드러낸다.
+2. **The review protocols** — external-model cross-review (`prompts/review.md`: finding
+   IDs, triage, a human approval gate, explicit termination states) and role-panel review
+   (`panel`: independent role runs, Area Chair synthesis, human decision handoff).
+   <br>**리뷰 프로토콜** — 외부 모델 교차 리뷰(`prompts/review.md`: finding ID·triage·사람
+   승인 게이트·명시적 종료 상태)와 역할 패널 리뷰(`panel`: 독립 역할 실행·Area Chair 합성·
+   사람 결정 핸드오프).
+3. **The authoring pipelines** (`prompts/`) — the authoring layer is a client of the
+   kernel; it currently contains two pipelines: doc mode (plan → draft → audit → review →
+   gate → split) and change-plan mode (`atb-*`).
+   <br>**저작 파이프라인** (`prompts/`) — 저작 레이어는 커널의 클라이언트이며, 현재 두
+   파이프라인을 담는다: 문서 모드(plan → draft → audit → review → gate → split)와
+   변경계획 모드(`atb-*`).
+
+## Why documents need a verification kernel (not just a writing loop) · 왜 문서에는 (글쓰기 루프가 아니라) 검증 커널이 필요한가
+
+Coding loops converge because code has an **oracle** — the compiler and the tests say,
+objectively, "still wrong." Writing has none: there is no compiler for a PRD, so a naive
+"write → self-check → rewrite" loop just converges on its own confident prose. docloop's
+core is a verification kernel because it splits the problem: what *can* be checked
+(source-grounded accuracy, consistency, policy) runs in loops with real checks plus an
+external model as independent pressure — an *attention* test, not a *truth* test — while
+voice, judgment, and the actual decisions stay outside the loop, with the human. The
+kernel detects drift from the sources you selected and stops; it does not prove those
+sources true, and it never manufactures consensus.
+코딩 루프가 수렴하는 것은 코드에 **오라클**이 있기 때문이다 — 컴파일러와 테스트가 "아직
+틀렸다"를 객관적으로 말해 준다. 글에는 그것이 없다. PRD를 위한 컴파일러는 없으므로, 단순한
+"작성 → 자가검토 → 재작성" 루프는 스스로 확신에 찬 문장으로 수렴할 뿐이다. docloop의 core가
+검증 커널인 이유는 문제를 쪼개기 때문이다: 검증 *가능한* 것(출처 대비 정확성·정합·정책)은
+실제 점검과 외부 모델의 독립적 압력(정답 판정이 아니라 주의환기 점검)이 있는 루프로 돌리고,
+문체·판단·실제 의사결정은 루프 밖 사람의 몫으로 남긴다. 커널은 선택한 출처로부터의
+드리프트를 잡고 멈출 뿐, 출처가 참임을 증명하지도 않고 합의를 지어내지도 않는다.
+
+See [`docs/design.md`](docs/design.md) for the full argument.
+전체 논의는 [`docs/design.md`](docs/design.md)에서 다룬다.
+
+## Where docloop draws the line · docloop이 긋는 선
+
+docloop owns only the shared validation/execution protocol kernel — manifest state, gap-audit,
+gate, split; org rules live in `policy.yaml`; the core imports no document type. See
+[`docs/design.md`](docs/design.md) for the full argument, and the **Direction (planned)**
+section below for the pieces that remain planned.
+
+docloop은 공용 검증/실행 프로토콜 커널만 소유한다 — manifest 상태, gap-audit, gate, split. 조직
+규칙은 `policy.yaml`에 두고, core는 어떤 문서 타입도 import하지 않는다. 전체 논의는
+[`docs/design.md`](docs/design.md), 아직 계획 단계인 조각들은 아래 **Direction(계획)** 섹션 참고.
 
 ## The variable layer: `policy.yaml` · 가변층: `policy.yaml`
 
@@ -152,15 +178,6 @@ manifest 실행 경로는 여전히 계획 단계다. 그 목표에서
 문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에 두게 *될 것이고*, 선언형 조직 규칙은
 이미 `policy.yaml`에 있으며, core는 프로토콜만 소유하게 *될 것이다* — 경계 판정은 **core가 어떤
 문서 타입도 import하지 않는다**는 것이다.
-
-```mermaid
-flowchart TB
-  dom["domain pack / skill · 문서 특화 (planned)<br/>ontology · prompts · derivation · validators"]
-  pol["policy.yaml · 조직 규칙 (shipped)<br/>values · constraints"]
-  core["docloop core · 프로토콜 커널 (shipped)<br/>manifest · gap · gate · split"]
-  dom -.-> core
-  pol --> core
-```
 
 Two directions *would* follow. **Derivation** (PRD → storyboard → manual) *would not* be a
 core verb — a future domain pack *would* author a *derivation manifest* and the core's
