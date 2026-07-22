@@ -1,30 +1,46 @@
 # docloop
 
-**A thin writing harness for PM/spec documents** — it wraps a model CLI you already
-use (`codex` or `claude -p`) into a disciplined loop for writing, auditing, and
-cross-reviewing documents (PRDs, specs, policies).
-**PM·기획 문서(PRD·정책서 등)를 위한 얇은 글쓰기 하네스** — 이미 사용 중인 모델 CLI(`codex`
-또는 `claude -p`)를 감싸 문서를 작성·감사·교차 리뷰하는, 규율 있는 루프로 묶는다.
+**A verification-first document kernel** — mechanical gates and model-assisted audits
+for documents (PRDs, specs, policies, change plans), wrapped around a model CLI you
+already use (`codex` or `claude -p`). The authoring layer is a client of the kernel,
+not the kernel itself.
+**검증 우선 문서 커널** — 문서(PRD·명세서·정책서·변경계획)를 위한 기계 게이트와 모델 보조
+감사를, 이미 쓰는 모델 CLI(`codex` 또는 `claude -p`) 위에 얹는다. 저작(글쓰기) 레이어는
+커널의 클라이언트이지 커널 자체가 아니다.
 
-> **Writing has no single oracle** — docloop checks what can be checked (source-grounded
-> accuracy, consistency, policy), surfaces the gaps, and stops; judgment stays with the human.
->
-> **글에는 단일 오라클이 없다** — docloop은 검증 가능한 것(출처 대비 정확성·정합·정책)만 점검해
-> 빈틈을 드러내고 멈춘다. 판단은 사람의 몫으로 남는다.
+> **Writing has no single oracle** — so docloop is built the other way around: check what
+> can be checked (source-grounded accuracy, consistency, policy), surface the gaps, and
+> stop; judgment stays with the human. The kernel is the checking layer; authoring flows
+> are clients built on it.
+> **글에는 단일 오라클이 없다** — 그래서 docloop은 반대 방향으로 지어졌다. 검증 가능한 것
+> (출처 대비 정확성·정합·정책)만 점검해 빈틈을 드러내고 멈춘다. 판단은 사람의 몫이다.
+> 커널은 점검 레이어이고, 저작 플로우는 그 위에 지어진 클라이언트다.
 
 docloop adds **no new runtime and no new agent.** The value is in three things:
 docloop은 **새 런타임도 새 에이전트도 만들지 않는다.** 가치는 세 가지에 있다:
 
-1. **The prompts** (`prompts/`) — the pipeline: plan → draft → audit → review → gate → split
-   (`audit` runs the gap-audit machinery).
-   <br>**프롬프트** (`prompts/`) — 파이프라인: plan → draft → audit → review → gate → split
-   (`audit`는 gap-audit 기계를 돌린다).
-2. **The scripts** (`lib/`) — manifest validation, consistency reporting, release gates, publish split.
-   <br>**스크립트** (`lib/`) — manifest 검증, 정합성 리포트, 릴리스 게이트, 배포용 분할.
-3. **The loop discipline** — manifest-as-state, evidence-over-plausibility, and a human approval gate.
-   <br>**루프 규율** — manifest=상태, 그럴듯함보다 근거, 사람 승인 게이트.
+1. **The checks & gates** (`lib/`) — fan-out audits (model-assisted: gap-audit for
+   consistency, ground-audit for evidence grounding) feeding deterministic manifest
+   validation, release gates, verbatim comparison, and prediction-file integrity
+   (lock/verify; diagnostic-only). Deterministic where applicable; otherwise fail-honest.
+   <br>**점검기와 게이트** (`lib/`) — 팬아웃 감사(모델 보조: 정합의 gap-audit, 증거 근거성의
+   ground-audit)가 결정론적 manifest 검증·릴리스 게이트·verbatim 대조·예측 파일 무결성
+   확인(lock/verify, 진단 전용)으로 이어진다. 가능한 점검은 결정론적으로 수행하고, 그렇지
+   않은 점검은 성공을 가장하지 않고 한계를 드러낸다.
+2. **The review protocols** — external-model cross-review (`prompts/review.md`: finding
+   IDs, triage, a human approval gate, explicit termination states) and role-panel review
+   (`panel`: independent role runs, Area Chair synthesis, human decision handoff).
+   <br>**리뷰 프로토콜** — 외부 모델 교차 리뷰(`prompts/review.md`: finding ID·triage·사람
+   승인 게이트·명시적 종료 상태)와 역할 패널 리뷰(`panel`: 독립 역할 실행·Area Chair 합성·
+   사람 결정 핸드오프).
+3. **The authoring pipelines** (`prompts/`) — the authoring layer is a client of the
+   kernel; it currently contains two pipelines: doc mode (plan → draft → audit → review →
+   gate → split) and change-plan mode (`atb-*`).
+   <br>**저작 파이프라인** (`prompts/`) — 저작 레이어는 커널의 클라이언트이며, 현재 두
+   파이프라인을 담는다: 문서 모드(plan → draft → audit → review → gate → split)와
+   변경계획 모드(`atb-*`).
 
-## Why a *writing* harness differs from a coding one · 왜 글쓰기 하네스는 코딩 하네스와 다른가
+## Why documents need a verification kernel (not just a writing loop) · 왜 문서에는 (글쓰기 루프가 아니라) 검증 커널이 필요한가
 
 Coding harnesses work because code has an **oracle**: the compiler and the test suite
 tell you, objectively, whether the loop converged. An agent can grind away because
@@ -38,8 +54,8 @@ something outside it can say "still wrong."
 **글에는 Oracle이 없다.** PRD를 위한 컴파일러는 없으므로, 단순한 "작성 → 자가검토 → 재작성"
 루프는 스스로 확신에 찬 문장으로 수렴할 뿐이다.
 
-docloop's answer is to split the problem:
-docloop의 해법은 문제를 둘로 쪼개는 것이다:
+docloop's answer — and the reason its core is a verification kernel — is to split the problem:
+docloop의 해법은 — core가 검증 커널인 이유이기도 하다 — 문제를 둘로 쪼개는 것이다:
 
 - **What *can* be made convergent** — source-grounded accuracy (agreement with selected
   sources), internal/cross-document consistency, policy compliance — is driven by loops
@@ -54,22 +70,23 @@ docloop의 해법은 문제를 둘로 쪼개는 것이다:
   첫 모델의 맹점을 상당 부분 공유하므로 진짜 Oracle은 아니고, 정답 판정이 아니라 주의환기 점검).
   docloop은 선택한 출처로부터의 드리프트를 잡을 뿐, 그 출처가 참이거나 최신임을 증명하지는 않는다.
 - **What can't** — voice, judgment, the actual decisions — stays **outside the loop,
-  with the human.** The harness surfaces gaps and stops; it never manufactures consensus.
+  with the human.** The kernel surfaces gaps and stops; it never manufactures consensus.
   <br>**수렴시킬 수 없는 것**(문체, 판단, 실제 의사결정)은 **루프 밖, 사람의 몫**으로 둔다.
-  하네스는 빈틈을 드러내고 멈출 뿐, 합의를 지어내지 않는다.
+  커널은 빈틈을 드러내고 멈출 뿐, 합의를 지어내지 않는다.
 
 See [`docs/design.md`](docs/design.md) for the full argument.
 전체 논의는 [`docs/design.md`](docs/design.md)에서 다룬다.
 
 ## Where docloop draws the line · docloop이 긋는 선
 
-docloop owns only the shared protocol — manifest state, gap-audit, gate, split; org rules
-live in `policy.yaml`; the core imports no document type. See [`docs/design.md`](docs/design.md)
-for the full argument, and the **Direction (planned)** section below for where this is meant to go.
+docloop owns only the shared validation/execution protocol kernel — manifest state, gap-audit,
+gate, split; org rules live in `policy.yaml`; the core imports no document type. See
+[`docs/design.md`](docs/design.md) for the full argument, and the **Direction (planned)**
+section below for the pieces that remain planned.
 
-docloop은 공용 프로토콜만 소유한다 — manifest 상태, gap-audit, gate, split. 조직 규칙은 `policy.yaml`에
-두고, core는 어떤 문서 타입도 import하지 않는다. 전체 논의는 [`docs/design.md`](docs/design.md),
-지향점은 아래 **Direction(계획)** 섹션 참고.
+docloop은 공용 검증/실행 프로토콜 커널만 소유한다 — manifest 상태, gap-audit, gate, split. 조직
+규칙은 `policy.yaml`에 두고, core는 어떤 문서 타입도 import하지 않는다. 전체 논의는
+[`docs/design.md`](docs/design.md), 아직 계획 단계인 조각들은 아래 **Direction(계획)** 섹션 참고.
 
 ## Install · 설치
 
@@ -121,13 +138,17 @@ reviewer-eval gold set. The conditional-tense text below describes where those p
 변경계획 스테이지다. **계획이며 미구현:** domain-pack 로더, derivation manifest 실행 경로,
 reviewer-eval 골드셋. 아래 조건법 문장은 그 계획된 조각들이 어디로 갈지를 그린다.
 
-The intended shape is a **shared protocol kernel** rather than the single canonical engine
-behind a family of specialized authoring skills. In that target, document *meaning*
+The target shape is a **shared validation/execution protocol kernel** rather than the single
+canonical engine behind a family of specialized authoring skills. The shipped core already has
+the shared protocol-kernel boundary. The domain-pack loader and derivation-manifest execution
+path described below remain planned. In that target, document *meaning*
 (ontology, prompts, derivations) *would* live in domain packs/skills; declarative org rules
 already live in `policy.yaml`; the core *would* own only the protocol — the boundary test
 being that **core imports no document type**.
 
-지향하는 형태는 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 프로토콜 커널**이다. 그 목표에서
+목표 형태는 특화 스킬군의 유일한 정본 엔진이 아니라 **공용 검증/실행 프로토콜 커널**이다. 출시된
+core에는 공용 프로토콜 커널 경계가 이미 있다. 아래에 서술하는 domain-pack 로더와 derivation
+manifest 실행 경로는 여전히 계획 단계다. 그 목표에서
 문서의 *의미*(ontology·프롬프트·파생)는 domain pack/스킬에 두게 *될 것이고*, 선언형 조직 규칙은
 이미 `policy.yaml`에 있으며, core는 프로토콜만 소유하게 *될 것이다* — 경계 판정은 **core가 어떤
 문서 타입도 import하지 않는다**는 것이다.
@@ -243,7 +264,7 @@ bin/docloop          thin launcher (wraps codex / claude -p)
 prompts/             stage prompts — doc mode: plan/draft/gap-audit/review · change-plan mode: atb-capture/atb-chunk/atb-author/atb-audit
 lib/                 python scripts: init, validate, gap_audit, ground_audit, split, approval_brief, stage, ...
 templates/           policy + manifest skeletons (doc + .atb change-plan variants), review-brief template
-docs/design.md       why writing harnesses differ from coding harnesses; design decisions (protocol kernel, reviewer-eval)
+docs/design.md       why documents need a verification kernel (not just a writing loop); design decisions (protocol kernel, reviewer-eval)
 docs/reviewer-eval-bootstrap.md   bootstrapping a reviewer-quality gold set from review residue · 리뷰 잔여물에서 리뷰어 골드셋 부트스트랩
 docs/reviewer-lens-set.md         document-review lenses harvested from PM skills (55 → 73 criteria) · PM 스킬에서 하베스트한 문서 리뷰 렌즈
 docs/cold-start-strategies.md     initial evidence-acquisition patterns for authoring · 저작 초기 증거 획득 패턴
