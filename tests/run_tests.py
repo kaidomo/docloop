@@ -541,16 +541,18 @@ rep = open(os.path.join(ga_pend, "reports", "_gap_report.md"), encoding="utf-8")
 check("gap_audit: 0 sources + all pending → no cross-blind warning (no misleading context)",
       "Cross-consistency not run" not in rep)
 
-# downstream only registered (0 sources) + draft section → no warning, coverage counts downstream (peer r1 test-gap)
+# downstream only registered (0 sources, real file) + draft section → no warning, coverage counts downstream (peer r1 test-gap)
 ga_ds = tempfile.mkdtemp()
+open(os.path.join(ga_ds, "sb.html"), "w").write("<html><body data-screen-id='S-01'></body></html>\n")
 open(os.path.join(ga_ds, "manifest.yaml"), "w").write(
     "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
-    "  downstream: {storyboard: ../sb.html}\n"
+    "  downstream: {storyboard: ./sb.html}\n"
     "sections:\n  - {id: a, title: \"A\", status: draft, sources: [k]}\n")
 r = run_ga(ga_ds)
 rep = open(os.path.join(ga_ds, "reports", "_gap_report.md"), encoding="utf-8").read()
 check("gap_audit: downstream only + draft → no warning + coverage downstream 1",
       "Cross-consistency not run" not in rep and "**0** source path(s) + **1** downstream target(s)" in rep)
+check("gap_audit: readable downstream → no 'could not be read' warning", "could not be read" not in rep)
 
 # empty list value → coverage 0 → cross-blind warning (peer r1 test-gap)
 ga_empty = tempfile.mkdtemp()
@@ -617,6 +619,101 @@ r = run_ga(ga_typo)
 rep = open(os.path.join(ga_typo, "reports", "_gap_report.md"), encoding="utf-8").read()
 check("gap_audit: typo'd source key not counted (coverage 0, cross-blind warns)",
       "**0** source path(s)" in rep and "Cross-consistency not run" in rep)
+
+# ── gap_audit.py: downstream coverage = "readable real files" ──
+# The counting basis moves from *number of path strings* to *number of existing regular files*.
+# Key names are irrelevant (the typo warning stays), missing files/directories count 0, duplicates count 1.
+def _mk_ga(project_extra, files=(), dirs=(), status="approved"):
+    d = tempfile.mkdtemp()
+    for f in files:
+        p = os.path.join(d, f)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write("x\n")
+    for sub in dirs:
+        os.makedirs(os.path.join(d, sub), exist_ok=True)
+    open(os.path.join(d, "manifest.yaml"), "w").write(
+        "project:\n  doc_type: PRD\n  product: P\n  title: P\n  ssot: PRD.md\n  output_dir: outputs\n"
+        + project_extra +
+        f"sections:\n  - {{id: a, title: \"A\", status: {status}, sources: [k]}}\n")
+    return d
+
+
+def _rep(d):
+    return open(os.path.join(d, "reports", "_gap_report.md"), encoding="utf-8").read()
+
+
+# (1) unknown/typo'd key + a real file → counted. The typo warning stays
+#     (the allowlist is typo defence, not a counting restriction).
+ga_unknown = _mk_ga("  downstream: {storyboard_html: ./sb.html}\n", files=["sb.html"])
+r = run_ga(ga_unknown)
+rep = _rep(ga_unknown)
+check("gap_audit: unregistered downstream key + real file → counted 1 (key name irrelevant)",
+      "**1** downstream target(s)" in rep and "Cross-consistency not run" not in rep)
+check("gap_audit: unknown downstream key still warns (counted, but warned)",
+      "unknown key 'storyboard_html'" in r.stderr)
+
+# (2) registered but the file doesn't exist → count 0 → cross-blind warning + --strict-cross-audit failure
+#     (counting declarations would make coverage 1 with no file and defeat the warning/gate)
+ga_missing = _mk_ga("  downstream: {storyboard: ./gone.html}\n")
+r = run_ga(ga_missing)
+rep = _rep(ga_missing)
+check("gap_audit: registered downstream with no file → count 0 + cross-blind warning",
+      "**0** downstream target(s)" in rep and "Cross-consistency not run" in rep)
+r = run_ga(ga_missing, "--strict-cross-audit")
+check("gap_audit: missing downstream file fails --strict-cross-audit",
+      r.returncode != 0 and "cross-audit not run" in (r.stdout + r.stderr))
+
+# (3) same file registered twice (different spellings) → counted 1 (no inflation)
+ga_dup = _mk_ga("  downstream:\n    storyboard: ./sb.html\n    policy_docs: [sb.html, ./sb.html]\n",
+                files=["sb.html"])
+r = run_ga(ga_dup)
+check("gap_audit: duplicate downstream paths → counted 1", "**1** downstream target(s)" in _rep(ga_dup))
+
+# (4) directory path → count 0 (regular files only — a directory is not a cross-check target file)
+ga_dir = _mk_ga("  downstream: {policy_docs: ./policies}\n", dirs=["policies"])
+r = run_ga(ga_dir)
+rep = _rep(ga_dir)
+check("gap_audit: downstream directory path → count 0 + cross-blind warning",
+      "**0** downstream target(s)" in rep and "Cross-consistency not run" in rep)
+
+# (5) regression: the three known keys · str + list[str] · all real files → unchanged (3),
+#     with relative paths resolved against the manifest file (not cwd)
+ga_legacy = _mk_ga(
+    "  downstream:\n    storyboard: sb/case.html\n    manual_manifest: ./manual/manifest.yaml\n"
+    "    policy_docs: [\"docs/../docs/policy.md\"]\n",
+    files=["sb/case.html", "manual/manifest.yaml", "docs/policy.md"])
+r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "gap_audit.py"),
+                    os.path.join(ga_legacy, "manifest.yaml")],
+                   cwd=tempfile.mkdtemp(), capture_output=True, text=True)   # cwd-independent
+rep = _rep(ga_legacy)
+check("gap_audit: three known keys (str+list, 3 real files) → counted 3 (regression, cwd-independent)",
+      r.returncode == 0 and "**3** downstream target(s)" in rep and "Cross-consistency not run" not in rep)
+
+# (6) sources registered (aggregate > 0) but a registered downstream can't be read →
+#     surfaced per item in the report + coverage line + stderr, and fails --strict-cross-audit.
+#     Counting alone would leave this silent: n_src + n_ds > 0 means cross_blind never fires.
+ga_mix = _mk_ga("  sources: {code_roots: [\"./code\"]}\n  downstream: {storyboard: ./vanished.html}\n",
+                files=["code/a.py"])
+r = run_ga(ga_mix, "--strict-cross-audit")
+rep = _rep(ga_mix)
+check("gap_audit: unreadable downstream surfaced even when sources exist",
+      "could not be read" in rep and "vanished.html" in rep)
+check("gap_audit: unreadable downstream also shown on the coverage line",
+      "⚠️ 1 unreadable downstream" in rep)
+check("gap_audit: unreadable downstream warns on stderr",
+      "1 registered downstream target(s) unreadable" in r.stderr)
+check("gap_audit: unreadable downstream fails --strict-cross-audit even with sources",
+      r.returncode != 0 and "downstream unreadable" in (r.stdout + r.stderr))
+check("gap_audit: unreadable downstream is not cross-blind (aggregate > 0 → separate warning)",
+      "Cross-consistency not run" not in rep)
+
+# (7) wording: with 0 cross-check targets the coverage line says "0 cross-check targets", not "none registered"
+#     (one entry was registered — "none registered" reads as a literal falsehood)
+ga_word = _mk_ga("  downstream: {storyboard: ./gone.html}\n")
+r = run_ga(ga_word)
+rep = _rep(ga_word)
+check("gap_audit: coverage line says '0 cross-check targets', not 'none registered'",
+      "⚠️ 0 cross-check targets" in rep and "none registered" not in rep)
 
 # ── silent-omission hardening (v0.1.2): verbatim_check + score_report ──
 # verbatim: 0 quotes → --strict passes but warns "nothing verified" (vacuous-pass guard)
