@@ -64,7 +64,7 @@ flowchart LR
 ## 더 알아보기
 
 - [`docs/change-plan-mode.md`](docs/change-plan-mode.md) — 이미 있는 시스템의 수정을 계획하는 as-is/to-be 파이프라인(`atb-*`).
-- [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — 역할 패널 리뷰(`panel`)와 예측 봉인(`lock` / `verify`).
+- [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — 초안을 여러 직무 관점에서 한 번에 검토받고(`panel`), 결과가 나오기 전에 예측을 못 박아 둔다(`lock` / `verify`).
 - [`docs/policy-layer.md`](docs/policy-layer.md) — 조직 문서 규칙을 담는 한 파일(`policy.yaml`).
 - [`docs/direction.md`](docs/direction.md) — 지금 안에 있는 것, 그리고 계획이지만 미출시인 것.
 - [`docs/design.md`](docs/design.md) — 왜 문서에는 검증 커널이 필요한가, docloop이 긋는 선.

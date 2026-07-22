@@ -66,7 +66,7 @@ flowchart LR
 ## Learn more
 
 - [`docs/change-plan-mode.md`](docs/change-plan-mode.md) — the as-is/to-be pipeline (`atb-*`) for planning fixes to a system that already exists.
-- [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — role-panel review (`panel`) and sealed predictions (`lock` / `verify`).
+- [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — get the draft read from several job angles at once (`panel`), and pin down a prediction before the result exists (`lock` / `verify`).
 - [`docs/policy-layer.md`](docs/policy-layer.md) — the one file (`policy.yaml`) that holds your org's document rules.
 - [`docs/direction.md`](docs/direction.md) — what's inside today, and what is planned but not shipped.
 - [`docs/design.md`](docs/design.md) — why documents need a verification kernel, and where docloop draws the line.
