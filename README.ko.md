@@ -3,11 +3,11 @@
 English: [README.md](README.md)
 
 **기획 문서를 쓰면, 리뷰어보다 먼저 docloop이 어긋난 곳을 잡아준다.**
-PRD·정책서·변경계획을 쓰고 나서 터미널에서 docloop을 돌리면 — 이미 쓰는 AI CLI(`codex`
-또는 `claude -p`)는 docloop이 대신 구동한다 — 반영은 당신이 승인한 것만 한다.
+PRD·정책서·변경계획을 쓰고 나서 터미널에서 docloop을 돌린다. 이미 쓰는 AI CLI(`codex`
+또는 `claude -p`)는 docloop이 대신 구동하고, 문서에는 당신이 승인한 내용만 반영된다.
 
-> 속은 검증 우선 문서 커널 — 검증 가능한 것만 점검해 빈틈을 드러내고 멈춘다. 판단은
-> 사람의 몫이다. 왜 그런지는: [`docs/design.md`](docs/design.md).
+> 속은 이렇다: 검증 가능한 것만 점검해 빈틈을 드러내고 멈춘다 — 판단은 사람의 몫이다.
+> 이 방식의 이름이 **검증 우선 문서 커널**이다. 왜 그런지는: [`docs/design.md`](docs/design.md).
 
 ## 뭘 할 수 있나
 
