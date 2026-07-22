@@ -1,4 +1,4 @@
-# docloop 재포지셔닝 계획: writing harness → verification kernel (v3 — r1 9건 + 실용 우선 가독성)
+# docloop 재포지셔닝 계획: writing harness → verification kernel (v4 — 독자=기획자 언어)
 
 > 작성: 2026-07-22 (Claude Code). 개정: 같은 날, 계획 리뷰 r1 9건 반영(v2) → 메인테이너 지시로
 > **실용 우선 가독성 원칙** 추가(v3): "철학은 어느 정도만, 실제로 뭘 할 수 있는지가 잘 드러나게."
@@ -29,6 +29,17 @@
     plan → draft → audit → review → gate → split에 각 단계가 "뭘 잡는지" 짧은 라벨.
     다이어그램은 1개만, 전문용어 최소화.
   - Direction(계획) 절은 유지하되 아래쪽 그대로, 분량 증가 금지.
+- **독자 페르소나 (v4, 메인테이너 지시)**: 문서를 쓰는 사람 = **AI CLI(Claude Code/Codex)를
+  쓰는 기획자**. 규칙:
+  - **첫 화면(정체성~Quick start)에서 엔지니어 어휘 추방**: kernel·manifest·SSOT·fan-out·
+    deterministic·scaffold 등은 첫 화면에서 쓰지 않거나 기획자 말로 번역(SSOT→정본 문서,
+    manifest→작업 상태 파일 등). PM 어휘(PRD·스토리보드·매뉴얼·정본·컨플루언스)는 그대로.
+  - 정체성 리드는 혜택 문장으로: "기획 문서를 쓰면, 리뷰어보다 먼저 docloop이 어긋난 곳을
+    잡아준다" 톤. kernel 정체성 문장은 그 아래 한 줄(기술 독자용)로 강등.
+  - mermaid 라벨도 기획자 언어("plan: 뭘 쓸지 인터뷰로 정리" 톤).
+  - What's inside 이하 기술 절에서는 kernel/기술 용어 허용(정체성 유지) — 단 첫 등장 시
+    한 줄 풀이. 영어판도 동일 원칙(PM이 읽는 영어).
+  - 과잉 주장 금지 원칙은 그대로 — 쉬운 말이 곧 더 센 주장이 되지 않게(r2-01·02 완화 유지).
 - 용어 계약(r1-04): **authoring layer가 커널의 client**이고, 그 layer 안에 pipeline이 둘(doc
   mode·change-plan mode) 있다. "client"를 파이프라인·consumer role의 뜻으로 혼용하지 않는다.
   design.md의 authoring/evaluator consumer role 구분은 그대로 둔다.
