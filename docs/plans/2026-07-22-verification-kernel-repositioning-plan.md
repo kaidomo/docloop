@@ -1,6 +1,7 @@
-# docloop 재포지셔닝 계획: writing harness → verification kernel (v2 — Codex 계획 리뷰 r1 반영)
+# docloop 재포지셔닝 계획: writing harness → verification kernel (v3 — r1 9건 + 실용 우선 가독성)
 
-> 작성: 2026-07-22 (Claude Code). 개정: 같은 날, 계획 리뷰 r1 9건 전부 반영.
+> 작성: 2026-07-22 (Claude Code). 개정: 같은 날, 계획 리뷰 r1 9건 반영(v2) → 메인테이너 지시로
+> **실용 우선 가독성 원칙** 추가(v3): "철학은 어느 정도만, 실제로 뭘 할 수 있는지가 잘 드러나게."
 > 배경: 2026-07-22 인벤토리에서 repo의 50%(18/36)가 리뷰/검증 자산이고 그중 기계 게이트·감사(9)가
 > 리뷰 루프(4)보다 두꺼움을 확인. README는 "thin writing harness"로 자칭하지만 design.md 결정
 > 기록은 이미 "shared validation/execution protocol kernel"로 자기규정 — 이 균열을 해소하고
@@ -14,6 +15,20 @@
   audit처럼 모델 fan-out이 수행하는 감사는 model-assisted로 명시**(r1-02) — 감사 수행과
   결과 게이트를 구분해 서술한다.
 - 이중언어(영·한) 병기 스타일 유지. 의미 parity 우선(r1-09).
+- **실용 우선 가독성 (v3, 메인테이너 지시)**:
+  - 정체성 블록 직후에 **"What you can do · 뭘 할 수 있나"** 절 신설 — 결과 중심 bullet 5~7개
+    (예: "PRD↔스토리보드↔매뉴얼 불일치를 리포트로 받는다(gap-audit)", "as-is 주장마다 증거가
+    실존하는지 감사한다(ground-audit)", "인용이 출처와 한 글자라도 다르면 게이트가 막는다
+    (verbatim)", "외부 모델이 초안을 공격하고, 반영은 사람이 승인한 것만(review 루프)",
+    "5개 직무 역할이 독립적으로 뜯어본다(panel)", "릴리스 게이트 통과분만 배포 페이지로
+    분할(split)"). 각 bullet은 기능명이 아니라 **얻는 결과**로 시작.
+  - **Quick start를 위로**: 정체성 블록 + What-you-can-do 바로 다음. 철학보다 먼저.
+  - **철학 압축**: 오라클 논증 절("Why documents need…")은 핵심 3~4문장으로 줄이고 상세는
+    design.md 링크로 위임. 인용 블록도 2줄 이내.
+  - **mermaid 단순화**: 추상 레이어 다이어그램(dom/pol/core) 대신 **실사용 흐름 하나** —
+    plan → draft → audit → review → gate → split에 각 단계가 "뭘 잡는지" 짧은 라벨.
+    다이어그램은 1개만, 전문용어 최소화.
+  - Direction(계획) 절은 유지하되 아래쪽 그대로, 분량 증가 금지.
 - 용어 계약(r1-04): **authoring layer가 커널의 client**이고, 그 layer 안에 pipeline이 둘(doc
   mode·change-plan mode) 있다. "client"를 파이프라인·consumer role의 뜻으로 혼용하지 않는다.
   design.md의 authoring/evaluator consumer role 구분은 그대로 둔다.
