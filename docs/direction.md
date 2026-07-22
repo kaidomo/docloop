@@ -3,6 +3,16 @@
 > Moved from README (2026-07-22). The "What's inside" and "Layout" sections at the bottom
 > were moved here from README in the same pass.
 
+**Short version:** what docloop ships today is the checking-and-gates core plus your
+`policy.yaml` rules file — that's it. A few larger ideas are designed but **not built**:
+loading document types as plug-in packs, generating one document from another, and grading
+the AI reviewer against expert judgment. Read this page as a roadmap, not a feature list —
+anything written in "would" below does not exist yet.
+**한 줄 요약:** 지금 출시된 것은 점검·게이트 코어와 `policy.yaml` 규칙 파일뿐이다. 문서 타입을
+플러그인 팩으로 불러오기, 한 문서에서 다른 문서를 뽑아내기, AI 리뷰어를 전문가 판단 대비로
+채점하기 — 이 셋은 설계만 되어 있고 **아직 만들지 않았다**. 이 문서는 기능 목록이 아니라
+로드맵으로 읽으면 된다. 아래에서 "될 것이다"로 쓰인 것은 아직 없는 것이다.
+
 This section is design direction, not a feature list. **Current:** the protocol-kernel
 boundary and the `policy.yaml` variable layer — the shipped verb set is `init · plan ·
 draft · audit · review · panel · lock · verify · gate · split` plus the `atb-*` change-plan stages. **Planned,
