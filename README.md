@@ -26,9 +26,10 @@ not the kernel itself.
   no source is blocked by ground-audit (change-plan mode).
   <br>**변경계획의 as-is 주장마다 증거가 실존하는지 감사한다** — 출처 없는 as-is는
   ground-audit이 막는다(변경계획 모드).
-- **Catch a quote that drifts from its source by even one character** — verbatim
-  comparison feeds the release gate.
-  <br>**인용이 출처와 한 글자라도 다르면 잡는다** — verbatim 대조가 릴리스 게이트로 이어진다.
+- **Catch quotes that drift from their source** — whitespace-normalized verbatim
+  comparison flags drifted quotes (a separate check, run alongside the gate).
+  <br>**인용이 출처에서 어긋나면 잡는다** — 공백 정규화 기반 verbatim 대조가 어긋난 인용을
+  표시한다(게이트와 별도로 돌리는 검사).
 - **Have an external model attack your draft, and apply only what you approve** — the
   review loop runs on finding IDs, triage, and a human approval gate.
   <br>**외부 모델이 초안을 공격하고, 반영은 사람이 승인한 것만** — review 루프는 finding
@@ -41,12 +42,14 @@ not the kernel itself.
   `verify` re-hashes at reveal (diagnostic-only).
   <br>**"그럴 줄 알았다"를 반증 가능하게 만든다** — `lock`이 결과가 나오기 전에 예측을
   봉인하고, `verify`가 공개 시점에 재해시한다(진단 전용).
-- **Ship only what passes the release gate** — `split` regenerates publish pages from
-  the SSOT.
-  <br>**릴리스 게이트 통과분만 배포 페이지로 분할한다** — `split`이 SSOT에서 배포 페이지를
-  재생성한다.
+- **Regenerate publish pages from approved sections** — run `gate` first, then `split`
+  rebuilds the publish pages from the SSOT.
+  <br>**승인된 섹션으로 배포 페이지를 재생성한다** — 먼저 `gate`를 통과시키고, `split`이
+  SSOT에서 배포 페이지를 다시 만든다.
 
-## Install · 설치
+## Get started · 시작하기
+
+### Install · 설치
 
 ```bash
 git clone https://github.com/kaidomo/docloop && cd docloop
@@ -60,7 +63,7 @@ Requirements: Python 3 + PyYAML (`pip install -r requirements.txt`), and one of 
 `codex` or `claude` CLIs on your PATH.
 필요 사항: Python 3 + PyYAML, 그리고 `codex` 또는 `claude` CLI 중 하나가 PATH에 있어야 한다.
 
-## Quick start · 빠른 시작
+### Quick start · 빠른 시작
 
 ```bash
 docloop init ~/work/case-submission ./submission-policy.md   # scaffold + isolate inputs
@@ -81,7 +84,7 @@ flowchart LR
   D --> A["audit<br/>catches contradictions<br/>모순을 잡는다"]
   A --> R["review<br/>external model attacks<br/>외부 모델이 공격"]
   R --> G["gate<br/>blocks unresolved gaps<br/>빈틈을 막는다"]
-  G --> S["split<br/>publish only past the gate<br/>통과분만 배포 분할"]
+  G --> S["split<br/>rebuild publish pages<br/>배포 페이지 재생성"]
 ```
 
 ## What's inside · 안에 있는 것

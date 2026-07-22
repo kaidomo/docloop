@@ -3,7 +3,7 @@
 > 작성: 2026-07-22 (Claude Code). 개정: 같은 날, 계획 리뷰 r1 9건 반영(v2) → 메인테이너 지시로
 > **실용 우선 가독성 원칙** 추가(v3): "철학은 어느 정도만, 실제로 뭘 할 수 있는지가 잘 드러나게."
 > 배경: 2026-07-22 인벤토리에서 repo의 50%(18/36)가 리뷰/검증 자산이고 그중 기계 게이트·감사(9)가
-> 리뷰 루프(4)보다 두꺼움을 확인. README는 "thin writing harness"로 자칭하지만 design.md 결정
+> 리뷰 루프(4)보다 두꺼움을 확인. README는 기존 '글쓰기 하네스' 정체성 문구로 자칭하지만 design.md 결정
 > 기록은 이미 "shared validation/execution protocol kernel"로 자기규정 — 이 균열을 해소하고
 > 정체성을 검증 커널 쪽으로 공식 전환한다(메인테이너 결정).
 
@@ -108,8 +108,8 @@ disciplined review protocols for PRDs/specs/change plans (authoring flows includ
 
 README 잔여 문자열: line 57 "The harness surfaces…"(→ kernel 문안), line 68 "where this
 is meant to go"/"지향점"(변경 4와 함께 정렬), Layout line 246 "why writing harnesses
-differ"(새 절 제목과 동기화). `bin/docloop`: 파일 헤더 주석과 `--help` 출력의 "a thin
-writing harness" 문자열만 kernel 문안으로 수정(동작·verb 무변경). CHANGELOG의 과거 릴리스
+differ"(새 절 제목과 동기화). `bin/docloop`: 파일 헤더 주석과 `--help` 출력의 기존
+writing-harness 정체성 문구만 kernel 문안으로 수정(동작·verb 무변경). CHANGELOG의 과거 릴리스
 표현은 역사 기록이므로 불변.
 
 ## 하지 않는 것
