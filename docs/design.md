@@ -1,4 +1,4 @@
-# Design: a writing harness has no oracle
+# Design: writing has no oracle — so docloop is a verification kernel
 
 ## The coding-harness pattern, and why it works
 
@@ -209,7 +209,7 @@ flowchart TB
   installed skill. Being public OSS signals distribution *intent*, not verified
   external demand.
 
-The refined direction: **docloop evolves into a shared validation/execution protocol
+The refined position: **docloop is a shared validation/execution protocol
 kernel** — derivation meaning stays in skills/domain packs, and `status` stays a
 read-only projection of existing gates.
 
