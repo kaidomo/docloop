@@ -5,8 +5,7 @@
 Every organization writes documents its own way — which sections come in which order, which
 ones are mandatory, the house glossary, the words you're not allowed to use, the tone, and what
 "done" means. In docloop all of that lives in **one file you edit**, `policy.yaml`. Move to a
-different team or a different document standard, and you swap that one file — nothing inside
-docloop changes.
+team with different rules and you swap that one file — nothing inside docloop changes.
 조직마다 문서 쓰는 방식이 다르다 — 섹션 순서, 필수 섹션, 사내 용어, 금칙어, 톤, 그리고 "완료"의
 기준. docloop에서는 그 모두가 **당신이 직접 고치는 한 파일** `policy.yaml`에 들어간다. 팀이나
 문서 표준이 바뀌면 이 파일 하나만 교체하면 되고, docloop 내부는 건드릴 게 없다.

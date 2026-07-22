@@ -27,8 +27,10 @@ untouched; it judges nothing on its own (diagnostic-only).
 한계: 패널 역할은 사람 전문가가 아니라 AI가 관점을 나눠 본 것이다 — 준비된 관점으로 읽고, 결정은
 당신 몫이다. `lock`/`verify`는 예측 파일이 그대로였는지만 증명할 뿐, 그 자체로 판정하지 않는다(진단 전용).
 
-See **Technical details** below for isolation, synthesis, and the sidecar mechanics.
-격리·합성·sidecar 동작은 아래 **기술 상세**를 참고.
+See **Technical details** below for how the roles are kept apart, how the chair combines them,
+and how the sealed prediction file works.
+역할을 어떻게 떼어놓는지, 의장이 어떻게 합치는지, 봉인 파일이 어떻게 동작하는지는 아래
+**기술 상세**를 참고.
 
 ## Technical details · 기술 상세
 

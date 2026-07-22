@@ -18,7 +18,8 @@ docloop init ~/work/fix-submission ./inputs/   # make a work folder (your input 
 docloop atb-capture ./inputs/                  # read the system, note what's true today (with evidence)
 docloop atb-chunk                              # group the fixes and put them in a sensible order
 docloop atb-author                             # write the as-is/to-be plan
-docloop atb-gate                               # block any "as-is" that has no source behind it
+docloop atb-audit                              # check each "as-is" against the evidence behind it
+docloop atb-gate                               # last stop: block if any as-is is still unsourced
 ```
 
 Limitation: docloop only checks the **as-is** half — that each "today it works like X" claim
