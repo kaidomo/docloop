@@ -3,6 +3,38 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.9.0] — 2026-07-22
+### Changed
+- **`review` triage is now a four-axis contract** (re-port from the canonical upstream
+  `peer-review` skill). What used to be one `severity` label plus an `apply /
+  apply-recommended / discuss / reject` direction is split into four independently
+  recorded axes: **validity** (`verified` / `unverified` / `refuted`), **nature**
+  (`bug` / `overclaim` / `robustness` / `design` — `trivial` dropped), **lifecycle**
+  (`new` / `duplicate` / `reopened` / `regression` / `carried`) and **disposition**
+  (`apply` / `defer` / `reject` / `already addressed` / `pending verification` /
+  `human decision` / `pending approval`). Collapsing them into one label let the
+  triager pick the verdict they preferred.
+- **Acceptance rules that close the known escape hatches**: `unverified` is never a
+  rejection ground (→ `pending verification`); acceptance is judged by validity, not by
+  repair cost, and a fix may NOT be required to be covered by existing tests (that
+  condition structurally killed findings about missing tests); lifecycle never decides
+  disposition, `duplicate` folds only under a full match, `reopened` counts as
+  unresolved; a top-down **precedence table** resolves conflicting combinations and
+  routes rule-ownership questions to the human so `design` cannot be used as an escape
+  hatch.
+- **Disposition obligations**: every non-`apply` disposition carries a one-line reason;
+  an all-`apply` round must record the counter-hypothesis for its least certain finding.
+  No rejection quota, no acceptance-rate target.
+- **`converged` re-defined** by the resolution state of canonical findings, not per-round
+  event counts: not converged while any `pending verification` / `human decision`
+  disposition, any `reopened` / `regression` lifecycle, or any approved-but-unvalidated
+  `apply` item remains.
+- The `## Applied (vN)` table (`review` §5 and `REVIEW_BRIEF.template.md`) gains one
+  column per axis; the reviewer prompt now asks for `nature`, not `severity`.
+### Notes
+- Semantic-port row only; no blob/script logic changed (`check_ports` 0 failures against
+  upstream `main`). Tests 185/0.
+
 ## [0.8.0] — 2026-07-21
 ### Added
 - **Change-plan audit gains two close-reading gates** (re-port from the canonical upstream

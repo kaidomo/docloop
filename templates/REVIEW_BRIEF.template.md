@@ -32,9 +32,15 @@
 <reviewer output, or a human-pasted review>
 
 ## Applied (v1 — YYYY-MM-DD HH:MM:SS TZ)
-| finding_id | lens | finding | class (severity) | status (applied/pending/held/rejected) | path | reason / test |
-|------------|------|---------|------------------|----------------------------------------|------|---------------|
-| r1-01 | n/a | | | | | |
+<!-- Four axes, one column each (see review.md §3/§5):
+     validity  = verified / unverified / refuted
+     nature    = bug / overclaim / robustness / design
+     lifecycle = new / duplicate / reopened / regression / carried
+     status    = apply / defer / reject / already addressed / pending verification /
+                 human decision / pending approval -->
+| finding_id | lens | finding | validity | nature | lifecycle | status | path | reason / test |
+|------------|------|---------|----------|--------|-----------|--------|------|---------------|
+| r1-01 | n/a | | | | | | | |
 
 **Intentionally not applied**: <item + reason>
 
