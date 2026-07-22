@@ -3,6 +3,40 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.9.1] — 2026-07-22
+### Fixed
+- **`gap-audit` downstream coverage now counts readable real files** (re-port from the canonical
+  upstream `pm-authoring` skill). It used to count *path strings* under three hardcoded keys, which
+  produced two false signals: ① registering a target under any other key made coverage 0 and raised
+  a **false cross-blind** warning even though a real target existed — key names are now irrelevant
+  to counting (the allowlist `storyboard` / `manual_manifest` / `policy_docs` stays, but only as the
+  validator's **typo warning**); ② a declaration was counted even with no file behind it, so
+  coverage could be 1 with nothing to read, defeating the cross-blind warning and the
+  `--strict-cross-audit` gate. Paths now resolve **against the manifest file** (`~` expanded) and
+  only **existing, readable regular files** count — a missing file or a directory counts 0 — with
+  **duplicate paths de-duplicated** by realpath. `sources` coverage and the validator's public
+  signatures are unchanged (a code root is a directory, so real-file counting doesn't fit there).
+- **A registered downstream that can't be read is surfaced per item.** Fixing the count alone left a
+  hole: with at least one source registered the aggregate is non-zero, so `cross_blind` never fires
+  and a downstream that silently vanished produced **no signal at all**. Read failures are now
+  collected separately and surfaced ① as a warning block in the report (showing the declaration as
+  written) ② as a count on the coverage line ③ on stderr ④ as a `--strict-cross-audit` failure.
+  "What wasn't read is reported as not read" now holds **per item**, not in aggregate.
+- **Coverage-line wording**: with 0 cross-check targets the line said `⚠️ none registered`, which
+  could be read as a literal falsehood ("1 registered, 0 readable"). It now says
+  `⚠️ 0 cross-check targets`.
+### Changed
+- **`gap-audit` prompt gains a "read visibility" contract** — the agent reading each downstream
+  records **the number of units it actually compared** or **"unit identification FAILED"** (ambiguous
+  → FAILED, no fake success). The comparison scope is unchanged: comparing by unit only changes the
+  granularity and address of a finding, and the whole-document omission scan is still performed.
+  There is no declaration schema (the reader is a model). A one-line improvement suggestion is
+  emitted **only on identification failure** (not a mandate, schema, or gate — it cites the repo's
+  storyboard `data-screen-id` as an example of good structure), and the report states the limit:
+  this is a model report, so the stated count is not mechanically guaranteed.
+### Notes
+- Tests 185 → 199. `check_ports` 0 failures against upstream `main`.
+
 ## [0.9.0] — 2026-07-22
 ### Changed
 - **`review` triage is now a four-axis contract** (re-port from the canonical upstream
