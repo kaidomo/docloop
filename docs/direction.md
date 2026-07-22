@@ -1,4 +1,4 @@
-# Direction (planned, not shipped) · 방향(계획·미구현)
+# What's inside today, and direction · 현재 구성과 향후 방향
 
 > Moved from README (2026-07-22). The "What's inside" and "Layout" sections at the bottom
 > were moved here from README in the same pass.

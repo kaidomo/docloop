@@ -7,8 +7,9 @@ Draft a PRD, a policy, or a change plan, then run docloop in your terminal — i
 AI CLI you already use (`codex` or `claude -p`) for you, and nothing is applied to the
 document unless you approve it.
 
-> Under the hood: a verification-first document kernel — docloop checks only what can be
-> checked, surfaces the gaps, and stops; judgment stays with the human. Why: [`docs/design.md`](docs/design.md).
+> Under the hood, docloop checks only what can be checked, surfaces the gaps, and stops —
+> judgment stays with the human. That approach has a name: a verification-first document
+> kernel. Why: [`docs/design.md`](docs/design.md).
 
 ## What you can do
 
