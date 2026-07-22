@@ -3,8 +3,9 @@
 > Moved from README (2026-07-22). The "What's inside" and "Layout" sections at the bottom
 > were moved here from README in the same pass.
 
-**Short version:** what docloop ships today is the checking-and-gates core plus your
-`policy.yaml` rules file — that's it. A few larger ideas are designed but **not built**:
+**Short version:** what docloop ships today is everything the README shows — the writing and
+change-plan flows, the review tools, the checks and gates, and your `policy.yaml` rules file.
+A few larger ideas are designed but **not built**:
 loading document types as plug-in packs, generating one document from another, and grading
 the AI reviewer against expert judgment. Read this page as a roadmap, not a feature list —
 anything written in "would" below does not exist yet.
