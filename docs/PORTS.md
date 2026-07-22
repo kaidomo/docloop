@@ -49,7 +49,7 @@ source on the `lib/stage.py` composite row).
 | prompts/plan.md | semantic-port | pm-authoring SKILL.md | - | - | |
 | prompts/draft.md | semantic-port | pm-authoring SKILL.md | - | - | |
 | prompts/gap-audit.md | semantic-port | pm-authoring SKILL.md | - | - | |
-| prompts/review.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/review.md | semantic-port | peer-review SKILL.md | - | - | four-axis triage contract, re-ported 2026-07-22 |
 | bin/docloop · tests/ · templates/ · docs/ | docloop-native | - | - | - | |
 
 Downstream hashes are recorded at port time; `check_ports.py` fails a blob row
