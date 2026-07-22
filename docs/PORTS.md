@@ -34,7 +34,7 @@ source on the `lib/stage.py` composite row).
 | lib/stage.py | blob | shared/path_guards.py | f1d2916ca936a90cadc4fc32af6f0d635845a67c | ea7bf528857db8e5ae0135993a0a85278553eb83 | containment contract (secondary) |
 | lib/init_workspace.py | blob | skills/asistobe-authoring/scripts/init_workspace.py | c64bb35080ca6d49042be9f6894f3a5f0567ea04 | e0393a174d353dfba1a7cb11f6ab4cda1dbe9ed9 | |
 | lib/validate_manifest.py | blob | skills/pm-authoring/scripts/validate_manifest.py | 838f345e2178d325171454d803284c4476a5dbe1 | 36bc962534f3323944007150b34b3adf70e01aac | |
-| lib/gap_audit.py | blob | skills/pm-authoring/scripts/gap_audit.py | ac5297c945b0c76e915317a940e9f329bcdbd7d0 | 3e2b676c70ef9a05de44650a0d0905533865927f | |
+| lib/gap_audit.py | blob | skills/pm-authoring/scripts/gap_audit.py | 2a2e6dbd288a93623cf4027e22b0012abeb3a428 | 930753374b7b3412f0b65c3251e852d0ded8694a | re-ported 2026-07-22 (downstream coverage = readable real files) |
 | lib/ground_audit.py | blob | skills/asistobe-authoring/scripts/ground_audit.py | 575bc1f43bf043cf7d2065b6815f4181e77cd321 | d97cbdedc8265267c78b3de6bea4284946526859 | |
 | lib/approval_brief.py | blob | skills/pm-authoring/scripts/approval_brief.py | 62ba54c413742ac97ce9e0916b37e708b5dde56c | 90a9d9ff07eba81acf260b69923864147de655d7 | |
 | lib/score_report.py | blob | skills/pm-authoring/scripts/score_report.py | c35cb3d17784dc86b4a17efe6613d02d4acabc98 | 1c00597234a6cd12dcc82cd0ad1248de604dfa1d | |
@@ -48,7 +48,7 @@ source on the `lib/stage.py` composite row).
 | prompts/atb-chunk.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
 | prompts/plan.md | semantic-port | pm-authoring SKILL.md | - | - | |
 | prompts/draft.md | semantic-port | pm-authoring SKILL.md | - | - | |
-| prompts/gap-audit.md | semantic-port | pm-authoring SKILL.md | - | - | |
+| prompts/gap-audit.md | semantic-port | pm-authoring SKILL.md | - | - | read-visibility block re-ported 2026-07-22 |
 | prompts/review.md | semantic-port | peer-review SKILL.md | - | - | four-axis triage contract, re-ported 2026-07-22 |
 | bin/docloop · tests/ · templates/ · docs/ | docloop-native | - | - | - | |
 
