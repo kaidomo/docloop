@@ -14,9 +14,11 @@ All notable changes to docloop are documented here. This project adheres to
 - **Two known limits of `docloop panel` are now stated** in the script header and
   `docs/panel-and-lock.md`, instead of being discoverable only by hitting them:
   ① **concurrency is not protected** — no workspace lock, so nothing stops two runs of the same
-  round from both getting past the overwrite guard; if they do, publishing moves one destination
-  at a time and each file goes to whichever run moved it last, so the panel can end up **mixed
-  from two runs**; ② the overwrite guard runs **before** the model does and the publish step
+  round from both getting past the overwrite guard. Passing it is not the same as publishing
+  (either run can still exit at role failure, validation, synthesis, or the budget cap), but if
+  both *do* reach publishing, files move one destination at a time and each is left by whichever
+  run moved it successfully last, so the panel can end up **mixed from two runs**;
+  ② the overwrite guard runs **before** the model does and the publish step
   re-checks only for a directory, so a regular `PANEL_r<N>_*` file created **while the panel is
   running** is overwritten with no warning and exit 0.
   ② is a real defect with a reproduction; the fix is a separate change because it alters

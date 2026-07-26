@@ -76,9 +76,12 @@ docloop verify ~/notes/b1-prediction.md ~/notes/b1-prediction.md.lock.yaml   # r
 ### Known limits — `docloop panel`
 
 - **Run one panel per workspace at a time.** There is no lock, so nothing stops two runs of the
-  same round from both getting past the overwrite guard. If they do, both publish, and since
-  publishing moves one destination at a time, each file goes to whichever run moved it last —
-  independently. You can end up with a panel **mixed from two runs**, not simply the later one.
+  same round from both getting past the overwrite guard. Passing it is not the same as publishing
+  — either run can still exit at role failure, envelope validation, synthesis, the decision-count
+  budget, or the destination preflight. But if both *do* reach publishing, files move one
+  destination at a time, so each is left by whichever run moved it successfully last,
+  independently of the others. You can end up with a panel **mixed from two runs**, not simply
+  the later one.
 - **Do not create or edit `PANEL_r<N>_*` files while a panel is running.** The overwrite guard runs
   before the model does; the publish step only re-checks whether a destination is a directory. A
   regular file you create during the run is overwritten with no warning and exit 0.

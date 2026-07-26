@@ -36,10 +36,12 @@
 #
 # Known limits (not defects to work around silently — state them so you can plan around them):
 # - CONCURRENCY IS NOT PROTECTED. There is no workspace lock, so nothing stops two runs of the
-#   same round from both getting past the overwrite guard below. If they do, both publish, and
-#   because publishing is a per-destination move loop, each destination goes to whichever run
-#   moved it last — independently. The result can be a panel MIXED from two runs, not simply the
-#   later one. Run one panel per workspace at a time.
+#   same round from both getting past the overwrite guard below. Passing it is not the same as
+#   publishing — either run can still exit at role failure, envelope validation, synthesis, the
+#   decision-count budget, or the destination preflight. But if both DO reach publishing, it is a
+#   per-destination move loop, so each destination is left by whichever run moved it successfully
+#   last, independently of the others. The result can be a panel MIXED from two runs, not simply
+#   the later one. Run one panel per workspace at a time.
 # - The overwrite guard is checked BEFORE the model runs, and the publish step re-checks only
 #   whether a destination is a directory. A regular PANEL_r<N>_* file created while the panel is
 #   running is therefore overwritten by the publish, with no warning and exit 0.
