@@ -3,6 +3,27 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [Unreleased]
+### Fixed
+- **`panel_review.sh` no longer claims a publish guarantee it does not provide.** The publish
+  comment said *all-or-nothing* while the error message in the same block admits that a failure
+  partway leaves the earlier files in place. The two phases guarantee that nothing is published
+  until every role's output validates — they do not make the moves transactional. Comment
+  corrected; **no behaviour change**.
+### Documented
+- **Two known limits of `docloop panel` are now stated** in the script header and
+  `docs/panel-and-lock.md`, instead of being discoverable only by hitting them:
+  ① **concurrency is not protected** — no workspace lock, so two runs on the same round both pass
+  the overwrite guard and the later publish silently wins; ② the overwrite guard runs **before**
+  the model does and the publish step re-checks only for a directory, so a regular `PANEL_r<N>_*`
+  file created **while the panel is running** is overwritten with no warning and exit 0.
+  ② is a real defect with a reproduction; the fix is a separate change because it alters
+  behaviour. ① is stated rather than fixed: there is no evidence it has bitten anyone, and a lock
+  is the kind of addition that earns its own review.
+### Notes
+- Both surfaced while porting the contribution stage (that port was abandoned; these findings
+  outlived it). `panel_review.sh` is a semantic-port row — `check_ports` unaffected.
+
 ## [0.9.1] — 2026-07-22
 ### Fixed
 - **`gap-audit` downstream coverage now counts readable real files** (re-port from the canonical

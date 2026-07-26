@@ -33,6 +33,15 @@
 #   CODEX_MODEL    codex model override
 #   FORCE=1        allow overwriting existing PANEL_r<N>_* files (refused by default)
 #   DRY_RUN=1      print the execution plan instead of calling the model (smoke test)
+#
+# Known limits (not defects to work around silently — state them so you can plan around them):
+# - CONCURRENCY IS NOT PROTECTED. There is no workspace lock. Two runs started together on the
+#   same round both pass the overwrite guard below, run their own model processes, and then
+#   publish to the same destinations; the later one silently wins. Run one panel per workspace
+#   at a time.
+# - The overwrite guard is checked BEFORE the model runs, and the publish step re-checks only
+#   whether a destination is a directory. A regular PANEL_r<N>_* file created while the panel is
+#   running is therefore overwritten by the publish, with no warning and exit 0.
 set -uo pipefail
 
 usage() { sed -n '2,31p' "$0"; exit "${1:-0}"; }
@@ -247,9 +256,14 @@ DC="$(grep -E '^[[:space:]]*decision_item_count[[:space:]]*:[[:space:]]*[0-9]+[[
 [ -n "$DC" ] || { echo "panel: synthesis lacks decision_item_count — nothing published" >&2; exit 1; }
 [ "$DC" -le 5 ] || { echo "panel: decision_item_count=$DC exceeds the budget cap of 5 — nothing published" >&2; exit 1; }
 
-# Publish all-or-nothing, and only after every validation passed. Two phases: first check
-# EVERY destination (a directory — or symlink to one — is an error, not a silent move-into),
-# then move; nothing is removed or moved until all destinations pass.
+# Publish only after every validation passed. Two phases: first check EVERY destination
+# (a directory — or symlink to one — is an error, not a silent move-into), then move; nothing
+# is removed or moved until all destinations pass.
+#
+# This is NOT transactional, despite the two phases. The phases guarantee that no file is
+# published while another role's output is still unvalidated — that is the property the panel
+# contract needs — but the moves themselves are sequential, so a failure at the Nth leaves the
+# first N-1 in place. The error below says so; do not read "two phases" as all-or-nothing.
 DESTS=()
 for R in "${ROLES[@]}"; do DESTS+=("PANEL_r${N}_${R}.yaml"); done
 DESTS+=("$SYN")
