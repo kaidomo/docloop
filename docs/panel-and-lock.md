@@ -75,15 +75,17 @@ docloop verify ~/notes/b1-prediction.md ~/notes/b1-prediction.md.lock.yaml   # r
 
 ### Known limits — `docloop panel`
 
-- **Run one panel per workspace at a time.** There is no lock. Two runs started together on the
-  same round both pass the overwrite guard, then publish to the same destinations — the later one
-  silently wins.
+- **Run one panel per workspace at a time.** There is no lock, so nothing stops two runs of the
+  same round from both getting past the overwrite guard. If they do, both publish, and since
+  publishing moves one destination at a time, each file goes to whichever run moved it last —
+  independently. You can end up with a panel **mixed from two runs**, not simply the later one.
 - **Do not create or edit `PANEL_r<N>_*` files while a panel is running.** The overwrite guard runs
   before the model does; the publish step only re-checks whether a destination is a directory. A
   regular file you create during the run is overwritten with no warning and exit 0.
 - Publishing is **not transactional**. Validation gates it — nothing is published until every
   role's output validates — but the moves are sequential, so a failure partway leaves the files
-  already moved in place, and says which ones.
+  already moved in place. The error names the destination it failed on; it does **not** list what
+  was already moved, so check the folder yourself.
 
 이 셋은 **현재 동작에 대한 사실 기재**다(회피 요령이 아니라 계획에 반영할 정보). 첫 둘은 잠금과
 게시 시점 재검사가 들어가면 사라진다.
