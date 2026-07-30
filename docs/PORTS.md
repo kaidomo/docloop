@@ -39,7 +39,7 @@ source on the `lib/stage.py` composite row).
 | lib/approval_brief.py | blob | skills/pm-authoring/scripts/approval_brief.py | 62ba54c413742ac97ce9e0916b37e708b5dde56c | 90a9d9ff07eba81acf260b69923864147de655d7 | |
 | lib/score_report.py | blob | skills/pm-authoring/scripts/score_report.py | c35cb3d17784dc86b4a17efe6613d02d4acabc98 | 1c00597234a6cd12dcc82cd0ad1248de604dfa1d | |
 | lib/verbatim_check.py | blob | skills/pm-authoring/scripts/verbatim_check.py | adb02d273cf0d33d53eeb6712b2ceaaeb9f169ee | 520d18ae39a531d2cd0364bf904065b3bb23ba1c | |
-| lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 8d9006b0d79022bef8cf189bdbcada7ecfab4e61 | d292f7cb19bbb34ee995034624ac27f5d8b33651 | output-existence/non-blank verdict + FORCE stash re-ported 2026-07-30 (upstream #110/#111) |
+| lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 8d9006b0d79022bef8cf189bdbcada7ecfab4e61 | 5ba8f14c8fbae86d8fbdb820447a3a92fc70577a | output-existence/non-blank verdict + FORCE stash re-ported 2026-07-30 (upstream #110/#111) |
 | lib/blind_lock.py | semantic-port | meta-learning-loop (prediction lock) | - | - | v0.7.0 port |
 | lib/panel_review.sh | semantic-port | cross-functional-review | - | - | v0.7.0 port |
 | prompts/atb-audit.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |

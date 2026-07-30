@@ -75,13 +75,25 @@ echo "multi-lens review: ${#LENSES[@]} lenses in parallel (effort=$EFFORT${MODEL
 # Under FORCE=1 the review file is moved aside BEFORE the run rather than overwritten in place:
 # the -o capture path does not touch the file when a lens writes nothing, so the previous round's
 # content would survive, pass the non-empty check below, and be reported ✓ — the human would then
-# triage LAST round's findings as this round's. Moving aside is all-or-nothing: a partial failure
-# would destroy earlier evidence while no lens runs, and FORCE=1 buys an overwrite, not evidence
-# loss. So stash to .forcebak first, delete only once every lens is clear, and restore on failure.
-force_restore() {
-  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do mv -f "$b" "${b%.forcebak}" 2>/dev/null || true; done
-}
+# triage LAST round's findings as this round's. Stashing rolls back on any guard rejection and on
+# INT/TERM/HUP, so a rejected preflight never leaves earlier evidence deleted while no lens runs —
+# FORCE=1 buys an overwrite, not evidence loss.
+# Scope of that guarantee, stated so it is not overread: it is NOT a filesystem transaction. A
+# kill -9, a crash between the mv and its registration, or a failing restore can still leave a
+# .forcebak behind. Those are reported and the content is left under its .forcebak name rather
+# than dropped, so recovery is a rename.
 FORCE_BAK=()
+force_restore() {
+  frc_left=""
+  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do
+    mv -f "$b" "${b%.forcebak}" 2>/dev/null || frc_left="$frc_left $b"
+  done
+  [ -n "$frc_left" ] && echo "WARNING: could not restore stashed output(s):$frc_left — rename them back by hand" >&2
+  FORCE_BAK=()
+  return 0
+}
+# Installed BEFORE the first move so an interrupt during the stash window rolls back too.
+[ "$DRY_RUN" != "1" ] && [ "$FORCE" = "1" ] && trap 'force_restore; exit 3' INT TERM HUP
 if [ "$DRY_RUN" != "1" ]; then
   for L in "${LENSES[@]}"; do
     for f in "REVIEW_r${N}_${L}.md" "REVIEW_r${N}_${L}.md.log" "REVIEW_r${N}_${L}.md.err"; do
@@ -101,7 +113,9 @@ if [ "$DRY_RUN" != "1" ]; then
       FORCE_BAK+=("$OUT.forcebak")
     fi
   done
-  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do rm -f "$b"; done   # only once every lens is clear
+  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do
+    rm -f "$b" || echo "WARNING: leftover stash not removed: $b" >&2
+  done   # only once every lens is clear
   FORCE_BAK=()
 fi
 
@@ -148,7 +162,7 @@ for pid in "${PIDS[@]}"; do
   L="${LNAMES[$i]}"; OUT="REVIEW_r${N}_${L}.md"; why=""
   if ! wait "$pid"; then why="exit code"
   elif [ ! -f "$OUT" ]; then why="no output"
-  elif ! grep -q '[^[:space:]]' "$OUT" 2>/dev/null; then why="empty output"
+  elif ! sed -e '1s/^\xef\xbb\xbf//' "$OUT" 2>/dev/null | grep -q '[^[:space:]]'; then why="empty output"
   fi
   if [ -z "$why" ]; then echo "  ✓ $L -> $OUT"
   else fail=1; failed="$failed $L($why)"; echo "  ✗ $L — $why (-> $OUT.log/.err)"; fi

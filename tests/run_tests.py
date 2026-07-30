@@ -1290,13 +1290,14 @@ def _mlr_dir():
     open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
     return d
 
-def run_mlr(cwd, n, lens="correctness", shim=None, force=False):
+def run_mlr(cwd, n, *lenses, shim=None, force=False):
     env = dict(os.environ, DRY_RUN="0")
     if shim:
         env["PATH"] = shim + os.pathsep + os.environ["PATH"]
     if force:
         env["FORCE"] = "1"
-    return subprocess.run(["bash", MLR, cwd, n, lens], cwd=cwd, capture_output=True, text=True, env=env)
+    lenses = lenses or ("correctness",)
+    return subprocess.run(["bash", MLR, cwd, n, *lenses], cwd=cwd, capture_output=True, text=True, env=env)
 
 # -o capture path: exit 0, writes nothing at all
 d = _mlr_dir()
@@ -1350,6 +1351,68 @@ body = open(OUTP, encoding="utf-8").read() if os.path.exists(OUTP) else ""
 check("multi_lens/FORCE: re-run with new content -> ✓ and content replaced",
       r.returncode == 0 and "new text" in body and "old text" not in body)
 
+
+# FORCE rollback: the stash is per-lens, so a later lens's guard can reject after an earlier lens
+# was already stashed. Those are the branches that carry the "no evidence loss" promise.
+CONTENT = 'printf "kept finding\n"; exit 0'
+
+def _two_lens_seeded():
+    """round 1 leaves real content for both lenses; returns (dir, pathA, pathB)."""
+    d = _mlr_dir()
+    r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False))
+    a = os.path.join(d, "REVIEW_r1_aa.md"); b = os.path.join(d, "REVIEW_r1_bb.md")
+    assert r.returncode == 0 and os.path.exists(a) and os.path.exists(b), r.stdout + r.stderr
+    return d, a, b
+
+# later lens is a symlink -> reject; the earlier lens must come back untouched
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+os.remove(B); os.symlink("/tmp/elsewhere", B)
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: later-lens symlink -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored byte-for-byte",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+check("multi_lens/FORCE rollback: no .forcebak residue", not os.path.exists(A + ".forcebak"))
+
+# later lens already has a stale .forcebak -> refuse to stash; earlier lens restored
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+open(B + ".forcebak", "w", encoding="utf-8").write("older\n")
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: pre-existing .forcebak -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored after stash refusal",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+
+# later lens output is a directory (not a regular file) -> refuse; earlier lens restored
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+os.remove(B); os.mkdir(B)
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: non-regular later output -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored after non-regular refusal",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+
+# mixed verdicts across lenses: one real, one empty -> overall failure, reasons kept apart
+d = _mlr_dir()
+mixed = r"""out=""
+prev=""
+for a in "$@"; do case "$prev" in -o) out="$a";; esac; prev="$a"; done
+case " $* " in *"Lens: "*) :;; esac
+if [ -n "$out" ]; then case "$out" in *_aa.md) printf "real\n" > "$out";; esac; fi
+exit 0"""
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(mixed, supports_o=True))
+out = r.stdout + r.stderr
+check("multi_lens: mixed verdicts -> exit 4 with per-lens reasons",
+      r.returncode == 4 and "✓ aa" in r.stdout and "bb" in out and "no output" in out)
+
+# BOM boundary (r1-05)
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim(r'printf "\xef\xbb\xbf   \n"; exit 0', supports_o=False))
+check("multi_lens: BOM-only output judged empty",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr))
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim(r'printf "\xef\xbb\xbfreal finding\n"; exit 0', supports_o=False))
+check("multi_lens: BOM + content still counts as content", r.returncode == 0 and "✓" in r.stdout)
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
