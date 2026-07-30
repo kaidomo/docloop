@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """docloop regression tests — split.py (deploy split) + approval_brief.py + validate_manifest sanity.
 Usage: python3 tests/run_tests.py"""
-import sys, os, tempfile, subprocess
+import sys, os, tempfile, subprocess, signal, time, stat
 
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")
 sys.path.insert(0, SCRIPTS)
@@ -1299,6 +1299,38 @@ def run_mlr(cwd, n, *lenses, shim=None, force=False):
     lenses = lenses or ("correctness",)
     return subprocess.run(["bash", MLR, cwd, n, *lenses], cwd=cwd, capture_output=True, text=True, env=env)
 
+
+def _marker_shim(run_body, supports_o=True):
+    """_codex_shim + markers: CALLED when the run body executes, PROBED when --help is asked.
+    Refusal paths assert the model was never invoked; DRY_RUN asserts not even the probe ran
+    (port r1-01 — a marker placed only after the --help branch would mask a probing dry-run)."""
+    sd = _codex_shim(run_body, supports_o=supports_o)
+    sh = os.path.join(sd, "codex")
+    body = open(sh, encoding="utf-8").read()
+    body = body.replace('then echo ', f'then touch "{sd}/PROBED"; echo ', 1)
+    head, tail = body.split("done\n", 1)
+    open(sh, "w", encoding="utf-8").write(head + "done\n" + f'touch "{sd}/CALLED"\n' + tail)
+    return sd
+
+
+def _called(sd):
+    return os.path.exists(os.path.join(sd, "CALLED"))
+
+
+def _probed(sd):
+    return os.path.exists(os.path.join(sd, "PROBED"))
+
+
+def _rd_file(d, name):
+    p = os.path.join(d, name)
+    if not os.path.isfile(p):
+        return ""
+    return open(p, encoding="utf-8").read()
+
+
+WRITES_O = 'prev=""; for a in "$@"; do [ "$prev" = "-o" ] && printf "%s\\n" "{}" > "$a"; prev="$a"; done; exit 0'
+LOCK1 = ".review_r1.lock"
+
 # -o capture path: exit 0, writes nothing at all
 d = _mlr_dir()
 r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=True))
@@ -1352,8 +1384,11 @@ check("multi_lens/FORCE: re-run with new content -> ✓ and content replaced",
       r.returncode == 0 and "new text" in body and "old text" not in body)
 
 
-# FORCE rollback: the stash is per-lens, so a later lens's guard can reject after an earlier lens
-# was already stashed. Those are the branches that carry the "no evidence loss" promise.
+# Validate-first / no-touch (port r1-03): these three fixtures predate the block redesign and
+# used to reach the ROLLBACK path (later lens rejected after an earlier lens was stashed).
+# Validate-first now rejects them BEFORE anything is staged, so they cover the no-touch
+# guarantee — the earlier lens is untouched, not "restored", and the model is never invoked.
+# Real rollback coverage (a failure after a successful stash) lives in trio/110-r below.
 CONTENT = 'printf "kept finding\n"; exit 0'
 
 def _two_lens_seeded():
@@ -1364,33 +1399,67 @@ def _two_lens_seeded():
     assert r.returncode == 0 and os.path.exists(a) and os.path.exists(b), r.stdout + r.stderr
     return d, a, b
 
-# later lens is a symlink -> reject; the earlier lens must come back untouched
+
+def _pathset_state(d, *lenses):
+    """Full no-touch snapshot (port r1-03 r2): absence / type / bytes / link target for every
+    path of each lens's execution unit (.md, .md.log, .md.err) plus their .forcebak variants —
+    preserving only the earlier .md would let a regression touch a sidecar and still pass."""
+    st = []
+    for lens in lenses:
+        base = os.path.join(d, "REVIEW_r1_%s.md" % lens)
+        for p in [base + suf for suf in ("", ".log", ".err")]:
+            for q in (p, p + ".forcebak"):
+                # lstat + S_IS* (port r1-03 r3): is-file/is-dir predicates let FIFOs, sockets
+                # and device nodes fall through as "absent" — creating/removing one would
+                # false-pass the no-touch comparison.
+                try:
+                    s = os.lstat(q)
+                except FileNotFoundError:
+                    st.append((q, "absent", None))
+                    continue
+                m = s.st_mode
+                if stat.S_ISLNK(m):
+                    st.append((q, "link", os.readlink(q)))
+                elif stat.S_ISDIR(m):
+                    st.append((q, "dir", None))
+                elif stat.S_ISREG(m):
+                    st.append((q, "file", open(q, "rb").read()))
+                else:
+                    st.append((q, "special", stat.S_IFMT(m)))
+    return st
+
+# later lens is a symlink -> reject in validation; NOTHING in either unit is touched
 d, A, B = _two_lens_seeded()
-before = open(A, encoding="utf-8").read()
 os.remove(B); os.symlink("/tmp/elsewhere", B)
-r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
-check("multi_lens/FORCE rollback: later-lens symlink -> exit 3", r.returncode == 3)
-check("multi_lens/FORCE rollback: earlier lens restored byte-for-byte",
-      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
-check("multi_lens/FORCE rollback: no .forcebak residue", not os.path.exists(A + ".forcebak"))
+before = _pathset_state(d, "aa", "bb")
+sd = _marker_shim(CONTENT, supports_o=False)
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("multi_lens/validate-first: later-lens symlink -> exit 3, model never invoked",
+      r.returncode == 3 and not _called(sd))
+check("multi_lens/validate-first: full path-set snapshot unchanged after symlink refusal",
+      _pathset_state(d, "aa", "bb") == before)
 
-# later lens already has a stale .forcebak -> refuse to stash; earlier lens restored
+# later lens already has a stale .forcebak -> refuse in validation; nothing touched
 d, A, B = _two_lens_seeded()
-before = open(A, encoding="utf-8").read()
 open(B + ".forcebak", "w", encoding="utf-8").write("older\n")
-r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
-check("multi_lens/FORCE rollback: pre-existing .forcebak -> exit 3", r.returncode == 3)
-check("multi_lens/FORCE rollback: earlier lens restored after stash refusal",
-      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+before = _pathset_state(d, "aa", "bb")
+sd = _marker_shim(CONTENT, supports_o=False)
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("multi_lens/validate-first: pre-existing .forcebak -> exit 3, model never invoked",
+      r.returncode == 3 and not _called(sd))
+check("multi_lens/validate-first: full path-set snapshot unchanged after residue refusal",
+      _pathset_state(d, "aa", "bb") == before)
 
-# later lens output is a directory (not a regular file) -> refuse; earlier lens restored
+# later lens output is a directory (not a regular file) -> refuse in validation; untouched
 d, A, B = _two_lens_seeded()
-before = open(A, encoding="utf-8").read()
 os.remove(B); os.mkdir(B)
-r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
-check("multi_lens/FORCE rollback: non-regular later output -> exit 3", r.returncode == 3)
-check("multi_lens/FORCE rollback: earlier lens restored after non-regular refusal",
-      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+before = _pathset_state(d, "aa", "bb")
+sd = _marker_shim(CONTENT, supports_o=False)
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("multi_lens/validate-first: non-regular later output -> exit 3, model never invoked",
+      r.returncode == 3 and not _called(sd))
+check("multi_lens/validate-first: full path-set snapshot unchanged after non-regular refusal",
+      _pathset_state(d, "aa", "bb") == before)
 
 # mixed verdicts across lenses: one real, one empty -> overall failure, reasons kept apart
 d = _mlr_dir()
@@ -1413,6 +1482,331 @@ check("multi_lens: BOM-only output judged empty",
 d = _mlr_dir()
 r = run_mlr(d, "1", shim=_codex_shim(r'printf "\xef\xbb\xbfreal finding\n"; exit 0', supports_o=False))
 check("multi_lens: BOM + content still counts as content", r.returncode == 0 and "✓" in r.stdout)
+
+# ── multi_lens_review.sh: FORCE/clobber trio (upstream #115/#116/#120 + impl r1/r2) ──
+# Re-ported with the upstream block redesign: round lock, validate-first over the three-path
+# execution unit, sidecar staging, signal ladder, pgroup kill. The issue-body reproductions
+# are the fixtures. Shims (fake codex/mv/rm/mkdir on PATH) inject faults deterministically.
+
+# -h must include the stale-lock recovery guidance (port r1-04 — the usage sed range cut it)
+r = subprocess.run(["bash", MLR, "-h"], capture_output=True, text=True)
+check("trio/help: -h names the lock and the rmdir recovery",
+      r.returncode == 0 and ".review_r<N>.lock" in r.stdout and "rmdir" in r.stdout)
+
+# 120-A: FORCE with a directory squatting on the sidecar path — validate-first must stop
+# before the .md is deleted (previously the .md was already gone when redirection failed).
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("new finding"))
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("previous round finding\n")
+os.mkdir(os.path.join(d, "REVIEW_r1_correctness.md.log"))
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/120-A: FORCE + dir sidecar -> exit 3, model never invoked, .md preserved",
+      r.returncode == 3 and not _called(sd)
+      and _rd_file(d, "REVIEW_r1_correctness.md") == "previous round finding\n")
+
+# 120-A2: a later lens's bad sidecar must not burn an earlier lens's evidence
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(d, "REVIEW_r1_aa.md"), "w").write("aa evidence\n")
+os.mkdir(os.path.join(d, "REVIEW_r1_bb.md.err"))
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("trio/120-A2: later-lens bad sidecar -> exit 3, earlier evidence preserved",
+      r.returncode == 3 and not _called(sd) and _rd_file(d, "REVIEW_r1_aa.md") == "aa evidence\n")
+
+# 120-B: symlinked sidecar escapes the review folder — rejected even without FORCE
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+outside = os.path.join(os.path.dirname(d), "outside-" + os.path.basename(d)); os.makedirs(outside)
+os.symlink(os.path.join(outside, "escaped.log"), os.path.join(d, "REVIEW_r1_correctness.md.log"))
+r = run_mlr(d, "1", shim=sd)
+check("trio/120-B: symlink sidecar -> exit 3 (no FORCE needed), no outside write",
+      r.returncode == 3 and "symlink" in (r.stdout + r.stderr) and not _called(sd)
+      and not os.path.exists(os.path.join(outside, "escaped.log")))
+
+# 116-a: a stale INACTIVE sidecar is staged away with the FORCE re-run, both capture modes
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("new round"))
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("old\n")
+open(os.path.join(d, "REVIEW_r1_correctness.md.err"), "w").write("stale stderr diagnosis\n")
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/116-a(-o): FORCE re-run succeeds and the stale .err is gone",
+      r.returncode == 0 and _rd_file(d, "REVIEW_r1_correctness.md").strip() == "new round"
+      and not os.path.exists(os.path.join(d, "REVIEW_r1_correctness.md.err")))
+d = _mlr_dir(); sd = _marker_shim('printf "new round\\n"; exit 0', supports_o=False)
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("old\n")
+open(os.path.join(d, "REVIEW_r1_correctness.md.log"), "w").write("stale -o log\n")
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/116-a(fallback): FORCE re-run succeeds and the stale .log is gone",
+      r.returncode == 0 and not os.path.exists(os.path.join(d, "REVIEW_r1_correctness.md.log")))
+
+# 116-b: the ✗ hint names only the sidecar this run actually wrote
+d = _mlr_dir(); sd = _marker_shim("exit 7")
+r = run_mlr(d, "1", shim=sd)
+out = r.stdout + r.stderr
+check("trio/116-b(-o): ✗ names .log only", r.returncode == 4
+      and "(-> REVIEW_r1_correctness.md.log)" in out and ".md.err" not in out)
+d = _mlr_dir(); sd = _marker_shim("exit 7", supports_o=False)
+r = run_mlr(d, "1", shim=sd)
+out = r.stdout + r.stderr
+check("trio/116-b(fallback): ✗ names .err only", r.returncode == 4
+      and "(-> REVIEW_r1_correctness.md.err)" in out and ".md.log" not in out)
+
+# 116-c: a leftover regular sidecar alone refuses a non-FORCE re-run (behavior change)
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(d, "REVIEW_r1_correctness.md.err"), "w").write("failure evidence\n")
+r = run_mlr(d, "1", shim=sd)
+check("trio/116-c: leftover sidecar without FORCE -> exit 3, model never invoked, evidence kept",
+      r.returncode == 3 and "already exists" in (r.stdout + r.stderr) and not _called(sd)
+      and _rd_file(d, "REVIEW_r1_correctness.md.err") == "failure evidence\n")
+
+# 115-a: pre-existing lock -> refuse before touching anything
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+os.mkdir(os.path.join(d, LOCK1))
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("evidence\n")
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/115-a: pre-existing lock -> exit 3, lock named, nothing touched",
+      r.returncode == 3 and "lock held" in (r.stdout + r.stderr) and not _called(sd)
+      and _rd_file(d, "REVIEW_r1_correctness.md") == "evidence\n")
+
+# 115-b: neither success nor failure leaves the lock behind
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("r1"))
+r = run_mlr(d, "1", shim=sd)
+check("trio/115-b: lock released after success", r.returncode == 0 and not os.path.exists(os.path.join(d, LOCK1)))
+r = run_mlr(d, "1", shim=_marker_shim("exit 7"), force=True)
+check("trio/115-b: lock released after failure", r.returncode == 4 and not os.path.exists(os.path.join(d, LOCK1)))
+
+# 115-c: .forcebak residue refuses even when OUT itself is absent (unconditional check),
+# and a dangling-symlink marker is still residue (upstream impl r1-05)
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(d, "REVIEW_r1_correctness.md.forcebak"), "w").write("residue\n")
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/115-c: .forcebak residue with OUT absent -> exit 3",
+      r.returncode == 3 and "forcebak" in (r.stdout + r.stderr) and not _called(sd))
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+os.symlink("/nonexistent-x", os.path.join(d, "REVIEW_r1_correctness.md.forcebak"))
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/115-c: dangling-symlink .forcebak residue -> exit 3",
+      r.returncode == 3 and "forcebak" in (r.stdout + r.stderr) and not _called(sd))
+
+# 115-d: the lock is held THROUGH collection — block A inside the fake lens via a gate file,
+# require the startup handshake, then assert a same-round B is refused without a model call
+d = _mlr_dir()
+sdA = _codex_shim("touch STARTED\nwhile [ ! -e release ]; do sleep 0.05; done\n" + WRITES_O.format("A finding"))
+envA = dict(os.environ, DRY_RUN="0"); envA["PATH"] = sdA + os.pathsep + envA["PATH"]
+pA = subprocess.Popen(["bash", MLR, d, "1", "correctness"], cwd=d, env=envA,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+_started = False
+for _ in range(200):
+    if os.path.exists(os.path.join(d, "STARTED")):
+        _started = True
+        break
+    time.sleep(0.05)
+check("trio/115-d: startup handshake observed", _started)
+check("trio/115-d: A holds the lock while its lens runs", os.path.exists(os.path.join(d, LOCK1)))
+sdB = _marker_shim(WRITES_O.format("B finding"))
+rB = run_mlr(d, "1", shim=sdB, force=True)
+check("trio/115-d: same-round B refused while A runs, model never invoked",
+      rB.returncode == 3 and "lock held" in (rB.stdout + rB.stderr) and not _called(sdB))
+open(os.path.join(d, "release"), "w").write("")
+pA.communicate(timeout=30)
+check("trio/115-d: A completes and releases; re-entry works",
+      pA.returncode == 0 and _rd_file(d, "REVIEW_r1_correctness.md").strip() == "A finding"
+      and not os.path.exists(os.path.join(d, LOCK1))
+      and run_mlr(d, "1", shim=sdB, force=True).returncode == 0)
+
+# 110-r: a stash failure mid-staging still rolls back everything (all-or-nothing survives
+# validate-first) — a fake mv fails only the later lens's stash and delegates the rest
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(sd, "mv"), "w").write(
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *REVIEW_r1_bb.md.forcebak) exit 1;; esac; done\nexec /bin/mv "$@"\n')
+os.chmod(os.path.join(sd, "mv"), 0o755)
+for nm, c in [("REVIEW_r1_aa.md", "aa evidence\n"), ("REVIEW_r1_aa.md.log", "log evidence\n"),
+              ("REVIEW_r1_aa.md.err", "err evidence\n"), ("REVIEW_r1_bb.md", "bb evidence\n")]:
+    open(os.path.join(d, nm), "w").write(c)
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("trio/110-r: mid-staging mv failure -> exit 3, model never invoked",
+      r.returncode == 3 and not _called(sd))
+check("trio/110-r: all three earlier-lens files restored, no .forcebak residue",
+      _rd_file(d, "REVIEW_r1_aa.md") == "aa evidence\n"
+      and _rd_file(d, "REVIEW_r1_aa.md.log") == "log evidence\n"
+      and _rd_file(d, "REVIEW_r1_aa.md.err") == "err evidence\n"
+      and _rd_file(d, "REVIEW_r1_bb.md") == "bb evidence\n"
+      and not [f for f in os.listdir(d) if f.endswith(".forcebak")])
+
+# impl r1-01: a signal during commit (backup deletion) must not half-restore — remaining
+# backups stay under .forcebak (content preserved; the next run refuses with guidance)
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(sd, "rm"), "w").write(
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *REVIEW_r1_aa.md.forcebak) kill -TERM $PPID;; esac; done\nexec /bin/rm "$@"\n')
+os.chmod(os.path.join(sd, "rm"), 0o755)
+open(os.path.join(d, "REVIEW_r1_aa.md"), "w").write("aa evidence\n")
+open(os.path.join(d, "REVIEW_r1_bb.md"), "w").write("bb evidence\n")
+r = run_mlr(d, "1", "aa", "bb", shim=sd, force=True)
+check("trio/impl-r1-01: signal during commit -> exit 3, model never invoked, lock released",
+      r.returncode == 3 and not _called(sd) and not os.path.exists(os.path.join(d, LOCK1)))
+check("trio/impl-r1-01: no partial restore — remaining backup stays as .forcebak",
+      not os.path.exists(os.path.join(d, "REVIEW_r1_bb.md"))
+      and _rd_file(d, "REVIEW_r1_bb.md.forcebak") == "bb evidence\n"
+      and not os.path.exists(os.path.join(d, "REVIEW_r1_aa.md.forcebak")))
+
+# impl r1-02: a signal in the staging window must not leave the lock; content survives under
+# either its own name or .forcebak (documented non-guarantee between mv and registration)
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(sd, "mv"), "w").write(
+    '#!/bin/sh\nfor a in "$@"; do case "$a" in *REVIEW_r1_correctness.md.forcebak) kill -TERM $PPID;; esac; done\nexec /bin/mv "$@"\n')
+os.chmod(os.path.join(sd, "mv"), 0o755)
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("c evidence\n")
+r = run_mlr(d, "1", shim=sd, force=True)
+check("trio/impl-r1-02: staging-window signal -> exit 3, lock released, content preserved",
+      r.returncode == 3 and not _called(sd) and not os.path.exists(os.path.join(d, LOCK1))
+      and (_rd_file(d, "REVIEW_r1_correctness.md") == "c evidence\n"
+           or _rd_file(d, "REVIEW_r1_correctness.md.forcebak") == "c evidence\n"))
+
+# impl r1-02b: a TRAPPED signal right after mkdir succeeds must not strand the fresh lock —
+# the acquisition window latches; ownership is recorded before the pending signal is honored
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(sd, "mkdir"), "w").write(
+    '#!/bin/sh\ncase "$*" in *.review_r1.lock*) /bin/mkdir "$@"; s=$?; kill -TERM $PPID; exit $s;; esac\nexec /bin/mkdir "$@"\n')
+os.chmod(os.path.join(sd, "mkdir"), 0o755)
+r = run_mlr(d, "1", shim=sd)
+check("trio/impl-r1-02b: trapped signal right after acquisition -> exit 3, no stale lock",
+      r.returncode == 3 and not os.path.exists(os.path.join(d, LOCK1)) and not _called(sd))
+
+# impl r1-03d: a signalled round must not end 0 even in dry-run. Determinism comes from pipe
+# BACKPRESSURE via ONE lens with a giant name (port r1-02 r2): its single [dry] line
+# (~120KB — the name appears twice) exceeds the pipe buffer nobody reads, so that one job
+# blocks mid-write and the run CANNOT complete before we drain. One lens also removes the
+# startup dependency the 1500-lens variant had (1500 sequential `tr` validation calls).
+# We still wait for the FIRST [dry] bytes, not just any output: the header prints BEFORE the
+# execution trap is installed, so signalling on the header races a default-action death
+# (measured). [dry] bytes prove a lens job ran, which proves the parent passed the trap line;
+# our few 256-byte reads do not meaningfully drain the ~120KB pending write.
+import select as _select
+d = _mlr_dir()
+# Environmental invariants, stated rather than assumed silently (port r1-02 r3/r4): the name
+# must satisfy BOTH (a) single-argument size < Linux MAX_ARG_STRLEN (32 pages = 128KiB on
+# 4KiB-page systems — a 200KB name aborted Popen with E2BIG in a Linux container, r4) and
+# (b) one [dry] line (the name appears twice) >> DEFAULT pipe capacity (16-64KiB on
+# macOS/Linux; raising it needs an explicit fcntl nothing here does). 100,000 gives ~30KiB
+# headroom under (a) and a ~200KB line, >3x margin over (b). If either invariant shifts, the
+# Popen guard or the liveness gate below fails loudly rather than letting the test false-pass.
+_giant = "L" + "x" * 100000
+envD = dict(os.environ, DRY_RUN="1")
+try:
+    pD = subprocess.Popen(["bash", MLR, d, "1", _giant], cwd=d, env=envD,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+except OSError as _e:               # E2BIG 등 — 스위트 중단이 아니라 FAIL로 기록(r4)
+    pD = None
+    check("trio/impl-r1-03d: fixture launches within per-arg limits", False)
+if pD is not None:
+  try:
+    _buf = b""
+    _deadline = time.time() + 30
+    while b"[dry]" not in _buf and time.time() < _deadline:
+        _ready, _, _ = _select.select([pD.stdout], [], [], 1)
+        if not _ready:
+            continue
+        _chunk = os.read(pD.stdout.fileno(), 256)
+        if not _chunk:
+            break
+        _buf += _chunk
+    check("trio/impl-r1-03d: first [dry] observed while held by pipe backpressure", b"[dry]" in _buf)
+    _alive = pD.poll() is None
+    check("trio/impl-r1-03d: child alive (blocked) before signalling", _alive)
+    _killed_ok = False
+    if _alive:                      # GATING (r3): never signal a possibly-reaped/recycled PID
+        try:
+            os.kill(pD.pid, signal.SIGTERM)
+            _killed_ok = True
+        except ProcessLookupError:
+            _killed_ok = False
+    try:
+        outD, errD = pD.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        pD.kill()
+        try:
+            outD, errD = pD.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            outD, errD = b"", b""
+    check("trio/impl-r1-03d: TERM during dry-run -> exit 4, no success line",
+          _killed_ok and pD.returncode == 4
+          and b"dry-run done" not in (_buf + outD) and b"interrupted" in errD)
+  finally:
+    # Bounded reap on any assertion path. Killing the outer bash closes our read ends via
+    # communicate(); the lens (own pgroup) blocked in write then dies on SIGPIPE — no orphan.
+    if pD.poll() is None:
+        pD.kill()
+        try:
+            pD.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
+# DRY-g: DRY_RUN stays inert on top of every guard state (lock, dir sidecar, symlink, residue)
+d = _mlr_dir(); sd = _marker_shim(WRITES_O.format("x"))
+open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("old\n")
+os.mkdir(os.path.join(d, "REVIEW_r1_correctness.md.log"))
+os.symlink("/nonexistent-y", os.path.join(d, "REVIEW_r1_correctness.md.err"))
+open(os.path.join(d, "REVIEW_r1_correctness.md.forcebak"), "w").write("residue\n")
+os.mkdir(os.path.join(d, LOCK1))
+snap = sorted(os.listdir(d))
+ok = True
+for force in (False, True):
+    env = dict(os.environ, DRY_RUN="1")
+    env["PATH"] = sd + os.pathsep + env["PATH"]
+    if force:
+        env["FORCE"] = "1"
+    rr = subprocess.run(["bash", MLR, d, "1", "correctness"], cwd=d, capture_output=True, text=True, env=env)
+    ok = ok and rr.returncode == 0
+check("trio/DRY-g: preseeded guard states + DRY_RUN (±FORCE) -> exit 0, folder snapshot unchanged",
+      ok and sorted(os.listdir(d)) == snap and not _called(sd)
+      and _rd_file(d, "REVIEW_r1_correctness.md") == "old\n")
+check("trio/DRY-g: DRY_RUN invokes no codex at all — not even the --help probe (port r1-01)",
+      not _probed(sd))
+
+# lock-w: a failed unlock is not swallowed — warn with the path, keep the exit status
+d = _mlr_dir()
+sd = _codex_shim("echo junk > %s/junk\n%s" % (LOCK1, WRITES_O.format("success")))
+r = run_mlr(d, "1", shim=sd)
+check("trio/lock-w: rmdir failure -> warning names the lock, exit status preserved (0)",
+      r.returncode == 0 and "could not release lock" in (r.stderr or "") and LOCK1 in (r.stderr or ""))
+
+# sig-x: INT/TERM/HUP during a running lens — jobs die BY PROCESS GROUP before the lock is
+# released, and the round ends 4 (never swallowed into 0). The fake lens does NOT poll its
+# parent: a real model CLI does not self-terminate, and a parent-poll would mask the
+# pid-only-kill regression (subshell dies, grandchild survives — measured upstream).
+for sig, sname in ((signal.SIGINT, "INT"), (signal.SIGTERM, "TERM"), (signal.SIGHUP, "HUP")):
+    d = _mlr_dir()
+    sd = _codex_shim("echo $$ > LENSPID\ntouch STARTED\n"
+                     "while [ ! -e release ]; do sleep 0.05; done\n" + WRITES_O.format("late write"))
+    envH = dict(os.environ, DRY_RUN="0", FORCE="1")
+    envH["PATH"] = sd + os.pathsep + envH["PATH"]
+    open(os.path.join(d, "REVIEW_r1_correctness.md"), "w").write("old\n")
+    pH = subprocess.Popen(["bash", MLR, d, "1", "correctness"], cwd=d, env=envH,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    started = False
+    for _ in range(200):
+        if os.path.exists(os.path.join(d, "STARTED")):
+            started = True
+            break
+        time.sleep(0.05)
+    check("trio/sig-x(%s): startup handshake observed" % sname, started)
+    os.kill(pH.pid, sig)
+    pH.communicate(timeout=30)
+    lenspid = int((_rd_file(d, "LENSPID").strip() or "0"))
+    alive = lenspid > 0
+    deadline = time.time() + 3
+    while alive and time.time() < deadline:
+        try:
+            os.kill(lenspid, 0)
+            time.sleep(0.05)
+        except ProcessLookupError:
+            alive = False
+    check("trio/sig-x(%s): exit 4 (not swallowed), lock released, lens PID actually dead" % sname,
+          pH.returncode == 4 and not os.path.exists(os.path.join(d, LOCK1)) and lenspid > 0 and not alive)
+    open(os.path.join(d, "release"), "w").write("")
+    late = False
+    for _ in range(10):
+        if os.path.exists(os.path.join(d, "REVIEW_r1_correctness.md")):
+            late = True
+            break
+        time.sleep(0.05)
+    check("trio/sig-x(%s): no ghost write after the lock is gone" % sname, not late)
 
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
