@@ -3,6 +3,32 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.10.1] — 2026-07-30
+### Fixed
+- **다렌즈 드라이버가 빈 산출물을 성공으로 보고하던 것** — upstream `docuauthring` #110/#111 재포팅.
+  `multi_lens_review.sh`가 렌즈의 **종료코드만** 보고 ✓를 찍었다. 렌즈가 exit 0인데 리뷰 파일을
+  남기지 않으면 존재하지 않는 파일명을 ✓와 함께 출력하고 triage로 안내했고, 그러면 triage에서
+  "렌즈가 아무것도 못 찾았다"와 "렌즈가 아예 돌지 않았다"가 구분되지 않는다 — 취합 규칙(합의=신뢰↑,
+  단독 발견도 진짜일 수 있음)은 각 렌즈가 실제로 돌았다는 전제 위에 있다.
+  이제 성공 = 종료코드 0 **그리고** 파일 실재 **그리고** 공백 아닌 내용이며, 실패 사유를
+  `exit code` / `no output` / `empty output` 셋으로 구분해 보고한다.
+  함께 재포팅: **FORCE=1 재실행이 낡은 산출물을 ✓로 통과시키던 것** — `-o` 캡처 경로는 렌즈가
+  아무것도 안 쓰면 파일을 건드리지 않아 이전 라운드 내용이 살아남는다. 이제 실행 전에 `.forcebak`으로
+  치우고, 가드 거부·INT/TERM/HUP에서 되돌린 뒤 중단한다 — FORCE가 수용한 것은 덮어쓰기이지 증거
+  소실이 아니다. **범위를 과장하지 않기 위해**: 이는 파일시스템 트랜잭션이 아니다. `kill -9`나
+  mv와 등록 사이의 크래시, 복원 실패는 여전히 `.forcebak`을 남길 수 있다 — 그 경우 경고를 찍고
+  내용을 `.forcebak` 이름으로 **남겨두므로 복구는 rename 한 번**이다.
+  **이 저장소에는 이 스크립트의 테스트가 0건이었다.** 회귀 21건을 새로 썼다(199 → 220): 가짜 `codex`를
+  PATH에 놓아 두 캡처 경로(`-o` / stdout 폴백)를 모두 태우고, 산출물 없음 · 0바이트 · 공백만 · 정상 ·
+  종료코드 실패 · FORCE 낡은내용 · FORCE 신규내용을 각각 확인한다. 변이 3종으로 가드가 실제로 무는 것을
+  확인했다 — 산출물 검사 제거 → 5건 FAIL · 공백판정을 `[ -s ]`로 약화 → 1건 FAIL · FORCE 치움 제거 →
+  2건 FAIL · 심링크 분기 롤백 제거 → 2건 FAIL · BOM 제거 되돌림 → 1건 FAIL · `.forcebak` 선점 검사 제거 → 3건 FAIL.
+  롤백 경로는 **부분 치움 상태에서 실제로 도달**하는 다렌즈 케이스로 덮었다(앞 렌즈 치움 후 뒤 렌즈가
+  심링크·비정규파일·기존 `.forcebak`으로 거부되는 세 갈래 — 앞 렌즈가 바이트 단위로 복원되는지 확인).
+  선행 UTF-8 BOM 하나는 공백 판정 전에 제거한다(BOM만 있는 산출물이 내용으로 통과하던 경계).
+  가짜 `codex` 픽스처가 검증하는 것은 **드라이버의 판정 계약**이지 codex의 행동이 아니다.
+  `docs/PORTS.md` 해시 갱신 — 이 재포팅으로 `check_ports.py`가 **0 failures**가 됐다.
+
 ## [0.10.0] — 2026-07-30
 ### Added
 - **Human-added triage rows (`H-<nn>`)** — re-ported from upstream `docuauthring` #112

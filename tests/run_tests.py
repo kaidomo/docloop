@@ -1264,5 +1264,155 @@ r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
                    cwd=nw, capture_output=True, text=True, timeout=15)
 check("stage guard: no worktree warning outside git", "inside a Git worktree" not in r.stdout)
 
+
+
+# ── multi_lens_review.sh: success = exit 0 AND output exists AND non-blank ──
+# Ported with upstream docuauthring #110/#111. A lens can exit 0 and write nothing; judging by
+# exit code alone printed a ✓ next to a file that does not exist and sent the human to triage,
+# where "found nothing" and "never ran" become indistinguishable. A fake `codex` on PATH drives
+# the driver's verdict contract — it does not model real codex behaviour.
+MLR = os.path.join(SCRIPTS, "multi_lens_review.sh")
+
+def _codex_shim(run_body, supports_o=True):
+    """Fake `codex`. --help decides which capture path the driver picks."""
+    helpline = '  -o, --output-last-message <FILE>' if supports_o else '  (no output-last-message)'
+    sd = tempfile.mkdtemp()
+    sh = os.path.join(sd, "codex")
+    open(sh, "w", encoding="utf-8").write(
+        "#!/bin/bash\n"
+        'for a in "$@"; do if [ "$a" = "--help" ]; then echo "%s"; exit 0; fi; done\n' % helpline
+        + run_body + "\n")
+    os.chmod(sh, 0o755)
+    return sd
+
+def _mlr_dir():
+    d = tempfile.mkdtemp()
+    open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+    return d
+
+def run_mlr(cwd, n, *lenses, shim=None, force=False):
+    env = dict(os.environ, DRY_RUN="0")
+    if shim:
+        env["PATH"] = shim + os.pathsep + os.environ["PATH"]
+    if force:
+        env["FORCE"] = "1"
+    lenses = lenses or ("correctness",)
+    return subprocess.run(["bash", MLR, cwd, n, *lenses], cwd=cwd, capture_output=True, text=True, env=env)
+
+# -o capture path: exit 0, writes nothing at all
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=True))
+out = r.stdout + r.stderr
+check("multi_lens(-o): exit0 + no output -> ✗ and exit 4 (not ✓)",
+      r.returncode == 4 and "no output" in out and "✓" not in r.stdout)
+check("multi_lens: a missing file is not advertised to triage", "done. Merge" not in r.stdout)
+
+# stdout-redirect fallback: exit 0 leaves a 0-byte file
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=False))
+check("multi_lens(fallback): exit0 + 0-byte output -> ✗ and exit 4",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr) and "✓" not in r.stdout)
+
+# whitespace-only output counts as empty
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "  \\n\\t\\n"; exit 0', supports_o=False))
+check("multi_lens: whitespace-only output judged empty",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr))
+
+# normal: real content -> ✓
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "r1-correctness-01 · bug · x · y\\n"; exit 0', supports_o=False))
+check("multi_lens: content-bearing output -> ✓, exit 0, triage advertised",
+      r.returncode == 0 and "✓" in r.stdout and "done. Merge" in r.stdout)
+
+# exit-code failure keeps its own distinct reason (regression)
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "partial\\n"; exit 7', supports_o=False))
+check("multi_lens: exit-code failure reported as its own reason",
+      r.returncode == 4 and "exit code" in (r.stdout + r.stderr))
+
+# FORCE re-run must not let LAST round's content pass as this round's ✓
+d = _mlr_dir()
+OUTP = os.path.join(d, "REVIEW_r1_correctness.md")
+r = run_mlr(d, "1", shim=_codex_shim('printf "round-one finding\\n"; exit 0', supports_o=False))
+check("multi_lens/FORCE precondition: round 1 leaves content", r.returncode == 0 and os.path.exists(OUTP))
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=True), force=True)
+check("multi_lens/FORCE: re-run writing nothing -> ✗ exit 4 (stale must not earn ✓)",
+      r.returncode == 4 and "no output" in (r.stdout + r.stderr) and "✓" not in r.stdout)
+check("multi_lens/FORCE: stale output does not survive the re-run", not os.path.exists(OUTP))
+check("multi_lens/FORCE: no .forcebak left behind", not os.path.exists(OUTP + ".forcebak"))
+
+# FORCE re-run with real new content still succeeds and replaces the old text
+d = _mlr_dir()
+OUTP = os.path.join(d, "REVIEW_r1_correctness.md")
+run_mlr(d, "1", shim=_codex_shim('printf "old text\\n"; exit 0', supports_o=False))
+r = run_mlr(d, "1", shim=_codex_shim('printf "new text\\n"; exit 0', supports_o=False), force=True)
+body = open(OUTP, encoding="utf-8").read() if os.path.exists(OUTP) else ""
+check("multi_lens/FORCE: re-run with new content -> ✓ and content replaced",
+      r.returncode == 0 and "new text" in body and "old text" not in body)
+
+
+# FORCE rollback: the stash is per-lens, so a later lens's guard can reject after an earlier lens
+# was already stashed. Those are the branches that carry the "no evidence loss" promise.
+CONTENT = 'printf "kept finding\n"; exit 0'
+
+def _two_lens_seeded():
+    """round 1 leaves real content for both lenses; returns (dir, pathA, pathB)."""
+    d = _mlr_dir()
+    r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False))
+    a = os.path.join(d, "REVIEW_r1_aa.md"); b = os.path.join(d, "REVIEW_r1_bb.md")
+    assert r.returncode == 0 and os.path.exists(a) and os.path.exists(b), r.stdout + r.stderr
+    return d, a, b
+
+# later lens is a symlink -> reject; the earlier lens must come back untouched
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+os.remove(B); os.symlink("/tmp/elsewhere", B)
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: later-lens symlink -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored byte-for-byte",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+check("multi_lens/FORCE rollback: no .forcebak residue", not os.path.exists(A + ".forcebak"))
+
+# later lens already has a stale .forcebak -> refuse to stash; earlier lens restored
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+open(B + ".forcebak", "w", encoding="utf-8").write("older\n")
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: pre-existing .forcebak -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored after stash refusal",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+
+# later lens output is a directory (not a regular file) -> refuse; earlier lens restored
+d, A, B = _two_lens_seeded()
+before = open(A, encoding="utf-8").read()
+os.remove(B); os.mkdir(B)
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(CONTENT, supports_o=False), force=True)
+check("multi_lens/FORCE rollback: non-regular later output -> exit 3", r.returncode == 3)
+check("multi_lens/FORCE rollback: earlier lens restored after non-regular refusal",
+      os.path.isfile(A) and open(A, encoding="utf-8").read() == before)
+
+# mixed verdicts across lenses: one real, one empty -> overall failure, reasons kept apart
+d = _mlr_dir()
+mixed = r"""out=""
+prev=""
+for a in "$@"; do case "$prev" in -o) out="$a";; esac; prev="$a"; done
+case " $* " in *"Lens: "*) :;; esac
+if [ -n "$out" ]; then case "$out" in *_aa.md) printf "real\n" > "$out";; esac; fi
+exit 0"""
+r = run_mlr(d, "1", "aa", "bb", shim=_codex_shim(mixed, supports_o=True))
+out = r.stdout + r.stderr
+check("multi_lens: mixed verdicts -> exit 4 with per-lens reasons",
+      r.returncode == 4 and "✓ aa" in r.stdout and "bb" in out and "no output" in out)
+
+# BOM boundary (r1-05)
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim(r'printf "\xef\xbb\xbf   \n"; exit 0', supports_o=False))
+check("multi_lens: BOM-only output judged empty",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr))
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim(r'printf "\xef\xbb\xbfreal finding\n"; exit 0', supports_o=False))
+check("multi_lens: BOM + content still counts as content", r.returncode == 0 and "✓" in r.stdout)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
