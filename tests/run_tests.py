@@ -1264,5 +1264,92 @@ r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "stage.py"), "case",
                    cwd=nw, capture_output=True, text=True, timeout=15)
 check("stage guard: no worktree warning outside git", "inside a Git worktree" not in r.stdout)
 
+
+
+# ── multi_lens_review.sh: success = exit 0 AND output exists AND non-blank ──
+# Ported with upstream docuauthring #110/#111. A lens can exit 0 and write nothing; judging by
+# exit code alone printed a ✓ next to a file that does not exist and sent the human to triage,
+# where "found nothing" and "never ran" become indistinguishable. A fake `codex` on PATH drives
+# the driver's verdict contract — it does not model real codex behaviour.
+MLR = os.path.join(SCRIPTS, "multi_lens_review.sh")
+
+def _codex_shim(run_body, supports_o=True):
+    """Fake `codex`. --help decides which capture path the driver picks."""
+    helpline = '  -o, --output-last-message <FILE>' if supports_o else '  (no output-last-message)'
+    sd = tempfile.mkdtemp()
+    sh = os.path.join(sd, "codex")
+    open(sh, "w", encoding="utf-8").write(
+        "#!/bin/bash\n"
+        'for a in "$@"; do if [ "$a" = "--help" ]; then echo "%s"; exit 0; fi; done\n' % helpline
+        + run_body + "\n")
+    os.chmod(sh, 0o755)
+    return sd
+
+def _mlr_dir():
+    d = tempfile.mkdtemp()
+    open(os.path.join(d, "REVIEW_BRIEF.md"), "w", encoding="utf-8").write("# brief\n")
+    return d
+
+def run_mlr(cwd, n, lens="correctness", shim=None, force=False):
+    env = dict(os.environ, DRY_RUN="0")
+    if shim:
+        env["PATH"] = shim + os.pathsep + os.environ["PATH"]
+    if force:
+        env["FORCE"] = "1"
+    return subprocess.run(["bash", MLR, cwd, n, lens], cwd=cwd, capture_output=True, text=True, env=env)
+
+# -o capture path: exit 0, writes nothing at all
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=True))
+out = r.stdout + r.stderr
+check("multi_lens(-o): exit0 + no output -> ✗ and exit 4 (not ✓)",
+      r.returncode == 4 and "no output" in out and "✓" not in r.stdout)
+check("multi_lens: a missing file is not advertised to triage", "done. Merge" not in r.stdout)
+
+# stdout-redirect fallback: exit 0 leaves a 0-byte file
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=False))
+check("multi_lens(fallback): exit0 + 0-byte output -> ✗ and exit 4",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr) and "✓" not in r.stdout)
+
+# whitespace-only output counts as empty
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "  \\n\\t\\n"; exit 0', supports_o=False))
+check("multi_lens: whitespace-only output judged empty",
+      r.returncode == 4 and "empty output" in (r.stdout + r.stderr))
+
+# normal: real content -> ✓
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "r1-correctness-01 · bug · x · y\\n"; exit 0', supports_o=False))
+check("multi_lens: content-bearing output -> ✓, exit 0, triage advertised",
+      r.returncode == 0 and "✓" in r.stdout and "done. Merge" in r.stdout)
+
+# exit-code failure keeps its own distinct reason (regression)
+d = _mlr_dir()
+r = run_mlr(d, "1", shim=_codex_shim('printf "partial\\n"; exit 7', supports_o=False))
+check("multi_lens: exit-code failure reported as its own reason",
+      r.returncode == 4 and "exit code" in (r.stdout + r.stderr))
+
+# FORCE re-run must not let LAST round's content pass as this round's ✓
+d = _mlr_dir()
+OUTP = os.path.join(d, "REVIEW_r1_correctness.md")
+r = run_mlr(d, "1", shim=_codex_shim('printf "round-one finding\\n"; exit 0', supports_o=False))
+check("multi_lens/FORCE precondition: round 1 leaves content", r.returncode == 0 and os.path.exists(OUTP))
+r = run_mlr(d, "1", shim=_codex_shim("exit 0", supports_o=True), force=True)
+check("multi_lens/FORCE: re-run writing nothing -> ✗ exit 4 (stale must not earn ✓)",
+      r.returncode == 4 and "no output" in (r.stdout + r.stderr) and "✓" not in r.stdout)
+check("multi_lens/FORCE: stale output does not survive the re-run", not os.path.exists(OUTP))
+check("multi_lens/FORCE: no .forcebak left behind", not os.path.exists(OUTP + ".forcebak"))
+
+# FORCE re-run with real new content still succeeds and replaces the old text
+d = _mlr_dir()
+OUTP = os.path.join(d, "REVIEW_r1_correctness.md")
+run_mlr(d, "1", shim=_codex_shim('printf "old text\\n"; exit 0', supports_o=False))
+r = run_mlr(d, "1", shim=_codex_shim('printf "new text\\n"; exit 0', supports_o=False), force=True)
+body = open(OUTP, encoding="utf-8").read() if os.path.exists(OUTP) else ""
+check("multi_lens/FORCE: re-run with new content -> ✓ and content replaced",
+      r.returncode == 0 and "new text" in body and "old text" not in body)
+
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)
