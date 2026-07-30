@@ -41,6 +41,10 @@
 | finding_id | lens | finding | validity | nature | lifecycle | status | path | reason / test |
 |------------|------|---------|----------|--------|-----------|--------|------|---------------|
 | r1-01 | n/a | | | | | | | |
+<!-- Human-added row (review.md §3): an issue the reviewer never surfaced gets its own
+     id H-<nn>, unique across the whole loop, with `human-added; no review file` in the
+     reason cell. Delete this row if the round has none — there is no quota.
+| H-01 | n/a | | | | | | | human-added; no review file | -->
 
 **Intentionally not applied**: <item + reason>
 
