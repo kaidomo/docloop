@@ -134,10 +134,29 @@ a matter of taste.
 - No requirement on the *number* of rejections. Never manufacture a rejection to satisfy
   a quota; there is no acceptance-rate target.
 
+**Human-added findings (`H-<nn>`) — record what the reviewer missed:**
+Every row above came from review output, so the set is **conditional on what the Critic
+happened to raise** and can never show what a reviewer *misses*. When the human finds an
+issue the reviewer did not surface, give it its own row with id `H-<nn>` and note
+`human-added; no review file` in the reason cell — where the disposition also owes a
+one-line reason, both go there, provenance first. Classify it on the same four axes and
+dispose of it like any other row: `H` is provenance, not a verdict, so it can still end up
+`unverified` or `refuted`. `lifecycle` is normally `new`, but it is classified, not fixed.
+- Record it even when the fix is trivial — the value is the label, not the repair.
+- A finding the reviewer raised but got *wrong* is not `H-<nn>`; that row keeps its `r` id
+  with `validity: refuted`.
+- **Do not manufacture them.** Zero human-added rows in a round is a legitimate outcome —
+  no quota, exactly as there is none for rejections.
+- **Capture is opportunistic and incomplete.** Zero `H` rows is not evidence of zero
+  reviewer misses; `H` counts are never a recall denominator, a gate, or a reviewer-quality
+  claim without independent adjudication.
+
 **Keying and aliases:**
 - **finding_id keying**: key each finding by finding_id (single = `r<N>-<nn>`,
-  multi-lens = lens-prefixed `r<N>-<lens>-<nn>`; both round-global-unique). If the
-  Critic omitted an id, assign one in discovery order.
+  multi-lens = lens-prefixed `r<N>-<lens>-<nn>`; both round-global-unique. Human-added =
+  `H-<nn>`, unique across the whole review loop — a multi-document packet must not reuse
+  `H-01`, and an `r` id is never reused for one). If the Critic omitted an id, assign one
+  in discovery order.
 - **alias (duplicates / re-review)**: if several lenses raise the same finding, keep
   ONE as the canonical id and fold the rest as aliases in the reason cell (`lifecycle:
   duplicate` — only under the fold condition above). **If a prior round's finding is
@@ -165,8 +184,9 @@ An `apply` row is only complete when the change is in the live original AND the
 reason/test cell records its validation; an `apply` row without that validation counts
 as unresolved and blocks `converged` (§6).
 finding_id is the canonical id triage keys on (§3) — normally the reviewer-emitted id (§2),
-but triage may assign one (if the reviewer omitted it) or alias-fold a re-review onto the
-original id (single = `r<N>-<nn>`, multi-lens = lens-prefixed); it is the stable cross-round key —
+but triage may assign one (if the reviewer omitted it), alias-fold a re-review onto the
+original id, or carry a human-added `H-<nn>` row that no reviewer produced (single =
+`r<N>-<nn>`, multi-lens = lens-prefixed, human-added = `H-<nn>`); it is the stable cross-round key —
 per §3's alias rule, a prior finding still live on re-review keeps its ORIGINAL id here,
 so dispositions and residual track across rounds. The lens column is for readability;
 uniqueness rests on finding_id.
