@@ -72,13 +72,51 @@ echo "multi-lens review: ${#LENSES[@]} lenses in parallel (effort=$EFFORT${MODEL
 # (.log/.err from a failed run are evidence too). FORCE=1 bypasses ONLY the ordinary
 # exists-check; a symlinked output path (dangling or not) is rejected unconditionally —
 # redirection would follow the link and write outside the review folder.
+# Under FORCE=1 the review file is moved aside BEFORE the run rather than overwritten in place:
+# the -o capture path does not touch the file when a lens writes nothing, so the previous round's
+# content would survive, pass the non-empty check below, and be reported ✓ — the human would then
+# triage LAST round's findings as this round's. Stashing rolls back on any guard rejection and on
+# INT/TERM/HUP, so a rejected preflight never leaves earlier evidence deleted while no lens runs —
+# FORCE=1 buys an overwrite, not evidence loss.
+# Scope of that guarantee, stated so it is not overread: it is NOT a filesystem transaction. A
+# kill -9, a crash between the mv and its registration, or a failing restore can still leave a
+# .forcebak behind. Those are reported and the content is left under its .forcebak name rather
+# than dropped, so recovery is a rename.
+FORCE_BAK=()
+force_restore() {
+  frc_left=""
+  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do
+    mv -f "$b" "${b%.forcebak}" 2>/dev/null || frc_left="$frc_left $b"
+  done
+  [ -n "$frc_left" ] && echo "WARNING: could not restore stashed output(s):$frc_left — rename them back by hand" >&2
+  FORCE_BAK=()
+  return 0
+}
+# Installed BEFORE the first move so an interrupt during the stash window rolls back too.
+[ "$DRY_RUN" != "1" ] && [ "$FORCE" = "1" ] && trap 'force_restore; exit 3' INT TERM HUP
 if [ "$DRY_RUN" != "1" ]; then
   for L in "${LENSES[@]}"; do
     for f in "REVIEW_r${N}_${L}.md" "REVIEW_r${N}_${L}.md.log" "REVIEW_r${N}_${L}.md.err"; do
-      [ -L "$f" ] && { echo "refusing: $f is a symlink — outputs must be regular files in the review folder (FORCE does not bypass)" >&2; exit 3; }
+      [ -L "$f" ] && { force_restore; echo "refusing: $f is a symlink — outputs must be regular files in the review folder (FORCE does not bypass)" >&2; exit 3; }
       [ "$FORCE" != "1" ] && [ -e "$f" ] && { echo "already exists: $f (use FORCE=1 or a new N)" >&2; exit 3; }
     done
+    OUT="REVIEW_r${N}_${L}.md"
+    if [ "$FORCE" = "1" ] && [ -e "$OUT" ]; then
+      if [ ! -f "$OUT" ]; then
+        force_restore
+        echo "refusing: existing output is not a regular file: $OUT (not auto-removed; stashed files restored)" >&2; exit 3
+      fi
+      if [ -e "$OUT.forcebak" ] || ! mv -f "$OUT" "$OUT.forcebak" 2>/dev/null; then
+        force_restore
+        echo "could not stash existing output: $OUT — stale content could be mistaken for this round; stopping (stashed files restored)" >&2; exit 3
+      fi
+      FORCE_BAK+=("$OUT.forcebak")
+    fi
   done
+  for b in ${FORCE_BAK[@]+"${FORCE_BAK[@]}"}; do
+    rm -f "$b" || echo "WARNING: leftover stash not removed: $b" >&2
+  done   # only once every lens is clear
+  FORCE_BAK=()
 fi
 
 trap 'kill $(jobs -p) 2>/dev/null' INT TERM
@@ -111,11 +149,23 @@ done
 
 if [ "$DRY_RUN" = "1" ]; then wait; echo "dry-run done (${#LENSES[@]} lenses)."; exit 0; fi
 
-# Collect per-lens exit codes — don't hide failures (any failure => non-zero)
+# Per-lens success — don't hide failures (any failure => non-zero).
+# An exit code alone does not earn a ✓: a lens can exit 0 and write nothing, and the old check
+# then printed a filename that does not exist next to a ✓ and sent the human on to triage. In
+# triage that makes "the lens found nothing" indistinguishable from "the lens never ran", while
+# the merge rule below (agreement raises confidence, a single-lens find can still be real)
+# assumes every lens actually ran. Success = exit 0 AND the file exists AND it has
+# non-whitespace content. The three reasons are reported apart; collapsing them loses the
+# diagnosis. DRY_RUN produces no output by design and returns before this check.
 fail=0; failed=""; i=0
 for pid in "${PIDS[@]}"; do
-  if wait "$pid"; then echo "  ✓ ${LNAMES[$i]} -> REVIEW_r${N}_${LNAMES[$i]}.md"
-  else fail=1; failed="$failed ${LNAMES[$i]}"; echo "  ✗ ${LNAMES[$i]} failed (-> REVIEW_r${N}_${LNAMES[$i]}.md.log/.err)"; fi
+  L="${LNAMES[$i]}"; OUT="REVIEW_r${N}_${L}.md"; why=""
+  if ! wait "$pid"; then why="exit code"
+  elif [ ! -f "$OUT" ]; then why="no output"
+  elif ! sed -e '1s/^\xef\xbb\xbf//' "$OUT" 2>/dev/null | grep -q '[^[:space:]]'; then why="empty output"
+  fi
+  if [ -z "$why" ]; then echo "  ✓ $L -> $OUT"
+  else fail=1; failed="$failed $L($why)"; echo "  ✗ $L — $why (-> $OUT.log/.err)"; fi
   i=$((i+1))
 done
 if [ "$fail" = "1" ]; then
