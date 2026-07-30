@@ -3,6 +3,21 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.10.0] — 2026-07-30
+### Added
+- **Human-added triage rows (`H-<nn>`)** — re-ported from upstream `docuauthring` #112
+  (`peer-review`/`codex-peer-review` SKILL.md §5). Every other triage row comes from review
+  output, so the set is conditional on what the Critic happened to raise and can never show
+  what a reviewer *misses*. `H-<nn>` rows are the loop's only false-negative signal: the
+  human notes an issue the reviewer never surfaced, keyed with its own id, classified on the
+  same four axes, `human-added; no review file` in the reason cell.
+  Guards on both sides — no quota (against over-recording), and an explicit statement that
+  capture is opportunistic so zero `H` rows is never evidence of zero misses and `H` counts
+  are never a recall denominator, gate, or reviewer-quality claim (against under-recording).
+  `H` ids are unique across the whole review loop, not per round, and never reuse an `r` id.
+  Upstream note: the same change had to reach the brief templates and the shared FID
+  validator, not just the prose — the contract is enforced in more places than it is stated.
+
 ## [0.9.1] — 2026-07-22
 ### Fixed
 - **`gap-audit` downstream coverage now counts readable real files** (re-port from the canonical
