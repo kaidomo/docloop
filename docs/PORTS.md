@@ -42,6 +42,7 @@ source on the `lib/stage.py` composite row).
 | lib/multi_lens_review.sh | blob | skills/peer-review/scripts/multi_lens_review.sh | 1807f09646d0e0eb60d42f57c76b249b7f907069 | 1b78363c612c3507b399627898aeb2a1e488609c | FORCE/clobber block redesign re-ported 2026-07-31 (upstream #115/#116/#120: round lock, validate-first 3-path unit, signal ladder, pgroup kill) |
 | lib/blind_lock.py | semantic-port | meta-learning-loop (prediction lock) | - | - | v0.7.0 port |
 | lib/panel_review.sh | semantic-port | cross-functional-review | - | - | v0.7.0 port |
+| lib/contribution_flow.py | docloop-native | - | - | - | opt-in append-only contribution/curation runner and validated draft bridge |
 | prompts/atb-audit.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
 | prompts/atb-author.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
 | prompts/atb-capture.md | semantic-port | asistobe-authoring SKILL.md | - | - | change-plan mode |
@@ -50,6 +51,8 @@ source on the `lib/stage.py` composite row).
 | prompts/draft.md | semantic-port | pm-authoring SKILL.md | - | - | |
 | prompts/gap-audit.md | semantic-port | pm-authoring SKILL.md | - | - | read-visibility block re-ported 2026-07-22 |
 | prompts/review.md | semantic-port | peer-review SKILL.md | - | - | four-axis triage contract, re-ported 2026-07-22; `H-<nn>` human-added rows re-ported 2026-07-30 (upstream #112) |
+| prompts/contribute.md | docloop-native | - | - | - | perspective contribution envelope contract; no upstream |
+| templates/contribution-response.example.yaml | docloop-native | - | - | - | human response/material/disposition example; no upstream |
 | bin/docloop · tests/ · templates/ · docs/ | docloop-native | - | - | - | |
 
 Downstream hashes are recorded at port time; `check_ports.py` fails a blob row

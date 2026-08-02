@@ -76,6 +76,47 @@ part that can be made convergent and the part that can't.
   scripted; *applying* a critique is a human gate. A wrong critique applied blindly
   is a regression, and there's no test to catch it.
 
+## Optional contribution: more attention, still no oracle
+
+The opt-in `contribute → human response/materials → curate → draft-curated` branch
+adds perspectives without pretending that more model output creates truth or
+consensus. It is separate from the default writing path: if the user does not call
+these commands, `plan`, plain `draft`, the manifest, and the SSOT behave exactly as
+before. A completed bundle does not make plain `draft` discover or consume it.
+
+`contribute` makes one model invocation per explicitly selected perspective. Every
+invocation in a run is pointed at the same captured bundle bytes, and each result
+keeps generation-qualified IDs in a one-to-one index. This gives provenance and
+repeatable routing, not cognitive independence. The calls may use the same model
+lineage and correlated assumptions. The captured bundle is assembled over a time
+interval, not atomically snapped at one instant, and it is not a filesystem
+isolation or secrecy boundary.
+
+The human boundary is explicit. A copied response file must route every raw item to
+`decided`, `supported`, `open`, `carried`, or `dismissed`; blank or open input never
+becomes a decision. Optional semantic groups are operator-owned. `curate` is a
+deterministic transformation, not another model judgment: it includes only decided
+and supported items in drafting notes, keeps open questions visibly unresolved, and
+preserves carried and dismissed items for audit. It does not modify the manifest,
+body SSOT, or approvals. Attestation is self-attestation and does not prove the
+operator's identity, authorship, or authority.
+
+The storage protocol supports the same honesty boundary. Run IDs are append-only,
+destinations are reserved without overwrite, and `COMPLETE.yaml` is created
+exclusively after payload validation. Downstream stages revalidate the complete
+inventory and digests; marker existence alone is not acceptance. This is a
+no-clobber and validated-acceptance contract, not a portable directory transaction:
+power loss, `SIGKILL`, a hostile same-UID process, manual tampering, and network
+filesystem behavior remain outside the guarantee. Incomplete bundles stay visible
+for diagnosis and are never silently recovered or deleted.
+
+Finally, the branch copies source and supplemental material into append-only local
+bundles and can send captured contents to the configured model provider. Restricted
+file modes reduce accidental local exposure; they do not provide encryption,
+backup exclusion, provider-retention control, or same-user confidentiality. The
+limits and manual retention procedure are part of the feature contract, not merely
+operational advice; see [the contribution and curation guide](contribute-curate.md).
+
 ## A second instance: change-plan mode (as-is/to-be)
 
 The split isn't specific to writing a PRD. **Change-plan mode** applies the same cut to a

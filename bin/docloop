@@ -54,6 +54,9 @@ docloop — a verification-first document kernel (wraps codex / claude -p)
   docloop init <folder> [inputs...]   scaffold a work folder (inputs/ work/ outputs/ reports/)
   docloop plan   [request...]         vague ask -> structured manifest (intake interview)
   docloop draft  [notes...]           write sections from evidence (reconcile)
+  docloop contribute <run-id> <perspectives...>   generate separate, labeled perspective contributions (opt-in)
+  docloop curate <source-run-id> <curation-id> <response.yaml>   deterministically curate an attested response
+  docloop draft-curated <curation-id>  validate curated notes and explicitly use them as draft input
   docloop audit                       gap-audit: find contradictions (fan-out) + report
   docloop review <name> <target...>   the Oracle loop: external-model cross-review
   docloop panel <folder> <N> [roles]  role-panel review: independent job-role evaluators (per-process isolation) + Area Chair synthesis
@@ -82,6 +85,8 @@ case "$cmd" in
     python3 "$LIB/init_workspace.py" "$@" ;;
   plan)   run_model "$(stage_prompt plan.md "$@")"  rw ;;
   draft)  run_model "$(stage_prompt draft.md "$@")" rw ;;
+  contribute|curate|draft-curated)
+    exec python3 "$LIB/contribution_flow.py" "$cmd" "$@" ;;
   audit)  run_model "$(stage_prompt gap-audit.md "$@")" rw ;;
   review)
     [ "$#" -ge 2 ] || die "usage: docloop review <name> <target...>"

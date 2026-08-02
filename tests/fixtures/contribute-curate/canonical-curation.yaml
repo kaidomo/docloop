@@ -1,0 +1,47 @@
+schema_version: 1
+metadata:
+  curation_id: cur-canonical
+  source_run_id: cc-canonical
+  source_payload_digest_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  operator_response_sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  created_at: '2026-08-03T00:00:00Z'
+semantic_digest_sha256: d44b832a2ed69a02e435bd80c4c133cdf4a840435230782e06ff5a70caf700fb
+content:
+  items:
+  - item_id: cc-canonical/pm/01
+    group_id: ''
+    perspective: pm
+    status: decided
+    target_section: overview
+    consideration: 'line one
+
+      # heading "quoted"'
+    human_question: 'Choose "A"
+
+      or B?'
+    decision: 'Ship "A"
+
+      carefully'
+    material_sha256: []
+    rationale: ''
+  - item_id: cc-canonical/backend/01
+    group_id: evidence
+    perspective: backend
+    status: supported
+    target_section: rules
+    consideration: API evidence
+    human_question: Which source?
+    decision: Use source
+    material_sha256:
+    - cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    rationale: ''
+  - item_id: cc-canonical/qa/01
+    group_id: ''
+    perspective: qa
+    status: open
+    target_section: rules
+    consideration: Edge case
+    human_question: Still open?
+    decision: ''
+    material_sha256: []
+    rationale: ''
