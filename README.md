@@ -17,6 +17,7 @@ document unless you approve it.
 - **Check that every "as-is" claim in a change plan has real evidence** — an unsourced claim is blocked before the plan is handed off (change-plan mode).
 - **Catch quotes that no longer match the original** — a separate companion check compares each quote against its source (spacing differences ignored).
 - **Let an external AI attack your draft — and apply only what you approve** — every finding gets an ID and a keep/drop decision.
+- **Prepare a stricter three-lens review packet when you explicitly ask for one** — `review-gate` freezes one reviewed file, validates its decision history and deterministic inputs, and leaves model runs and the final decision to people.
 - **Optionally collect named job perspectives before drafting** — `contribute` records separate, traceable suggestions; a person supplies decisions and materials before `curate` turns them into verified optional draft input.
 - **Cut the master document into pages for Confluence and the like** — `split` cuts the pages from the one master copy; regenerate the deliverables anytime.
 
@@ -90,6 +91,28 @@ workspace-write; these provider settings are not an isolation guarantee.
 See [the contribution and curation guide](docs/contribute-curate.md) for the response
 schema, accepted-state checks, limits, privacy, concurrency, and manual retention.
 
+### Optional: prepare an explicit review-gate packet
+
+After `docloop review` has staged a folder, you can explicitly freeze one UTF-8 target
+and the selected review inputs into a three-lens packet:
+
+```bash
+docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PRD.md \
+  --decisions decisions.yaml --terms terms.yaml --no-docmodel
+docloop review-gate check \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+```
+
+This command prepares prompts and deterministic audit artifacts; it does not invoke a
+model, apply findings, or mark the document reviewed. Run the generated lens, synthesis,
+anchor-audit, and verification prompts in fresh contexts, then record the human decision.
+`review-gate check` verifies the prepared marker, frozen payload inventory and digest,
+run identity, and that the results tree contains only real directories and regular
+files; it still does not declare review pass.
+The lens folders are input envelopes, not filesystem isolation or proof of independent
+agents. See [the review-gate guide](docs/review-gate.md) for input choices, artifacts,
+failure behavior, and the manual completion contract.
+
 ## Limitations
 
 - An AI model does the finding — treat `audit`, `review`, and `panel` reports as a sharp-eyed assistant, not a verdict.
@@ -102,6 +125,7 @@ schema, accepted-state checks, limits, privacy, concurrency, and manual retentio
 - [`docs/change-plan-mode.md`](docs/change-plan-mode.md) — the as-is/to-be pipeline (`atb-*`) for planning fixes to a system that already exists.
 - [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — get the draft read from several job angles at once (`panel`), and pin down a prediction before the result exists (`lock` / `verify`).
 - [`docs/contribute-curate.md`](docs/contribute-curate.md) — optionally collect perspectives, add human decisions and materials, and pass validated curated notes to drafting.
+- [`docs/review-gate.md`](docs/review-gate.md) — explicitly prepare a frozen three-lens review packet, then complete synthesis, verification, and human disposition manually.
 - [`docs/policy-layer.md`](docs/policy-layer.md) — the one file (`policy.yaml`) that holds your org's document rules.
 - [`docs/direction.md`](docs/direction.md) — what's inside today, and what is planned but not shipped.
 - [`docs/design.md`](docs/design.md) — why documents need a verification kernel, and where docloop draws the line.

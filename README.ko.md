@@ -15,6 +15,7 @@ PRD·정책서·변경계획을 쓰고 나서 터미널에서 docloop을 돌린�
 - **변경계획의 as-is 주장마다 근거가 실제로 있는지 확인한다** — 출처 없는 주장은 계획을 넘기기 전에 걸린다(변경계획 모드).
 - **인용이 원본과 달라지면 잡는다** — 별도의 동반 검사가 인용을 출처와 대조해(띄어쓰기 차이는 무시) 어긋난 것을 표시한다.
 - **외부 AI가 초안을 공격하게 하고, 반영은 당신이 승인한 것만** — 지적마다 번호가 붙고 반영/기각을 정한다.
+- **명시적으로 요청할 때 더 엄격한 3렌즈 리뷰 패킷을 준비한다** — `review-gate`가 리뷰할 파일 하나와 결정 이력·결정론 입력을 동결하고, 모델 실행과 최종 판단은 사람에게 남긴다.
 - **선택한 직무 관점을 초안 전에 따로 모은다** — `contribute`가 추적 가능한 제안을 별도 기록하고, 사람이 결정·자료를 보충한 뒤 `curate`가 검증된 선택 입력으로 정리한다.
 - **정본 문서를 컨플루언스 등에 올릴 페이지로 쪼갠다** — `split`이 하나뿐인 정본에서 페이지를 잘라낸다. 배포본은 언제든 재생성.
 
@@ -86,6 +87,27 @@ Codex 기여 호출은 read-only sandbox를, curated 초안 호출은 workspace-
 accepted-state 검증, 제한, privacy, 동시 실행, 수동 보존·삭제는
 [기여·큐레이션 가이드](docs/contribute-curate.md)를 참고한다.
 
+### 선택 사항: review-gate 패킷 준비
+
+`docloop review`로 폴더를 준비한 뒤, UTF-8 대상 파일 하나와 선택한 리뷰 입력을
+명시적으로 동결해 3렌즈 패킷을 만들 수 있다.
+
+```bash
+docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PRD.md \
+  --decisions decisions.yaml --terms terms.yaml --no-docmodel
+docloop review-gate check \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+```
+
+이 명령은 프롬프트와 결정론적 감사 산출물을 준비할 뿐 모델을 호출하거나 finding을
+반영하거나 문서를 reviewed로 표시하지 않는다. 생성된 렌즈·합성·앵커 감사·검증
+프롬프트를 fresh context에서 실행하고, 마지막 판단을 사람이 기록한다.
+`review-gate check`는 prepared marker·동결 payload inventory/digest·run ID와 results
+tree가 실제 디렉터리·정규 파일로만 구성됐는지를 검사하지만 리뷰 통과를 선언하지는
+않는다. 렌즈 폴더는
+입력 envelope이지 파일시스템 격리나 독립 agent의 증명이 아니다. 입력 선택·산출물·
+실패 동작·수동 완료 계약은 [review-gate 가이드](docs/review-gate.md)를 참고한다.
+
 ## 한계
 
 - 찾는 건 AI 모델이다 — `audit`·`review`·`panel` 리포트는 판정이 아니라 눈 밝은 검토 보조로 쓴다.
@@ -98,6 +120,7 @@ accepted-state 검증, 제한, privacy, 동시 실행, 수동 보존·삭제는
 - [`docs/change-plan-mode.md`](docs/change-plan-mode.md) — 이미 있는 시스템의 수정을 계획하는 as-is/to-be 파이프라인(`atb-*`).
 - [`docs/panel-and-lock.md`](docs/panel-and-lock.md) — 초안을 여러 직무 관점에서 한 번에 검토받고(`panel`), 결과가 나오기 전에 예측을 못 박아 둔다(`lock` / `verify`).
 - [`docs/contribute-curate.md`](docs/contribute-curate.md) — 관점 기여를 선택적으로 모으고 사람의 결정·자료를 보충해 검증된 초안 입력으로 넘기는 흐름.
+- [`docs/review-gate.md`](docs/review-gate.md) — 동결된 3렌즈 리뷰 패킷을 명시적으로 준비하고 합성·검증·사람 처분을 수동으로 마치는 흐름.
 - [`docs/policy-layer.md`](docs/policy-layer.md) — 조직 문서 규칙을 담는 한 파일(`policy.yaml`).
 - [`docs/direction.md`](docs/direction.md) — 지금 안에 있는 것, 그리고 계획이지만 미출시인 것.
 - [`docs/design.md`](docs/design.md) — 왜 문서에는 검증 커널이 필요한가, docloop이 긋는 선.

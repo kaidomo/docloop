@@ -2826,5 +2826,16 @@ check("curate/group rejects members with inconsistent status/section/decision",
       group_run.returncode != 0 and not os.path.exists(os.path.join(
           flow, "work", "curations", "cur-group-invalid")))
 
+# ── review-gate port (separate focused suite; included in the canonical full run) ──
+review_gate_suite = subprocess.run(
+    [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_review_gate.py")],
+    capture_output=True, text=True,
+)
+if review_gate_suite.stdout:
+    print(review_gate_suite.stdout, end="")
+if review_gate_suite.stderr:
+    print(review_gate_suite.stderr, end="", file=sys.stderr)
+check("review-gate focused suite", review_gate_suite.returncode == 0)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

@@ -3,6 +3,49 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.12.0] — 2026-08-03
+### Added
+- **Explicit `docloop review-gate prepare` packet workflow.** From an existing
+  `docloop review` folder, the command freezes exactly one named UTF-8 target plus
+  selected sidecars and their in-folder provenance. Callers must choose assured
+  `--decisions` or explicit `--unassured`, `--terms` or `--no-terms`, and
+  `--docmodel` or `--no-docmodel`; a default planning-document axis checklist is
+  supplied when `--axes` is omitted. Invalid or stale decisions abort rather than
+  silently disabling suppression, and conventional adjacent terms/docmodel files
+  cannot be skipped with `--no-*`.
+- **Three fixed lens envelopes and manual review handoff.** Prepared runs contain
+  L1 target-only, L2 target-plus-decisions (or an unassured notice), and L3
+  target-plus-axes-and-optional-docmodel packets, plus synthesis, anchor-audit,
+  independent-verification, and human-decision guidance. The command does not invoke
+  models or claim filesystem isolation, independent agents, complete detection,
+  correct severity, confidence ordering, or a justified repeat count. Prepared is a
+  packet state, not `passed` or `done`; people run fresh contexts, disposition every
+  finding, verify applied findings, and record the final decision.
+- **Frozen, append-only evidence protocol.** Target, sidecars, and referenced
+  provenance are snapshotted before validation or scanning. Each run ID is reserved
+  once with an ownership-marked `INCOMPLETE.json`; exclusive writes and fsync precede
+  `COMPLETE.json`, whose inventory/digest covers the prepared inputs, prompts, audits,
+  and handoffs. State markers and append-only `results/` are excluded so manual outputs
+  can be added without invalidating prepared inputs. Post-reservation failure remains
+  non-consumable diagnostic evidence and the ID cannot be reused. A prepared run
+  requires COMPLETE-without-INCOMPLETE plus a matching prepared-payload inventory.
+- **Prepared-packet integrity check and deterministic tool entry points.**
+  `review-gate check` verifies state markers, run identity/state, the prepared
+  payload inventory/digest, and a safe regular-file results tree; success means
+  prepared, not reviewed or done. `validate-decisions`, `scan-terms`, and
+  `audit-anchors` preserve the vendored upstream tools' fail-closed behavior and exit
+  semantics. Term-scan audit output is retained in the packet when selected; anchor
+  auditing detects synthesis losses but does not validate finding correctness or
+  reviewer recall. Exact scanner output is preserved as `TERM_SCAN_RAW.md`; the packet
+  audit copy zero-pads lines 1–9 (`L01`…`L09`) so the upstream anchor auditor cannot
+  confuse them with lens names and silently miss an early-line anchor.
+
+### Compatibility
+- Existing `plan`, `draft`, `review`, `panel`, `gate`, `contribute`, `curate`, and
+  other commands are unchanged unless `review-gate` is explicitly invoked. This port
+  excludes unsettled upstream docuauthring #160 (drift output type), #161 (up-front
+  convention questions), and #162 (second-document/docmodel generalization).
+
 ## [0.11.0] — 2026-08-03
 ### Added
 - **Explicitly opt-in `contribute → curate → draft-curated` branch.**

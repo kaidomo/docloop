@@ -16,12 +16,14 @@ anything written in "would" below does not exist yet.
 
 This section is design direction, not a feature list. **Current:** the protocol-kernel
 boundary and the `policy.yaml` variable layer — the shipped verb set is `init · plan ·
-draft · audit · review · panel · lock · verify · gate · split` plus the `atb-*` change-plan stages. **Planned,
+draft · audit · review · review-gate · panel · lock · verify · gate · split · contribute ·
+curate · draft-curated` plus the `atb-*` change-plan stages. **Planned,
 not shipped:** a domain-pack loader, a derivation-manifest execution path, and the
 reviewer-eval gold set. The conditional-tense text below describes where those planned pieces would go.
 
 이 섹션은 기능 목록이 아니라 설계 방향이다. **현재 있는 것:** 프로토콜 커널 경계와 `policy.yaml`
-가변층 — shipped verb는 `init · plan · draft · audit · review · panel · lock · verify · gate · split` + `atb-*`
+가변층 — shipped verb는 `init · plan · draft · audit · review · review-gate · panel · lock · verify · gate · split ·
+contribute · curate · draft-curated` + `atb-*`
 변경계획 스테이지다. **계획이며 미구현:** domain-pack 로더, derivation manifest 실행 경로,
 reviewer-eval 골드셋. 아래 조건법 문장은 그 계획된 조각들이 어디로 갈지를 그린다.
 
@@ -79,11 +81,16 @@ was checked.)
    확인(lock/verify, 진단 전용)으로 이어진다. 가능한 점검은 결정론적으로 수행하고, 그렇지
    않은 점검은 성공을 가장하지 않고 한계를 드러낸다.
 2. **The review protocols** — external-model cross-review (`prompts/review.md`: finding
-   IDs, triage, a human approval gate, explicit termination states) and role-panel review
-   (`panel`: independent role runs, Area Chair synthesis, human decision handoff).
+   IDs, triage, a human approval gate, explicit termination states), role-panel review
+   (`panel`: separate role runs, Area Chair synthesis, human decision handoff), and the
+   explicit `review-gate` packet builder. `review-gate` freezes one target and deterministic
+   inputs into fixed L1/L2/L3 envelopes, then stops for fresh-context model runs,
+   verification, and a human decision; it is not an automatic reviewer or isolation layer.
    <br>**리뷰 프로토콜** — 외부 모델 교차 리뷰(`prompts/review.md`: finding ID·triage·사람
-   승인 게이트·명시적 종료 상태)와 역할 패널 리뷰(`panel`: 독립 역할 실행·Area Chair 합성·
-   사람 결정 핸드오프).
+   승인 게이트·명시적 종료 상태), 역할 패널 리뷰(`panel`: 분리된 역할 실행·Area Chair 합성·
+   사람 결정 핸드오프), 명시적 `review-gate` 패킷 준비기. `review-gate`는 대상 하나와 결정론
+   입력을 L1/L2/L3 envelope로 동결한 뒤 fresh-context 모델 실행·검증·사람 판단을 위해 멈춘다.
+   자동 리뷰어나 격리 계층이 아니다.
 3. **The authoring pipelines** (`prompts/`) — the authoring layer is a client of the
    kernel; it currently contains two pipelines: doc mode (plan → draft → audit → review →
    gate → split) and change-plan mode (`atb-*`).
@@ -99,6 +106,7 @@ prompts/             stage prompts — doc mode: plan/draft/gap-audit/review · 
 lib/                 python scripts: init, validate, gap_audit, ground_audit, split, approval_brief, stage, ...
 templates/           policy + manifest skeletons (doc + .atb change-plan variants), review-brief template
 docs/design.md       why documents need a verification kernel (not just a writing loop); design decisions (protocol kernel, reviewer-eval)
+docs/review-gate.md  explicit packet-preparation CLI, artifacts, limits, and manual verification contract
 docs/reviewer-eval-bootstrap.md   bootstrapping a reviewer-quality gold set from review residue · 리뷰 잔여물에서 리뷰어 골드셋 부트스트랩
 docs/reviewer-lens-set.md         document-review lenses harvested from PM skills (55 → 73 criteria) · PM 스킬에서 하베스트한 문서 리뷰 렌즈
 docs/cold-start-strategies.md     initial evidence-acquisition patterns for authoring · 저작 초기 증거 획득 패턴
