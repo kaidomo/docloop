@@ -117,6 +117,30 @@ backup exclusion, provider-retention control, or same-user confidentiality. The
 limits and manual retention procedure are part of the feature contract, not merely
 operational advice; see [the contribution and curation guide](contribute-curate.md).
 
+## Explicit review-gate packets: protocol without an orchestrator
+
+The opt-in `review-gate` command applies the same verification-kernel boundary to a
+stricter review protocol. It prepares a packet; it does not run the review. One file
+already staged under a `docloop review` folder is frozen with its selected decision
+registry, axes, term dictionary, document model, and referenced provenance. Validation
+and deterministic scanning run against those frozen bytes, so a changing live input
+cannot silently alter the packet after a check.
+
+The packet separates L1 cold-read, L2 decision-history, and L3 cross-section inputs
+into different directories. That layout is an auditable visibility contract for the
+operator, not filesystem isolation or evidence of independent agents. The operator
+must run the prompts in fresh contexts, synthesize findings, check for lost anchors,
+obtain fresh-context kill/pass/unresolved verification, and record the final human
+decision. `prepared` therefore describes only a complete packet inventory; it never
+means the review passed or the document is done.
+
+This command is deliberately explicit and additive. It neither intercepts ordinary
+review requests nor changes any existing command. The first port also refuses
+unmeasured promises from upstream: it does not add a drift result type,
+convention-question phase, generalized multi-document docmodel, severity ordering,
+or a prescribed repeat count. See the
+[review-gate guide](review-gate.md) for the executable and human contracts.
+
 ## A second instance: change-plan mode (as-is/to-be)
 
 The split isn't specific to writing a PRD. **Change-plan mode** applies the same cut to a
