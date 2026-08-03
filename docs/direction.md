@@ -84,12 +84,16 @@ was checked.)
    IDs, triage, a human approval gate, explicit termination states), role-panel review
    (`panel`: separate role runs, Area Chair synthesis, human decision handoff), and the
    explicit `review-gate` packet builder. `review-gate` freezes one target and deterministic
-   inputs into fixed L1/L2/L3 envelopes, then stops for fresh-context model runs,
-   verification, and a human decision; it is not an automatic reviewer or isolation layer.
+   inputs into fixed L1/L2/L3 envelopes and validates an optional pre-lens convention
+   pair before stopping for fresh-context model runs. After synthesis it supports a
+   deterministic intermediate ledger and packet-bound receipt for verification and a
+   human decision; it is not an automatic reviewer or isolation layer.
    <br>**리뷰 프로토콜** — 외부 모델 교차 리뷰(`prompts/review.md`: finding ID·triage·사람
    승인 게이트·명시적 종료 상태), 역할 패널 리뷰(`panel`: 분리된 역할 실행·Area Chair 합성·
    사람 결정 핸드오프), 명시적 `review-gate` 패킷 준비기. `review-gate`는 대상 하나와 결정론
-   입력을 L1/L2/L3 envelope로 동결한 뒤 fresh-context 모델 실행·검증·사람 판단을 위해 멈춘다.
+   입력을 L1/L2/L3 envelope로 동결하고 선택적 pre-lens 규약 쌍을 검증한 뒤 fresh-context
+   모델 실행을 위해 멈춘다. 합성 이후에는 결정론 중간 원장과 패킷 결합 receipt로 검증·사람
+   판단을 지원한다.
    자동 리뷰어나 격리 계층이 아니다.
 3. **The authoring pipelines** (`prompts/`) — the authoring layer is a client of the
    kernel; it currently contains two pipelines: doc mode (plan → draft → audit → review →

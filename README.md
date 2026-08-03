@@ -101,6 +101,8 @@ docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PR
   --decisions decisions.yaml --terms terms.yaml --no-docmodel
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+docloop review-gate validate-result \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01 results/DONE.md
 ```
 
 This command prepares prompts and deterministic audit artifacts; it does not invoke a
@@ -109,6 +111,11 @@ anchor-audit, and verification prompts in fresh contexts, then record the human 
 `review-gate check` verifies the prepared marker, frozen payload inventory and digest,
 run identity, and that the results tree contains only real directories and regular
 files; it still does not declare review pass.
+New runs use a v2 intermediate ledger and a packet-bound final receipt. An optional
+`--convention-profile FILE --convention-intake FILE` pair validates pre-lens answers
+before reserving a run; it records readiness only and does not run a lens or make a
+draft docmodel authoritative. Legacy v1 done receipts remain valid. Upstream #162
+multi-document/docmodel generalization remains deferred.
 The lens folders are input envelopes, not filesystem isolation or proof of independent
 agents. See [the review-gate guide](docs/review-gate.md) for input choices, artifacts,
 failure behavior, and the manual completion contract.

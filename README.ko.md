@@ -97,6 +97,8 @@ docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PR
   --decisions decisions.yaml --terms terms.yaml --no-docmodel
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+docloop review-gate validate-result \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01 results/DONE.md
 ```
 
 이 명령은 프롬프트와 결정론적 감사 산출물을 준비할 뿐 모델을 호출하거나 finding을
@@ -104,7 +106,10 @@ docloop review-gate check \
 프롬프트를 fresh context에서 실행하고, 마지막 판단을 사람이 기록한다.
 `review-gate check`는 prepared marker·동결 payload inventory/digest·run ID와 results
 tree가 실제 디렉터리·정규 파일로만 구성됐는지를 검사하지만 리뷰 통과를 선언하지는
-않는다. 렌즈 폴더는
+않는다. 새 run은 v2 중간 원장과 패킷에 결합된 최종 receipt를 사용한다. 선택적
+`--convention-profile FILE --convention-intake FILE` 쌍은 run을 예약하기 전에 pre-lens
+답변을 검증하지만, 렌즈를 실행하거나 draft docmodel에 권위를 부여하지 않는다. 기존 v1
+done receipt도 계속 유효하며 upstream #162 다중 문서/docmodel 일반화는 유보한다. 렌즈 폴더는
 입력 envelope이지 파일시스템 격리나 독립 agent의 증명이 아니다. 입력 선택·산출물·
 실패 동작·수동 완료 계약은 [review-gate 가이드](docs/review-gate.md)를 참고한다.
 

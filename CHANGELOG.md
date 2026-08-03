@@ -3,6 +3,28 @@
 All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
 
+## [0.13.0] — 2026-08-04
+### Added
+- **Bound v2 review ledger and receipt validation / 패킷 결합 v2 리뷰 원장·receipt 검증.**
+  New review-gate runs can validate complete candidate-to-atom-to-terminal lineage,
+  non-blocking drift, authority-bound questions, immutable public records, and an exact
+  prepared-packet binding. 기존 v1 done receipt는 계속 검증된다.
+- **Optional convention preflight / 선택적 규약 사전 검증.** A profile/intake pair is
+  validated against the actual target before run reservation, frozen into the packet,
+  and recorded only as `phase: pre_lens`. Draft materialization is explicit,
+  no-clobber, non-authoritative, and never injected into the current L3 packet.
+- **Deterministic command surface / 결정론 명령 표면.** Added
+  `validate-intermediate`, `validate-result`, `validate-convention-profile`,
+  `validate-convention-intake`, and `materialize-docmodel`; ledger-aware anchor audit
+  remains backward compatible when no ledger is supplied.
+
+### Compatibility
+- Ordinary docloop commands and review-gate preparation without convention inputs are
+  CLI- and lens-visibility-compatible; v0.13 updates packet versions and handoffs.
+  `review-gate check` still proves prepared-input integrity only. Upstream
+  #162 multi-document/docmodel generalization remains deferred; no model independence,
+  completeness, or generalization guarantee is added.
+
 ## [0.12.0] — 2026-08-03
 ### Added
 - **Explicit `docloop review-gate prepare` packet workflow.** From an existing
@@ -43,8 +65,8 @@ All notable changes to docloop are documented here. This project adheres to
 ### Compatibility
 - Existing `plan`, `draft`, `review`, `panel`, `gate`, `contribute`, `curate`, and
   other commands are unchanged unless `review-gate` is explicitly invoked. This port
-  excludes unsettled upstream docuauthring #160 (drift output type), #161 (up-front
-  convention questions), and #162 (second-document/docmodel generalization).
+  excluded unsettled upstream docuauthring #162 (second-document/docmodel
+  generalization); v0.13.0 later adds the bounded #160/#161 protocol slices.
 
 ## [0.11.0] — 2026-08-03
 ### Added

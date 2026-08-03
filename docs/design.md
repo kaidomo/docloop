@@ -126,6 +126,12 @@ registry, axes, term dictionary, document model, and referenced provenance. Vali
 and deterministic scanning run against those frozen bytes, so a changing live input
 cannot silently alter the packet after a check.
 
+The v0.13 contract adds a deterministic intermediate ledger and packet-bound final
+receipt plus an optional, generic convention profile/intake preflight. These remain
+protocol mechanisms: drift is non-blocking representation metadata, convention answers
+are not authority, and materialization creates only a draft for possible human approval
+and selection in a later run.
+
 The packet separates L1 cold-read, L2 decision-history, and L3 cross-section inputs
 into different directories. That layout is an auditable visibility contract for the
 operator, not filesystem isolation or evidence of independent agents. The operator
@@ -135,10 +141,10 @@ decision. `prepared` therefore describes only a complete packet inventory; it ne
 means the review passed or the document is done.
 
 This command is deliberately explicit and additive. It neither intercepts ordinary
-review requests nor changes any existing command. The first port also refuses
-unmeasured promises from upstream: it does not add a drift result type,
-convention-question phase, generalized multi-document docmodel, severity ordering,
-or a prescribed repeat count. See the
+review requests nor changes any existing command. It still refuses unmeasured promises
+from upstream: #162 generalized multi-document docmodels, severity ordering, complete
+detection, model independence, and any claim that the prescribed P1/done verifier
+counts are empirically justified remain outside the contract. See the
 [review-gate guide](review-gate.md) for the executable and human contracts.
 
 ## A second instance: change-plan mode (as-is/to-be)
