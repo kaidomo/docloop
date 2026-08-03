@@ -1,0 +1,10 @@
+meta:
+  template: fixture-template-v1
+  updated_at: 2026-08-04
+  approval_state: approved
+  suppression_eligible: true
+  approved_by: fixture-document-owner
+sections:
+  - id: "1"
+    title: Fixture
+    role: canonical
