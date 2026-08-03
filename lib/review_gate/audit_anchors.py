@@ -33,7 +33,10 @@ finding에 나타나야 한다. 앵커가 기록 쪽에만 남고 승격분이 �
 앵커 토큰 = L<2~5자리 숫자>(하이픈·숫자 비후행 — 렌즈 후보 ID `L1-24`류 오인 방지;
 1자리 행 번호는 렌즈 이름 L1·L2·L3과 충돌해 미수집, 한계로 명시) + --extra-re 매치.
 
-판정: SYNTH 텍스트에 L<번호> 토큰이 없는 앵커가 하나라도 있으면 누락 —
+판정: v2 실행은 `--ledger`의 `classification_ledger[].evidence_anchors`를 terminal
+placement SSOT로 삼는다. SYNTH 본문이나 scratch prose에 앵커가 있어도 ledger에
+없으면 누락이다. `--ledger`가 없는 legacy 실행만 SYNTH 텍스트를 사용한다.
+필수 앵커가 terminal SSOT에 하나라도 없으면 누락 —
 exit 1 (fail-closed: 합성은 미완성이며, 누락 앵커를 인용·억제·비승격 기록
 중 하나로 처리한 수정본을 낼 때까지 전달 금지). 승계 검사 위반(승격 대상
 finding 부재 = 매달린 참조 포함)도 같은 exit 1. 전부 통과하면 exit 0.
@@ -47,6 +50,21 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+
+import yaml
+
+try:  # Package import in tests; sibling import when executed as a script.
+    from .validate_review_intermediate import (
+        load_yaml_text,
+        resolve_packet_file,
+        validate_data as validate_intermediate_data,
+    )
+except ImportError:  # pragma: no cover - exercised by CLI dispatch
+    from validate_review_intermediate import (
+        load_yaml_text,
+        resolve_packet_file,
+        validate_data as validate_intermediate_data,
+    )
 
 # 왼쪽 경계도 ASCII 기준(--extra-re와 동일 규칙). 현 골든 코퍼스에서는 no-op이나
 # 한글 바로 뒤 인용("행L129")에서 갈리므로 규칙을 통일해 둔다.
@@ -185,6 +203,14 @@ def check_promotions(
 def main() -> int:
     ap = argparse.ArgumentParser(description="합성 앵커 계수 검산기")
     ap.add_argument("synth", help="합성 산출물(SYNTH.md)")
+    ap.add_argument(
+        "--ledger",
+        help="v2 review_intermediate YAML; classification_ledger evidence anchors become the terminal SSOT",
+    )
+    ap.add_argument(
+        "--packet-root",
+        help="packet root for ledger and hash-bound authority references",
+    )
     ap.add_argument("--lens", nargs="*", default=[], help="전체 수집 렌즈 파일(L1·L3)")
     ap.add_argument("--l2", help="L2 파일(신규 쟁점 구간만 수집)")
     ap.add_argument("--scan", help="용어 스캔 파일(HIT line 패턴 수집)")
@@ -224,7 +250,43 @@ def main() -> int:
         print(f"ERROR: SYNTH 파일 없음: {synth_path}", file=sys.stderr)
         return 2
     synth_text = read(synth_path)
-    synth_anchors = anchors_full(synth_text, extra_res)
+    ledger_path = None
+    if args.ledger:
+        if not args.packet_root:
+            print("ERROR: --ledger requires --packet-root", file=sys.stderr)
+            return 2
+        path_errors: list[str] = []
+        packet_root = Path(args.packet_root)
+        ledger_path = resolve_packet_file(packet_root, args.ledger, "ledger", path_errors)
+        if path_errors or ledger_path is None:
+            for error in path_errors:
+                print(f"ERROR: {error}", file=sys.stderr)
+            return 2
+        try:
+            loaded = load_yaml_text(ledger_path.read_text(encoding="utf-8"))
+            envelope = loaded.get("review_intermediate") if isinstance(loaded, dict) else None
+        except (OSError, yaml.YAMLError) as e:
+            print(f"ERROR: LEDGER를 읽을 수 없음: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(envelope, dict):
+            print("ERROR: LEDGER에 review_intermediate mapping이 없음", file=sys.stderr)
+            return 2
+        ledger_errors = validate_intermediate_data(envelope, packet_root=packet_root)
+        if ledger_errors:
+            print(
+                "결과: LEDGER-FAIL — intermediate ledger 구조가 유효하지 않음:",
+                file=sys.stderr,
+            )
+            for error in ledger_errors:
+                print(f"  {error}", file=sys.stderr)
+            return 1
+        synth_anchors = {
+            anchor
+            for row in envelope["classification_ledger"]
+            for anchor in row["evidence_anchors"]
+        }
+    else:
+        synth_anchors = anchors_full(synth_text, extra_res)
 
     sources: list[tuple[str, Path, set[str]]] = []
     for f in args.lens:
@@ -246,7 +308,14 @@ def main() -> int:
             return 2
         sources.append(("scan:HIT", p, anchors_scan(read(p))))
 
-    print(f"SYNTH: {synth_path} sha256 {sha256_of(synth_path)} (앵커 {len(synth_anchors)}종)")
+    print(f"SYNTH: {synth_path} sha256 {sha256_of(synth_path)}")
+    if ledger_path:
+        print(
+            f"TERMINAL-LEDGER: {ledger_path} sha256 {sha256_of(ledger_path)} "
+            f"(terminal evidence 앵커 {len(synth_anchors)}종)"
+        )
+    else:
+        print(f"LEGACY-SYNTH-ANCHORS: {len(synth_anchors)}종")
     required: set[str] = set()
     for kind, p, anc in sources:
         print(f"SRC[{kind}]: {p} sha256 {sha256_of(p)} (앵커 {len(anc)}종)")
@@ -259,9 +328,12 @@ def main() -> int:
     missing = sorted(required - synth_anchors, key=sort_key)
     print(f"검산: 요구 앵커 {len(required)}종 → SYNTH 존재 {len(required) - len(missing)}종 · 누락 {len(missing)}종")
 
-    promo_total, promo_ok, promo_skip, promo_bad, promo_multi = check_promotions(
-        synth_text, extra_res, args.id_re
-    )
+    if ledger_path:
+        promo_total, promo_ok, promo_skip, promo_bad, promo_multi = 0, 0, 0, [], 0
+    else:
+        promo_total, promo_ok, promo_skip, promo_bad, promo_multi = check_promotions(
+            synth_text, extra_res, args.id_re
+        )
     # 표현 주의(Codex c1-04): 이 검사는 "줄 앵커 ∩ 승격분 앵커 ≠ ∅"이라는 **패턴 기반
     # 중첩 감지**이지 의미 수준의 승계 검증이 아니다. 한 줄에 승격이 여럿이면 다른 결함의
     # 앵커로도 중첩이 성립할 수 있으므로 "승계 확인"이라 부르지 않는다.
@@ -287,7 +359,8 @@ def main() -> int:
         failed = True
     if failed:
         return 1
-    print("결과: ANCHOR-OK — 렌즈·스캔 후보 앵커 전부가 합성 산출물에 존재, 승격 앵커 중첩 위반 없음")
+    sink = "atom-level terminal ledger" if ledger_path else "legacy 합성 산출물"
+    print(f"결과: ANCHOR-OK — 렌즈·스캔 후보 앵커 전부가 {sink}에 존재, 승격 앵커 중첩 위반 없음")
     return 0
 
 

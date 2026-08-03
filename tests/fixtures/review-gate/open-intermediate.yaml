@@ -1,0 +1,42 @@
+review_intermediate:
+  schema_version: 1
+  snapshot_id: sha256:open-snapshot
+  target: docs/open.md
+  state: open
+  source_candidate_inventory:
+  - source_candidate_id: SC-Q
+    lens: L3
+    statement: 규약이 없으면 판정할 수 없음
+    evidence_anchors: [L12]
+  candidate_atoms:
+  - candidate_atom_id: ATOM-Q
+    source_candidate_refs: [SC-Q]
+    statement: candidate-dependent convention question
+    evidence_anchors: [L12]
+    classification_basis:
+      co_reference: unknown
+      semantic_values: unknown
+      presentation_rule: unknown
+      evidence: no approved convention exists
+  findings: []
+  questions:
+  - record_id: REC-Q
+    status: open
+    convention_slot: ownership.filters
+    dependent_atom_refs: [ATOM-Q]
+    resolution_derived_atom_refs: []
+    snapshot_id: sha256:open-snapshot
+    evidence_anchors: [L12]
+    classification_verification:
+      result: unresolved
+      verifier_id: V-Q
+      evidence: no approved convention
+    public_record_digest: sha256:d211226e33646318c2077358270597cc8cd3338e306e86aa7234d0375f554d67
+  drifts: []
+  suppressed: []
+  nonissues: []
+  classification_ledger:
+  - candidate_atom_id: ATOM-Q
+    outcome: question
+    target_record_id: REC-Q
+    evidence_anchors: [L12]

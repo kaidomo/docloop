@@ -1,0 +1,161 @@
+review_intermediate:
+  schema_version: 1
+  snapshot_id: sha256:target-snapshot
+  target: docs/target.md
+  state: closed
+  source_candidate_inventory:
+  - source_candidate_id: SC-Q
+    lens: L3
+    statement: 규약이 필요함
+    evidence_anchors:
+    - L10
+  - source_candidate_id: SC-D
+    lens: L3
+    statement: 표기가 다름
+    evidence_anchors:
+    - L20
+    - L30
+  - source_candidate_id: SC-N
+    lens: L1
+    statement: 맥락별 표현
+    evidence_anchors:
+    - L40
+  candidate_atoms:
+  - candidate_atom_id: ATOM-Q
+    source_candidate_refs:
+    - SC-Q
+    statement: 표현 규약 질문
+    evidence_anchors:
+    - L10
+    classification_basis:
+      co_reference: unknown
+      semantic_values: unknown
+      presentation_rule: unknown
+      evidence: co-reference convention is unanswered
+  - candidate_atom_id: ATOM-F
+    source_candidate_refs:
+    - SC-Q
+    statement: 답변 후 확인된 결함
+    evidence_anchors:
+    - L10
+    classification_basis:
+      co_reference: proven
+      semantic_values: different
+      presentation_rule: not_applicable
+      evidence: approved docmodel resolves the comparison
+    derived_from_question_atom_refs:
+    - ATOM-Q
+  - candidate_atom_id: ATOM-D
+    source_candidate_refs:
+    - SC-D
+    statement: 비결함 표기 차이
+    evidence_anchors:
+    - L20
+    - L30
+    classification_basis:
+      co_reference: proven
+      semantic_values: equal
+      presentation_rule: not_violated
+      evidence: declared mirror values normalize equally
+  - candidate_atom_id: ATOM-N
+    source_candidate_refs:
+    - SC-N
+    statement: 비교 대상 아님
+    evidence_anchors:
+    - L40
+    classification_basis:
+      co_reference: not_coreferential
+      semantic_values: not_applicable
+      presentation_rule: not_applicable
+      evidence: contexts identify different facts
+  findings:
+  - record_id: REC-F
+    finding_id: F-01
+    candidate_atom_refs:
+    - ATOM-F
+    source_candidate_refs:
+    - SC-Q
+    snapshot_id: sha256:target-snapshot
+    evidence_anchors:
+    - L10
+    severity: P2
+    judgment_provenance: approved convention says the value is required
+    status: verified
+    public_record_digest: sha256:8845a161ee2e12c2ef2c94d37ba9bde2fee153ac58db18a9601c303a413e7540
+  questions:
+  - record_id: REC-Q
+    status: resolved
+    convention_slot: ownership.filters
+    dependent_atom_refs:
+    - ATOM-Q
+    resolution_derived_atom_refs:
+    - ATOM-F
+    authority: document owner
+    scope: document
+    source:
+      kind: approved_docmodel
+      path: frozen/approved-docmodel.yaml
+      sha256: f3a31cb49628d2ffcab04431b6a9d3c697f539f4d50b298d1f0b821a74c45d60
+    snapshot_id: sha256:target-snapshot
+    evidence_anchors:
+    - L10
+    classification_verification:
+      result: pass
+      verifier_id: V-Q
+      evidence: approved docmodel
+    public_record_digest: sha256:d280b03bf5d452816a969956aba6954b13c48881bf7d5f9d61ec9830dc77563d
+  drifts:
+  - record_id: REC-D
+    candidate_atom_refs:
+    - ATOM-D
+    source_candidate_refs:
+    - SC-D
+    snapshot_id: sha256:target-snapshot
+    evidence_anchors:
+    - L20
+    - L30
+    detail: 같은 상한값의 조사 차이
+    variants:
+    - notation: 200개
+      anchors:
+      - L20
+    - notation: 200건
+      anchors:
+      - L30
+    co_reference_basis: docmodel ownership[상한값].mirrors_ok
+    comparison_ref: ownership:상한값
+    public_record_digest: sha256:f3149289c2d85ae8ec5bd21e99e2eef3391d23b7624c6425ba37d2d23e603f6d
+  suppressed: []
+  nonissues:
+  - record_id: REC-N
+    candidate_atom_refs:
+    - ATOM-N
+    source_candidate_refs:
+    - SC-N
+    snapshot_id: sha256:target-snapshot
+    evidence_anchors:
+    - L40
+    rationale: 서로 다른 맥락의 표현이라 co-reference가 아님
+    public_record_digest: sha256:af563233d21d8ae4f957a3f7777bd6b521a47f631d0836e718de0e4c2de3ac6c
+  classification_ledger:
+  - candidate_atom_id: ATOM-Q
+    outcome: question
+    target_record_id: REC-Q
+    evidence_anchors:
+    - L10
+  - candidate_atom_id: ATOM-F
+    outcome: finding
+    target_record_id: REC-F
+    evidence_anchors:
+    - L10
+  - candidate_atom_id: ATOM-D
+    outcome: drift
+    target_record_id: REC-D
+    evidence_anchors:
+    - L20
+    - L30
+  - candidate_atom_id: ATOM-N
+    outcome: nonissue
+    target_record_id: REC-N
+    evidence_anchors:
+    - L40
