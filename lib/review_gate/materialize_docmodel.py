@@ -8,6 +8,7 @@ from copy import deepcopy
 import hashlib
 import os
 from pathlib import Path
+import stat
 import sys
 from typing import Any
 
@@ -94,10 +95,53 @@ def materialize_paths(profile_path: Path, intake_path: Path) -> dict[str, Any]:
     return materialize(profile, intake, digest)
 
 
+def _canonical_output_path(path: Path) -> Path:
+    absolute = path if path.is_absolute() else Path.cwd() / path
+    if sys.platform == "darwin" and len(absolute.parts) > 1 and absolute.parts[1] in {"tmp", "var"}:
+        absolute = Path("/private").joinpath(*absolute.parts[1:])
+    return absolute
+
+
+def _open_output_parent(path: Path) -> tuple[Path, int]:
+    absolute = _canonical_output_path(path)
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if (
+        not isinstance(directory_flag, int)
+        or directory_flag == 0
+        or not isinstance(nofollow, int)
+        or nofollow == 0
+    ):
+        raise OSError("safe output creation requires O_DIRECTORY and O_NOFOLLOW")
+    flags = os.O_RDONLY | directory_flag
+    fd = os.open(absolute.anchor, flags)
+    try:
+        for part in absolute.parent.parts[1:]:
+            nxt = os.open(part, flags | nofollow, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return absolute, fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _write_new(path: Path, raw: bytes) -> None:
-    """Create *path* exactly once without following an existing final symlink."""
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags, 0o600)
+    """Create *path* once through a descriptor-anchored, no-follow parent."""
+    absolute, parent_fd = _open_output_parent(path)
+    try:
+        opened_parent = os.fstat(parent_fd)
+        named_parent = os.stat(absolute.parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(named_parent.st_mode)
+            or (opened_parent.st_dev, opened_parent.st_ino)
+            != (named_parent.st_dev, named_parent.st_ino)
+        ):
+            raise OSError("output parent changed during safe create")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        fd = os.open(absolute.name, flags, 0o600, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
     try:
         view = memoryview(raw)
         while view:

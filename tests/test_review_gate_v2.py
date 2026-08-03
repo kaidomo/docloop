@@ -16,11 +16,81 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+BIN = ROOT / "bin" / "docloop"
 FIXTURES = ROOT / "tests" / "fixtures" / "review-gate"
 sys.path.insert(0, str(ROOT))
 
 from lib.review_gate import validate_review_intermediate as intermediate  # noqa: E402
 from lib.review_gate import validate_review_result as result  # noqa: E402
+
+
+def _write_assured_inputs(review: Path) -> None:
+    review.mkdir()
+    target = review / "draft.md"
+    target.write_text("# Demo\n\nState is open.\n", encoding="utf-8")
+    decision_source = review / "decision-source.md"
+    decision_source.write_text("D-01 remains authoritative\n", encoding="utf-8")
+    (review / "decisions.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "meta": {
+                    "target": "demo",
+                    "source_ref": "decision-source.md",
+                    "source_version_hash": hashlib.sha256(decision_source.read_bytes()).hexdigest(),
+                    "updated_at": "2026-08-03",
+                },
+                "decisions": [{
+                    "id": "D-01", "decision": "retain the established rule", "status": "재론금지",
+                    "date": "2026-08-03", "evidence": "D-01",
+                }],
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    terms_source = review / "terms-source.md"
+    terms_source.write_text("Receiver is canonical.\n", encoding="utf-8")
+    (review / "terms.yaml").write_text(
+        yaml.safe_dump({
+            "meta": {
+                "target": "demo", "updated_at": "2026-08-03", "source_ref": "terms-source.md",
+                "source_hash": hashlib.sha256(terms_source.read_bytes()).hexdigest(),
+            },
+            "terms": [{"canonical": "Receiver", "forbidden": ["리시버"]}],
+        }, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    model_source = review / "model-source.md"
+    model_source.write_text("Section one is canonical.\n", encoding="utf-8")
+    (review / "docmodel.yaml").write_text(
+        yaml.safe_dump({
+            "meta": {
+                "template": "demo", "updated_at": "2026-08-03", "approved_by": "owner",
+                "approval_state": "approved", "suppression_eligible": True,
+                "source_ref": "model-source.md",
+                "source_hash": hashlib.sha256(model_source.read_bytes()).hexdigest(),
+            },
+            "sections": [{"id": "1", "title": "Demo", "role": "canonical"}],
+        }, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def _prepare_assured(root: Path) -> Path:
+    review = root / "review"
+    _write_assured_inputs(review)
+    proc = subprocess.run(
+        [
+            str(BIN), "review-gate", "prepare", str(review), "assured-registry", "draft.md",
+            "--decisions", "decisions.yaml", "--terms", "terms.yaml", "--docmodel", "docmodel.yaml",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(proc.stdout + proc.stderr)
+    return review / "review-gate" / "assured-registry"
 
 
 def _receipt_fixture() -> dict:
@@ -115,6 +185,141 @@ def _packet(root: Path) -> tuple[dict, dict, Path, Path]:
 
 
 class ReviewGateV2Tests(unittest.TestCase):
+    def test_runner_prepared_decision_registry_can_resolve_and_suppress(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            run = _prepare_assured(Path(td))
+            run_meta = yaml.safe_load((run / "RUN.yaml").read_text(encoding="utf-8"))
+            snapshot = "sha256:" + run_meta["target"]["sha256"]
+            target_source = run_meta["target"]["source"]
+            authority = run / "frozen" / "decisions.yaml"
+            authority_ref = {
+                "kind": "decision_registry",
+                "path": "frozen/decisions.yaml",
+                "sha256": hashlib.sha256(authority.read_bytes()).hexdigest(),
+                "decision_id": "D-01",
+            }
+            envelope = yaml.safe_load(
+                (FIXTURES / "v2-ledger.yaml").read_text(encoding="utf-8")
+            )[intermediate.ROOT_KEY]
+            envelope["snapshot_id"] = snapshot
+            envelope["target"] = target_source
+            envelope["questions"][0]["source"] = copy.deepcopy(authority_ref)
+            envelope["source_candidate_inventory"].append({
+                "source_candidate_id": "SC-S", "lens": "L2",
+                "statement": "candidate covered by confirmed decision", "evidence_anchors": ["L50"],
+            })
+            envelope["candidate_atoms"].append({
+                "candidate_atom_id": "ATOM-S", "source_candidate_refs": ["SC-S"],
+                "statement": "confirmed prior decision", "evidence_anchors": ["L50"],
+                "classification_basis": {
+                    "co_reference": "proven", "semantic_values": "different",
+                    "presentation_rule": "not_applicable", "evidence": "registry decision D-01",
+                },
+            })
+            envelope["suppressed"] = [{
+                "record_id": "REC-S",
+                "candidate_atom_refs": ["ATOM-S"],
+                "source_candidate_refs": ["SC-S"],
+                "snapshot_id": snapshot,
+                "evidence_anchors": ["L50"],
+                "rationale": "current confirmed decision",
+                "authority_ref": copy.deepcopy(authority_ref),
+            }]
+            envelope["classification_ledger"].append({
+                "candidate_atom_id": "ATOM-S", "outcome": "suppressed",
+                "target_record_id": "REC-S", "evidence_anchors": ["L50"],
+            })
+            for category, collection in intermediate.PUBLIC_COLLECTIONS.items():
+                for record in envelope[collection]:
+                    record["snapshot_id"] = snapshot
+                    record["public_record_digest"] = intermediate.record_digest(category, record)
+            self.assertEqual(
+                intermediate.validate_data(envelope, require_closed=True, packet_root=run),
+                [],
+            )
+
+            ledger_path = run / "results" / "INTERMEDIATE.yaml"
+            ledger_path.write_text(
+                yaml.safe_dump({intermediate.ROOT_KEY: envelope}, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            receipt = _receipt_fixture()
+            receipt["snapshot_id"] = snapshot
+            receipt["target"] = target_source
+            for verifier in receipt["verifiers"]:
+                verifier["snapshot_id"] = snapshot
+            receipt["classification_ledger_ref"] = {
+                "path": "results/INTERMEDIATE.yaml",
+                "sha256": hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
+                "snapshot_id": snapshot,
+            }
+            receipt["findings"] = copy.deepcopy(envelope["findings"])
+            receipt["questions"] = copy.deepcopy(envelope["questions"])
+            receipt["drifts"] = copy.deepcopy(envelope["drifts"])
+            binding, binding_errors = result.packet_binding_from_prepared(run, "results/DONE.md")
+            self.assertEqual(binding_errors, [])
+            receipt["packet_binding"] = binding
+            _write_receipt(run / "results" / "DONE.md", receipt)
+            proc = subprocess.run(
+                [str(BIN), "review-gate", "validate-result", str(run), "results/DONE.md"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_registry_errors_are_relative_safe_and_not_masked(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            envelope, _, _, _ = _packet(root)
+            provenance = root / "frozen" / "provenance"
+            provenance.mkdir()
+            source = provenance / "decision.source"
+            source.write_bytes(b"authority\n")
+            registry = root / "frozen" / "decisions.yaml"
+            registry.write_text(yaml.safe_dump({
+                "meta": {
+                    "target": "demo", "source_ref": "provenance/decision.source",
+                    "source_version_hash": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "updated_at": "2026-08-03",
+                },
+                "decisions": [{
+                    "id": "D-01", "decision": "confirmed", "status": "재론금지",
+                    "date": "2026-08-03", "evidence": "D-01",
+                }],
+            }, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            envelope["schema_version"] = 2
+            envelope["questions"][0]["source"] = {
+                "kind": "decision_registry", "path": "frozen/decisions.yaml",
+                "sha256": hashlib.sha256(registry.read_bytes()).hexdigest(), "decision_id": "missing",
+            }
+            envelope["questions"][0]["public_record_digest"] = intermediate.record_digest(
+                "question", envelope["questions"][0]
+            )
+            errors = intermediate.validate_data(envelope, packet_root=root)
+            self.assertIn("schema_version must be 1", errors)
+            self.assertTrue(any("current confirmed decision" in error for error in errors), errors)
+
+            registry_data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+            registry_data["meta"]["source_ref"] = "../../outside"
+            registry.write_text(yaml.safe_dump(registry_data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            envelope["questions"][0]["source"]["sha256"] = hashlib.sha256(registry.read_bytes()).hexdigest()
+            envelope["questions"][0]["public_record_digest"] = intermediate.record_digest(
+                "question", envelope["questions"][0]
+            )
+            errors = intermediate.validate_data(envelope, packet_root=root)
+            self.assertTrue(any("outside the packet root" in error for error in errors), errors)
+
+            registry_data["meta"]["source_ref"] = "provenance/link.source"
+            link = provenance / "link.source"
+            link.symlink_to(source)
+            registry.write_text(yaml.safe_dump(registry_data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            envelope["questions"][0]["source"]["sha256"] = hashlib.sha256(registry.read_bytes()).hexdigest()
+            envelope["questions"][0]["public_record_digest"] = intermediate.record_digest(
+                "question", envelope["questions"][0]
+            )
+            errors = intermediate.validate_data(envelope, packet_root=root)
+            self.assertTrue(any("symlink" in error for error in errors), errors)
+
     def test_closed_ledger_and_v2_receipt_pass_without_git(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -231,6 +436,19 @@ class ReviewGateV2Tests(unittest.TestCase):
             receipt["findings"][0]["severity"] = "P1"
             _write_receipt(receipt_path, receipt)
             self.assertTrue(any("immutable payload" in error for error in result.validate(root, "results/DONE.md", expected)))
+
+    def test_malformed_ledger_still_reports_load_failure_after_dead_path_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, ledger_path, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            ledger_path.write_text("not: [valid\n", encoding="utf-8")
+            receipt["classification_ledger_ref"]["sha256"] = hashlib.sha256(
+                ledger_path.read_bytes()
+            ).hexdigest()
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(any("cannot load classification ledger" in error for error in errors), errors)
 
     def test_receipt_and_ledger_paths_reject_backslash_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as td:

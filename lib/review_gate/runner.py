@@ -673,14 +673,12 @@ def _validate_convention_pair(
     """Validate captured convention bytes before reserving a packet directory."""
     try:
         import validate_convention_intake
-        import validate_convention_profile
     except ImportError as exc:
         raise GateError("convention validators are unavailable") from exc
 
     profile = _load_strict(profile_raw, "convention profile")
     intake = _load_strict(intake_raw, "convention intake")
-    errors = validate_convention_profile.validate_data(profile)
-    errors.extend(validate_convention_intake.validate_data(intake, profile))
+    errors = validate_convention_intake.validate_data(intake, profile)
     expected_snapshot = f"sha256:{target_sha}"
     if not isinstance(intake, dict):
         errors.append("convention intake: top level must be a mapping")

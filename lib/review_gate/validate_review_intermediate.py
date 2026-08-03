@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import posixpath
 import re
 import stat
 import sys
@@ -179,6 +180,31 @@ def resolve_packet_file(
     return candidate
 
 
+def _validate_registry_source_ref(
+    packet_root: Path,
+    authority_path: Path,
+    value: Any,
+    label: str,
+    errors: list[str],
+) -> None:
+    """Validate a registry provenance ref relative to the registry within its packet."""
+    if not _nonempty(value) or "\x00" in value or "\\" in value or value.startswith(("/", "~")):
+        errors.append(f"{label} must resolve below the packet root from the decision registry")
+        return
+    try:
+        registry_relative = authority_path.relative_to(packet_root.resolve())
+    except ValueError:
+        errors.append(f"{label} decision registry is outside the packet root")
+        return
+    joined = posixpath.normpath(
+        posixpath.join(PurePosixPath(registry_relative.as_posix()).parent.as_posix(), value)
+    )
+    if joined in {"", ".", ".."} or joined.startswith("../"):
+        errors.append(f"{label} resolves outside the packet root")
+        return
+    resolve_packet_file(packet_root, joined, label, errors)
+
+
 def _expected_outcome(basis: Any) -> str | None:
     if not isinstance(basis, dict) or set(basis) != {
         "co_reference", "semantic_values", "presentation_rule", "evidence"
@@ -280,16 +306,17 @@ def _validate_authority_ref(
         for item in registry.get("decisions", []) if isinstance(registry, dict) else []:
             if isinstance(item, dict) and _nonempty(item.get("source_ref")):
                 nested_refs.append(item["source_ref"])
+        registry_errors: list[str] = []
         for index, nested_ref in enumerate(nested_refs):
-            nested_errors: list[str] = []
-            if resolve_packet_file(
+            _validate_registry_source_ref(
                 packet_root,
+                authority_path,
                 nested_ref,
                 f"{label}.nested_source_ref[{index}]",
-                nested_errors,
-            ) is None:
-                errors.extend(nested_errors)
-        if errors:
+                registry_errors,
+            )
+        errors.extend(registry_errors)
+        if registry_errors:
             return
         decision_errors, _, _ = validate_decisions(authority_path)
         if decision_errors:

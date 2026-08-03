@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 import tempfile
-from types import SimpleNamespace
 
 import yaml
 
@@ -59,51 +58,52 @@ for command in (
     )
     check(f"dispatch reaches {command} CLI", proc.returncode == 0)
 
-profile = {"profile_id": "neutral"}
-intake = {
-    "target_snapshot": "sha256:" + "a" * 64,
-    "target_document": "docs/example.md",
-}
+profile = yaml.safe_load(
+    (CONVENTION_FIXTURES / "synthetic-profile.yaml").read_text(encoding="utf-8")
+)
+intake = yaml.safe_load(
+    (CONVENTION_FIXTURES / "intake-all-states.yaml").read_text(encoding="utf-8")
+)
 profile_raw = yaml.safe_dump(profile).encode()
 intake_raw = yaml.safe_dump(intake).encode()
-old_profile = sys.modules.get("validate_convention_profile")
-old_intake = sys.modules.get("validate_convention_intake")
-sys.modules["validate_convention_profile"] = SimpleNamespace(validate_data=lambda _data: [])
-sys.modules["validate_convention_intake"] = SimpleNamespace(validate_data=lambda _data, _profile: [])
+preflight = RG._validate_convention_pair(
+    profile_raw,
+    intake_raw,
+    target_rel=PurePosixPath("docs/example.md"),
+    target_sha="a" * 64,
+)
+check(
+    "preflight is readiness-only and hash-bound",
+    preflight["phase"] == "pre_lens"
+    and preflight["target_snapshot"] == "sha256:" + "a" * 64
+    and "lens_started" not in preflight,
+)
+invalid_profile = dict(profile)
+invalid_profile["schema_version"] = 2
 try:
-    preflight = RG._validate_convention_pair(
-        profile_raw,
+    RG._validate_convention_pair(
+        yaml.safe_dump(invalid_profile).encode(),
         intake_raw,
         target_rel=PurePosixPath("docs/example.md"),
         target_sha="a" * 64,
     )
-    check(
-        "preflight is readiness-only and hash-bound",
-        preflight["phase"] == "pre_lens"
-        and preflight["target_snapshot"] == "sha256:" + "a" * 64
-        and "lens_started" not in preflight,
+except RG.GateError as exc:
+    profile_validated_once = str(exc).count("schema_version must be 1") == 1
+else:
+    profile_validated_once = False
+check("convention profile is validated exactly once", profile_validated_once)
+try:
+    RG._validate_convention_pair(
+        profile_raw,
+        intake_raw,
+        target_rel=PurePosixPath("other.md"),
+        target_sha="a" * 64,
     )
-    try:
-        RG._validate_convention_pair(
-            profile_raw,
-            intake_raw,
-            target_rel=PurePosixPath("other.md"),
-            target_sha="a" * 64,
-        )
-    except RG.GateError as exc:
-        mismatch_closed = "target_document" in str(exc)
-    else:
-        mismatch_closed = False
-    check("preflight rejects target-document mismatch", mismatch_closed)
-finally:
-    if old_profile is None:
-        del sys.modules["validate_convention_profile"]
-    else:
-        sys.modules["validate_convention_profile"] = old_profile
-    if old_intake is None:
-        del sys.modules["validate_convention_intake"]
-    else:
-        sys.modules["validate_convention_intake"] = old_intake
+except RG.GateError as exc:
+    mismatch_closed = "target_document" in str(exc)
+else:
+    mismatch_closed = False
+check("preflight rejects target-document mismatch", mismatch_closed)
 
 
 def _prepare_fixture(root: Path, run_id: str, *, target_document: str = "draft.md"):

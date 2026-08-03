@@ -131,10 +131,10 @@ def _resolve_ledger(
     packet_root: Path,
     ref: Any,
     errors: list[str],
-) -> tuple[Path | None, dict[str, Any] | None]:
+) -> dict[str, Any] | None:
     if not isinstance(ref, dict) or set(ref) != {"path", "sha256", "snapshot_id"}:
         errors.append("classification_ledger_ref must contain exactly path, sha256, snapshot_id")
-        return None, None
+        return None
     ledger_path = resolve_packet_file(
         packet_root,
         ref.get("path"),
@@ -142,7 +142,7 @@ def _resolve_ledger(
         errors,
     )
     if ledger_path is None:
-        return None, None
+        return None
     try:
         payload = ledger_path.read_bytes()
         loaded = load_yaml_text(payload)
@@ -151,11 +151,11 @@ def _resolve_ledger(
         ledger = loaded[ROOT_KEY]
     except (OSError, ValueError, yaml.YAMLError) as exc:
         errors.append(f"cannot load classification ledger: {exc}")
-        return ledger_path, None
+        return None
     actual_hash = hashlib.sha256(payload).hexdigest()
     if ref.get("sha256") != actual_hash:
         errors.append("classification_ledger_ref.sha256 does not match ledger bytes")
-    return ledger_path, ledger
+    return ledger
 
 
 def _validate_packet_binding(
@@ -183,7 +183,6 @@ def _validate_packet_binding(
 
 
 def _validate_v2(
-    path: Path,
     receipt: dict[str, Any],
     packet_root: Path,
     expected_packet_binding: dict[str, Any],
@@ -209,7 +208,7 @@ def _validate_v2(
         if receipt.get("target") != binding.get("target_source"):
             errors.append("receipt target must match packet_binding.target_source")
     ref = receipt.get("classification_ledger_ref")
-    _, ledger = _resolve_ledger(packet_root, ref, errors)
+    ledger = _resolve_ledger(packet_root, ref, errors)
     if isinstance(ref, dict) and ref.get("snapshot_id") != receipt.get("snapshot_id"):
         errors.append("classification_ledger_ref.snapshot_id must match receipt snapshot_id")
     if ledger is None:
@@ -327,7 +326,6 @@ def validate(
         return _validate_v1(receipt)
     if type(version) is int and version == 2:
         return _validate_v2(
-            receipt_path,
             receipt,
             packet_root,
             expected_packet_binding,

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -21,12 +22,14 @@ FIXTURES = ROOT / "tests" / "fixtures" / "review-gate" / "convention"
 sys.path.insert(0, str(LIB))
 
 from front_gate import FrontGateTrace, LENSES  # noqa: E402
-from materialize_docmodel import materialize  # noqa: E402
+import materialize_docmodel as materializer  # noqa: E402
 from validate_convention_intake import validate as validate_intake_file  # noqa: E402
 from validate_convention_intake import validate_data as validate_intake  # noqa: E402
 from validate_convention_profile import load_yaml  # noqa: E402
 from validate_convention_profile import validate as validate_profile_file  # noqa: E402
 from validate_convention_profile import validate_data as validate_profile  # noqa: E402
+
+materialize = materializer.materialize
 
 
 class ConventionFixture(unittest.TestCase):
@@ -222,6 +225,62 @@ class MaterializerTests(ConventionFixture):
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(link.is_symlink())
             self.assertEqual(target.read_bytes(), b"keep-target\n")
+
+    def test_symlinked_output_parent_is_rejected_without_external_create(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outside = root / "outside"
+            outside.mkdir()
+            link = root / "linked-parent"
+            link.symlink_to(outside, target_is_directory=True)
+            result = self._command(link / "draft.yaml")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((outside / "draft.yaml").exists())
+
+    def test_parent_swap_is_rejected_and_cannot_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            parent = root / "parent"
+            parent.mkdir()
+            displaced = root / "displaced"
+            outside = root / "outside"
+            outside.mkdir()
+
+            original_fstat = materializer.os.fstat
+
+            def swap_parent(fd: int):
+                opened_parent = original_fstat(fd)
+                parent.rename(displaced)
+                parent.symlink_to(outside, target_is_directory=True)
+                return opened_parent
+
+            with patch.object(materializer.os, "fstat", swap_parent):
+                with self.assertRaises(OSError):
+                    materializer._write_new(parent / "draft.yaml", b"new\n")
+            self.assertFalse((outside / "draft.yaml").exists())
+            self.assertFalse((displaced / "draft.yaml").exists())
+
+    def test_missing_safe_open_flag_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            output = Path(td) / "draft.yaml"
+            for flag_name in ("O_DIRECTORY", "O_NOFOLLOW"):
+                with self.subTest(flag=flag_name):
+                    with patch.object(materializer.os, flag_name, None):
+                        with self.assertRaisesRegex(
+                            OSError,
+                            "safe output creation requires O_DIRECTORY and O_NOFOLLOW",
+                        ):
+                            materializer._write_new(output, b"new\n")
+            self.assertFalse(output.exists())
+
+    def test_nested_parent_no_clobber_preserves_existing_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            output = Path(td) / "nested" / "draft.yaml"
+            output.parent.mkdir()
+            output.write_bytes(b"keep\n")
+            with self.assertRaises(FileExistsError):
+                materializer._write_new(output, b"replace\n")
+            self.assertEqual(output.read_bytes(), b"keep\n")
 
     def test_concurrent_same_output_admits_exactly_one_success(self) -> None:
         with tempfile.TemporaryDirectory() as td:
