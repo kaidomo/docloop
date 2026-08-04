@@ -101,23 +101,57 @@ docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PR
   --decisions decisions.yaml --terms terms.yaml --no-docmodel
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+docloop review-gate validate-result \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01 results/DONE.md
 ```
 
 This command prepares prompts and deterministic audit artifacts; it does not invoke a
-model, apply findings, or mark the document reviewed. Run the generated lens, synthesis,
-anchor-audit, and verification prompts in fresh contexts, then record the human decision.
-`review-gate check` verifies the prepared marker, frozen payload inventory and digest,
-run identity, and that the results tree contains only real directories and regular
-files; it still does not declare review pass.
-The lens folders are input envelopes, not filesystem isolation or proof of independent
-agents. See [the review-gate guide](docs/review-gate.md) for input choices, artifacts,
-failure behavior, and the manual completion contract.
+model, apply findings, or mark the document reviewed. Non-Git review folders are
+supported. It freezes one UTF-8 target; packet paths must be normalized packet-relative
+POSIX paths and refer to regular, non-symlink files. Packet and draft outputs use
+exclusive, no-follow, no-clobber creation so they do not overwrite an existing file or
+escape through an output symlink.
+
+Run the generated lens, synthesis, anchor-audit, and verification prompts in fresh
+contexts, then record the human decision. The v2 intermediate ledger preserves
+source-candidate → atom → terminal-record lineage: every source candidate is covered by
+one or more atoms, atoms may merge candidates, and each atom receives exactly one
+terminal outcome: `finding | question | drift | suppressed | nonissue`. A `drift` is a
+non-blocking, co-referential equal-value representation difference; it is not a finding.
+Questions without an authoritative answer block ledger closure. A person accepts or
+rejects each finding, verifies applied changes, and records the final decision.
+
+The v2 receipt's `packet_binding` has exactly five fields: `run_id`, `target_source`,
+`target_snapshot`, `prepared_payload_digest_sha256`, and `receipt_path`.
+`validate-result` checks prepared-packet integrity before parsing the receipt and rejects
+mismatched or cross-run bindings, changed ledger bytes, public receipt records that
+diverge from the closed ledger, and unsafe receipt or ledger paths. It does not hash-bind
+arbitrary receipt body prose. Legacy v1 done receipts remain valid.
+
+An optional `--convention-profile FILE --convention-intake FILE` pair validates the
+profile and pre-lens answers before reserving a run directory. That record means
+readiness only: it does not record `lens_started` or run a lens. `materialize-docmodel`
+uses only `approved_to_draft` answers to create a new draft with
+`approval_state: draft`, `approved_by: null`, and `suppression_eligible: false`. The draft
+is not automatically L3 input or suppression authority for the current run; a person
+must approve and explicitly select it in a later run. The internal front gate is
+an implementation ordering guard, not a public command or execution trace.
+
+`review-gate check` and receipt validation prove only mechanical invariants such as path
+containment, file type, hashes, and run binding; they do not declare review pass, prove
+that a finding is correct, establish completeness or authorship, or resist a coordinated
+same-UID rewrite of packet files and metadata. Lens folders are input envelopes, not
+filesystem isolation or proof of independent agents. The current scope is one target
+document per run; multi-document/docmodel generalization remains deferred. See
+[the review-gate guide](docs/review-gate.md) for the complete command surface, input
+choices, artifacts, failure behavior, and manual completion contract.
 
 ## Limitations
 
 - An AI model does the finding — treat `audit`, `review`, and `panel` reports as a sharp-eyed assistant, not a verdict.
 - docloop checks your document against the sources you chose; it does not prove those sources true.
 - Contribution attestation is self-attestation; it does not authenticate identity, authorship, or authority.
+- `review-gate` integrity checks validate paths, hashes, and run binding; they do not prove semantic correctness, completeness, or authorship of findings.
 - The checks-then-`split` order is a workflow, not enforced by the tool — the final call is always yours.
 
 ## Learn more

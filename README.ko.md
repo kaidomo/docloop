@@ -97,22 +97,54 @@ docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PR
   --decisions decisions.yaml --terms terms.yaml --no-docmodel
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
+docloop review-gate validate-result \
+  ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01 results/DONE.md
 ```
 
 이 명령은 프롬프트와 결정론적 감사 산출물을 준비할 뿐 모델을 호출하거나 finding을
-반영하거나 문서를 reviewed로 표시하지 않는다. 생성된 렌즈·합성·앵커 감사·검증
-프롬프트를 fresh context에서 실행하고, 마지막 판단을 사람이 기록한다.
-`review-gate check`는 prepared marker·동결 payload inventory/digest·run ID와 results
-tree가 실제 디렉터리·정규 파일로만 구성됐는지를 검사하지만 리뷰 통과를 선언하지는
-않는다. 렌즈 폴더는
-입력 envelope이지 파일시스템 격리나 독립 agent의 증명이 아니다. 입력 선택·산출물·
-실패 동작·수동 완료 계약은 [review-gate 가이드](docs/review-gate.md)를 참고한다.
+반영하거나 문서를 reviewed로 표시하지 않는다. Git 저장소가 아닌 리뷰 폴더도 지원하며,
+UTF-8 대상 파일 하나를 동결한다. 패킷 내부 경로는 정규화된 packet-relative POSIX
+경로여야 하고 symlink가 아닌 정규 파일만 허용한다. 패킷과 draft 출력은
+exclusive/no-follow/no-clobber 방식으로 만들어 기존 파일이나 패킷 밖 경로를 덮어쓰지
+않는다.
+
+생성된 렌즈·합성·앵커 감사·검증 프롬프트를 fresh context에서 실행하고, 마지막 판단을
+사람이 기록한다. v2 중간 원장은 source candidate → atom → terminal record 계보를
+보존한다. 모든 source candidate는 하나 이상의 atom으로 이어지고, 하나의 atom이 여러
+candidate를 병합할 수도 있으며, 각 atom은
+`finding | question | drift | suppressed | nonissue` 중 정확히 하나로 분류된다. `drift`는
+같은 대상을 같은 값으로 표현한 non-blocking 표기 차이이며 finding이 아니다. 권위 있는
+답이 없는 question은 원장 closure를 막는다. 사람은 각 finding을 승인하거나 기각하고,
+적용 결과를 검증한 뒤 최종 판단을 기록한다.
+
+v2 receipt의 `packet_binding`은 `run_id`, `target_source`, `target_snapshot`,
+`prepared_payload_digest_sha256`, `receipt_path`의 정확한 5개 필드로 구성된다.
+`validate-result`는 receipt를 읽기 전에 prepared packet 무결성을 검사하고, 다른 run의
+binding, 변경된 ledger 바이트, 닫힌 원장과 다른 공개 receipt record, 안전하지 않은
+receipt·ledger 경로를 거부한다. receipt 본문 전체 바이트를 해시 결합하는 것은 아니다.
+기존 v1 done receipt도 계속 유효하다.
+
+선택적 `--convention-profile FILE --convention-intake FILE` 쌍은 run 디렉터리를 예약하기
+전에 profile과 pre-lens 답변을 검증한다. 이 기록은 준비 완료만 나타내며 `lens_started`를
+기록하거나 렌즈를 실행하지 않는다. `materialize-docmodel`은 `approved_to_draft` 답만
+사용해 `approval_state: draft`, `approved_by: null`, `suppression_eligible: false`인 새
+draft를 만들고, 현재 run의 L3 입력이나 suppression authority로 자동 사용하지 않는다. 사람이 승인한 뒤 새 run에서 명시적으로 선택해야 한다. 내부
+front gate는 이 순서를 검사하는 구현용 guard이며 공개 실행 trace나 명령이 아니다.
+
+`review-gate check`와 receipt 검증은 경로·파일 종류·해시·run binding 같은 기계적
+불변식을 확인할 뿐 리뷰 통과를 선언하지 않는다. finding이 맞는지, 모든 문제를 찾았는지,
+작성자가 누구인지, 같은 UID 권한으로 packet과 metadata를 함께 다시 쓴 공격을 막았는지는
+증명하지 않는다. 렌즈 폴더도 입력 envelope이지 파일시스템 격리나 독립 agent의 증명이
+아니다. 현재 범위는 run당 대상 문서 하나이며 다중 문서/docmodel 일반화는 유보한다.
+전체 명령, 입력 선택, 산출물, 실패 동작, 수동 완료 계약은
+[review-gate 가이드](docs/review-gate.md)를 참고한다.
 
 ## 한계
 
 - 찾는 건 AI 모델이다 — `audit`·`review`·`panel` 리포트는 판정이 아니라 눈 밝은 검토 보조로 쓴다.
 - docloop은 당신이 고른 출처와 문서를 대조할 뿐, 그 출처가 참임을 증명하지 않는다.
 - 기여 답변의 attestation은 자기 확인일 뿐 사람의 신원·작성자·권한을 인증하지 않는다.
+- `review-gate` 무결성 검사는 경로·해시·run 결합을 검증하지만 finding의 의미적 정확성·완전성·작성자를 증명하지 않는다.
 - 검사 후 `split` 순서는 워크플로이지 도구가 강제하지 않는다 — 최종 판단은 언제나 사람의 몫이다.
 
 ## 더 알아보기

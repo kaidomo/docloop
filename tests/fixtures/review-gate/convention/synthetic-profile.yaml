@@ -1,0 +1,93 @@
+schema_version: 1
+profile_id: synthetic-v1
+template_id: synthetic-v1
+status: provisional
+transferability:
+  universal: false
+  deferred_to_issue: "#162"
+  note: Synthetic coverage profile; it makes no cross-template claim.
+questions:
+  - id: q-unanswered
+    prompt: Who owns section U?
+    applicability:
+      all_sections_present: [U]
+      note: Applicable when U exists.
+    declaration_targets: ["sections[U]"]
+    allowed_scopes: [template]
+    provenance_required: true
+    options:
+      - id: canonical
+        label: U is canonical.
+        declaration:
+          sections:
+            - {id: U, title: Unanswered, role: canonical}
+  - id: q-inapplicable
+    prompt: Who owns section I?
+    applicability:
+      all_sections_present: [I]
+      note: Applicable when I exists.
+    declaration_targets: ["sections[I]"]
+    allowed_scopes: [template]
+    provenance_required: true
+    options:
+      - id: reference
+        label: I is reference-only.
+        declaration:
+          sections:
+            - {id: I, title: Inapplicable, role: reference}
+  - id: q-document
+    prompt: Who owns document-specific section D?
+    applicability:
+      all_sections_present: [D]
+      note: Applicable when D exists in this document.
+    declaration_targets: ["sections[D]"]
+    allowed_scopes: [document]
+    provenance_required: true
+    options:
+      - id: derived
+        label: D is derived for this document.
+        declaration:
+          sections:
+            - {id: D, title: Document, role: derived}
+  - id: q-template
+    prompt: Who owns template section T?
+    applicability:
+      all_sections_present: [T]
+      note: Applicable when T exists.
+    declaration_targets: ["sections[T]"]
+    allowed_scopes: [template]
+    provenance_required: true
+    options:
+      - id: canonical
+        label: T is canonical for the template.
+        declaration:
+          sections:
+            - {id: T, title: Template, role: canonical}
+  - id: q-unapproved
+    prompt: Who owns section X?
+    applicability:
+      all_sections_present: [X]
+      note: Applicable when X exists.
+    declaration_targets: ["sections[X]"]
+    allowed_scopes: [template]
+    provenance_required: true
+    options:
+      - id: canonical
+        label: X is canonical if later approved.
+        declaration:
+          sections:
+            - {id: X, title: Unapproved, role: canonical}
+  - id: q-approved
+    prompt: Who owns section A?
+    applicability:
+      all_sections_present: [A]
+      note: Applicable when A exists.
+    declaration_targets: ["sections[A]"]
+    allowed_scopes: [template, document]
+    provenance_required: true
+    options:
+      - id: reference
+        label: A is reference-only.
+        declaration:
+          sections:
+            - {id: A, title: Approved, role: reference}

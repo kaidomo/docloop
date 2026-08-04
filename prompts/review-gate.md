@@ -8,7 +8,15 @@ contexts, saving their outputs under `results/`. The directories declare which i
 each lens should see; they are organizational envelopes, not a filesystem security
 boundary or proof of independent agents.
 
-Then follow `handoff/SYNTHESIS.md`, run the vendored anchor audit as instructed, follow
-`handoff/VERIFICATION.md` in a writer-excluded context, and record the human disposition
-using `handoff/HUMAN_DECISION.md`. Model detection is probabilistic. Only a supplied
-`terms.yaml` scan is deterministic for variants listed in that dictionary.
+Then follow `handoff/SYNTHESIS.md`, preserving every source candidate as auditable atoms
+in `results/INTERMEDIATE.yaml`. Validate the ledger, run the ledger-aware anchor audit,
+follow `handoff/VERIFICATION.md` in a writer-excluded context, and record the human
+disposition plus a packet-bound v2 `results/DONE.md` receipt. Validate that receipt with
+`review-gate validate-result`; `review-gate check` still proves preparation only.
+
+Convention profile/intake inputs, when explicitly selected, are validated before any
+lens starts. Their preflight record is not evidence that a model ran, and a materialized
+docmodel remains a non-authoritative draft until human approval and selection in a new
+run. Model detection is probabilistic. Drift records are non-blocking representation
+differences, not defects. Only a supplied `terms.yaml` scan is deterministic for
+variants listed in that dictionary.

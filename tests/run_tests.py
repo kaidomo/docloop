@@ -2837,5 +2837,20 @@ if review_gate_suite.stderr:
     print(review_gate_suite.stderr, end="", file=sys.stderr)
 check("review-gate focused suite", review_gate_suite.returncode == 0)
 
+for suite_name, suite_file in (
+        ("review-gate convention suite", "test_review_gate_convention.py"),
+        ("review-gate intermediate contract suite", "test_review_gate_intermediate_contract.py"),
+        ("review-gate v2 receipt suite", "test_review_gate_v2.py"),
+        ("review-gate v0.13 runner integration suite", "test_review_gate_runner_v013.py")):
+    suite = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), suite_file)],
+        capture_output=True, text=True,
+    )
+    if suite.stdout:
+        print(suite.stdout, end="")
+    if suite.stderr:
+        print(suite.stderr, end="", file=sys.stderr)
+    check(suite_name, suite.returncode == 0)
+
 print(f"\n=== {_passed} passed, {_failed} failed ===")
 sys.exit(1 if _failed else 0)

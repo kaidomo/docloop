@@ -36,6 +36,14 @@ Choose each input explicitly:
   `docmodel.yaml` exists next to the target, `--no-docmodel` is rejected. Preparation
   checks basic YAML, approval, provenance, and hashes, but does not claim full schema
   validation or generalization to other document types.
+- Convention preflight: optionally pass both `--convention-profile profile.yaml` and
+  `--convention-intake intake.yaml`. The pair must cover the profile exactly once and
+  declare `phase: pre_lens`. `target_snapshot` always binds to the actual target hash.
+  An answered document-scoped record requires `target_document`, and any present
+  `target_document` must match the selected target source. Missing, partial,
+  duplicate-key, stale, or mismatched input fails before a run directory is reserved.
+  Approved answers may later be materialized
+  only as a non-authoritative draft; they are not suppression authority.
 
 Every provenance reference used by decisions, terms, or a docmodel is frozen before
 validation. Validation and term scanning run only against the frozen files, never
@@ -58,6 +66,10 @@ docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-02 PR
   --no-terms \
   --no-docmodel
 ```
+
+To enable convention preflight, add both convention options. Preparation freezes both
+files and writes `deterministic/CONVENTION_PREFLIGHT.json` with `phase: pre_lens`; it
+does not emit `lens_started`, run a model, or add a newly materialized draft to L3.
 
 Run IDs are append-only. Preparation reserves
 `<review-folder>/review-gate/<run-id>/` once and never overwrites or reuses it.
@@ -91,6 +103,8 @@ done.
     axes.md
     terms.yaml                     # when selected
     docmodel.yaml                  # when selected
+    convention-profile.yaml       # when selected as a pair
+    convention-intake.yaml        # when selected as a pair
     provenance/<typed-id>
   lens/L1/{PROMPT.md,TARGET.md}
   lens/L2/{PROMPT.md,TARGET.md,DECISIONS.yaml|UNASSURED.md}
@@ -98,6 +112,7 @@ done.
   deterministic/DECISIONS_VALIDATION.txt  # assured mode only
   deterministic/TERM_SCAN_RAW.md   # exact upstream scanner output, when selected
   deterministic/TERM_SCAN.md       # two-digit-minimum anchor adapter used by audit
+  deterministic/CONVENTION_PREFLIGHT.json  # readiness only; no lens execution
   handoff/{SYNTHESIS.md,ANCHOR_AUDIT.md,VERIFICATION.md,HUMAN_DECISION.md}
   results/README.md
 ```
@@ -145,11 +160,14 @@ treating preparation as the review:
    `lens/L3/PROMPT.md` in a separate fresh context with only that lens directory's
    declared inputs. Save outputs under the append-only names described by
    `results/README.md`.
-2. Run `handoff/SYNTHESIS.md` in another fresh context. Each canonical finding must
+2. Run `handoff/SYNTHESIS.md` in another fresh context. Preserve every source
+   candidate as one or more auditable atoms in `results/INTERMEDIATE.yaml`, with each
+   atom assigned exactly one terminal outcome. Each canonical finding must
    include all six required fields: finding ID; verbatim evidence and location;
    contrary-text search result; decision-registry comparison; severity with its
    decision path; and lifecycle state.
-3. Run the anchor audit before using the synthesis. Missing source anchors fail
+3. Validate the ledger, then run the ledger-aware anchor audit before using the
+   synthesis. Missing source, atom, ledger-row, or terminal-record anchors fail
    closed. Repair in the same synthesis context at most twice; after two failed
    repairs, record the run as failed and refer it to a human.
 4. A human accepts or rejects each finding. Accepted findings move through
@@ -161,26 +179,51 @@ treating preparation as the review:
    pass, unanimous kill rejects an individual finding, and any mixture is blocking
    `unresolved`; there is no majority vote. The final done-preflight also requires
    three, and any kill or unresolved result there returns to synthesis.
-6. Follow `handoff/HUMAN_DECISION.md` and append the final human record to
-   `results/HUMAN_DECISION.md`. The review is not done while any finding is outside
+6. Follow `handoff/HUMAN_DECISION.md`, append the human record, and create the v2
+   `results/DONE.md` receipt. Validate it against the prepared packet. The review is
+   not done while any finding is outside
    `verified|rejected`, verification is absent or unresolved, or an unassured run
    lacks explicit human acceptance of the missing decision history.
 
 Severity is a review claim, not an ordering guarantee. Read every finding, including
-P3 and findings seen by only one run. docloop does not prescribe or justify a repeat
-count in this initial port.
+P3 and findings seen by only one run. The protocol prescribes three done verifiers
+and three reviewers for P1 findings, but does not claim that those counts are
+empirically justified or sufficient for complete detection.
 
 ## Deterministic tools
 
-The three tools can also be invoked directly. They preserve the upstream behavior
+The deterministic tools can also be invoked directly. Legacy commands preserve their
+behavior
 and exit-code semantics:
 
 ```text
 docloop review-gate validate-decisions <decisions.yaml> [--skip-hash]
+docloop review-gate validate-intermediate <run-folder> <ledger-relative-path> [--closed]
+docloop review-gate validate-result <run-folder> <receipt-relative-path>
+docloop review-gate validate-convention-profile <profile.yaml>
+docloop review-gate validate-convention-intake <intake.yaml> --profile <profile.yaml>
+docloop review-gate materialize-docmodel <intake.yaml> --profile <profile.yaml> [--output FILE]
 docloop review-gate scan-terms <terms.yaml> <target>
-docloop review-gate audit-anchors <synthesis> [--lens [LENS ...]] [--l2 L2] \
+docloop review-gate audit-anchors <synthesis> [--ledger LEDGER --packet-root ROOT] \
+  [--lens [LENS ...]] [--l2 L2] \
   [--scan SCAN] [--extra-re EXTRA_RE] [--id-re ID_RE]
 ```
+
+`validate-intermediate` enforces candidate/atom coverage, terminal uniqueness, anchor
+lineage, drift shape, and question authority. A drift is a co-referential equal-value
+representation difference and is non-blocking; it is not a defect. Candidate-dependent
+questions block closure until authority and reverse lineage resolve them.
+
+`validate-result` first validates the real prepared packet, then validates a v1 or v2
+receipt. V2 binds the exact run ID, target source and snapshot, prepared payload digest,
+receipt path, ledger bytes, immutable records, and public record set. Packet-relative
+paths must be normalized POSIX regular files below the non-Git packet root. This proves
+internal consistency, not authorship or resistance to a coordinated same-UID rewrite.
+
+Convention validation is data-driven and document-type neutral. Materialization consumes
+only `approved_to_draft` answers, refuses identity conflicts, and creates a no-clobber
+draft with `approval_state: draft` and `suppression_eligible: false`. A human must approve
+and explicitly select it in a new run.
 
 `validate-decisions` and `scan-terms` are fail-closed. `audit-anchors` detects lost
 line/source anchors; it does not determine whether a finding is correct or whether
@@ -203,10 +246,6 @@ justified number of repeated runs, or a correct final document. The term scan is
 deterministic only for relationships encoded in the supplied dictionary. Human
 review, disposition, and verification remain mandatory.
 
-The initial port deliberately excludes unsettled upstream work:
-
-- [#160](https://github.com/kaidomo/docuauthring/issues/160): a separate drift output type;
-- [#161](https://github.com/kaidomo/docuauthring/issues/161): up-front convention questions; and
-- [#162](https://github.com/kaidomo/docuauthring/issues/162): second-document/docmodel generalization.
-
-Those issues are follow-ups, not behavior promised by docloop v0.12.0.
+The deterministic ledger/receipt and generic convention-preflight contracts are
+supported. Second-document/docmodel generalization remains deferred. No transferability,
+completeness, or model-independence guarantee is implied.

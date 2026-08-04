@@ -1,0 +1,36 @@
+# Convention profile contract for review-gate startup intake.
+# This is a schema exemplar. Validation is implemented by
+# skills/review-gate/scripts/validate_convention_profile.py.
+
+schema_version: 1
+profile_id: <stable profile identifier>
+template_id: <template identifier>
+status: provisional                 # provisional | validated
+transferability:
+  universal: false                  # provisional profiles MUST remain false
+  deferred_to_issue: <issue ref>    # nonempty while status is provisional
+  note: <nonempty limitation note>
+
+questions:
+  - id: <stable question identifier>
+    prompt: <question shown before lens execution>
+    applicability:
+      all_sections_present: [<section id>, ...]
+      note: <how applicability is determined and evidenced>
+    declaration_targets: [<stable docmodel collection identity>, ...]
+                         # Every option declaration must write exactly these identities.
+                         # Examples: sections[3], precedence[3], correspondence[4->6].
+    allowed_scopes: [template, document]
+    provenance_required: true
+    options:
+      - id: <stable response identifier>
+        label: <human-readable response>
+        declaration:                # fragment merged only into a draft docmodel
+          sections: []
+
+# Safety rules:
+# - A profile routes known questions; it is not itself convention authority.
+# - No option is selected by default. Missing intake answers create no declaration.
+# - A provisional profile does not claim universality; #162 owns transferability.
+# - Only approved_to_draft intake records may be materialized, and the result remains
+#   a non-suppression-authoritative *.draft.yaml until separately human-approved.

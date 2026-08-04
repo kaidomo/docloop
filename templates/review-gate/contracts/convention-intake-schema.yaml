@@ -1,0 +1,35 @@
+# Field-complete startup convention intake contract.
+# Validation is implemented by
+# skills/review-gate/scripts/validate_convention_intake.py.
+
+schema_version: 1
+phase: pre_lens                    # required: intake completes before lens execution
+profile_id: <convention profile id>
+template_id: <target template id>
+target_snapshot: <sha256:64hex | commit:7~64hex | export:stable-id>
+target_document: <document id or path, optional>
+recorded_at: <YYYY-MM-DD>
+
+records:                            # exactly one record per profile question
+  - question_id: <stable question id>
+    applicability:
+      result: applicable            # applicable | inapplicable
+      evidence: <nonempty evidence for the result>
+    asked: true
+    response: <profile option id or null>
+    authority: <answering authority or null>
+    scope: template                 # template | document | null
+    source:                         # null when unanswered/inapplicable
+      type: user_decision
+      ref: <decision record reference>
+    approval: approved_to_draft     # unanswered | inapplicable | unapproved | approved_to_draft
+
+# State rules:
+# - inapplicable: asked=false and response/authority/scope/source are null.
+# - unanswered: applicability=applicable and response/authority/scope/source are null.
+# - unapproved: the answer is recorded completely but has no declaration or
+#   suppression authority.
+# - approved_to_draft: may be copied into a draft docmodel only. It is still not
+#   suppression authority and never mutates the approved docmodel automatically.
+# - document scope requires target_document. Unanswered prompts are never emitted
+#   into a docmodel draft.

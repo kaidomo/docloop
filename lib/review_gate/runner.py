@@ -31,10 +31,10 @@ import validate_decisions
 
 
 SCHEMA_VERSION = 1
-TOOL_VERSION = "0.12.0"
+TOOL_VERSION = "0.13.0"
 UPSTREAM_REPOSITORY = "kaidomo/docuauthring"
-UPSTREAM_COMMIT = "df20afdcb420d86551f070fc409dabacf91c284e"
-UPSTREAM_CONTRACT_VERSION = "0.10"
+UPSTREAM_COMMIT = "44604347e95067fe93a9b62280b76d16f516d5b4"
+UPSTREAM_CONTRACT_VERSION = "0.12"
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_TARGET_BYTES = 10 * 1024 * 1024
@@ -436,12 +436,20 @@ Every canonical finding must contain: (1) finding_id, (2) verbatim evidence + lo
 (3) contrary-quote search result, (4) registry comparison result, (5) P1/P2/P3 plus
 decision path, and (6) state. Severity is a claim, not a trusted priority signal.
 
+Save the auditable candidate inventory and terminal dispositions as
+`results/INTERMEDIATE.yaml`, then validate the closed ledger:
+
+```text
+docloop review-gate validate-intermediate . results/INTERMEDIATE.yaml --closed
+```
+
 Save synthesis as `results/SYNTHESIS.md`, then run:
 
 ```text
 docloop review-gate audit-anchors results/SYNTHESIS.md \\
   --lens results/L1.md results/L3.md --l2 results/L2.md \\
-  [--scan deterministic/TERM_SCAN.md] [--extra-re '<document-id-regex>']
+  [--scan deterministic/TERM_SCAN.md] [--extra-re '<document-id-regex>'] \
+  --ledger results/INTERMEDIATE.yaml --packet-root .
 ```
 
 ANCHOR-FAIL or PROMO-FAIL means incomplete synthesis. Repair at most twice, preserving
@@ -484,10 +492,13 @@ path is `discovered -> accepted -> planned -> applied -> verified`; the refuted 
 `discovered -> rejected`. `rejected` and `verified` are terminal. Human resolution of an unresolved item must end in accepted or
 rejected; do not invent a terminal enum.
 
-The review is not done unless every finding is verified or rejected, no verification is
-missing/unresolved, the three-reviewer done-preflight is pass, and the unassured-mode
-acceptance (if applicable) is explicit. This file records a human judgment; it does not
-turn model output into ground truth.
+The review is not done unless every candidate atom has exactly one terminal disposition,
+every finding is verified or rejected, no verification is missing/unresolved, the
+three-reviewer done-preflight is pass, and the unassured-mode acceptance (if applicable)
+is explicit. Record the final v2 receipt as `results/DONE.md`, bound to this packet's
+run ID, target, snapshot, prepared-payload digest, and ledger. Then run
+`docloop review-gate validate-result . results/DONE.md`. This file records a human
+judgment; it does not turn model output into ground truth.
 """.encode("utf-8")
 
 
@@ -575,7 +586,8 @@ def _validate_results_tree(run_path: Path) -> None:
                 raise GateError(f"prepared packet: unsafe mutable result file: {dp / name}")
 
 
-def _check_prepared(run_folder: str) -> int:
+def _validate_prepared_packet(run_folder: str | Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    """Validate immutable packet state without printing or inspecting a receipt."""
     run_path = _directory_argument(run_folder, "run folder")
     run_fd = _open_directory(run_path, "run folder")
     try:
@@ -612,6 +624,11 @@ def _check_prepared(run_folder: str) -> int:
         _validate_results_tree(run_path)
     finally:
         os.close(run_fd)
+    return run_path, run, complete
+
+
+def _check_prepared(run_folder: str) -> int:
+    run_path, _run, _complete = _validate_prepared_packet(run_folder)
     print(f"prepared packet verified: {run_path}")
     return 0
 
@@ -646,6 +663,46 @@ def _run_tool(script: Path, args: list[str], label: str) -> bytes:
     return output
 
 
+def _validate_convention_pair(
+    profile_raw: bytes,
+    intake_raw: bytes,
+    *,
+    target_rel: PurePosixPath,
+    target_sha: str,
+) -> dict[str, Any]:
+    """Validate captured convention bytes before reserving a packet directory."""
+    try:
+        import validate_convention_intake
+    except ImportError as exc:
+        raise GateError("convention validators are unavailable") from exc
+
+    profile = _load_strict(profile_raw, "convention profile")
+    intake = _load_strict(intake_raw, "convention intake")
+    errors = validate_convention_intake.validate_data(intake, profile)
+    expected_snapshot = f"sha256:{target_sha}"
+    if not isinstance(intake, dict):
+        errors.append("convention intake: top level must be a mapping")
+    else:
+        if intake.get("target_snapshot") != expected_snapshot:
+            errors.append("convention intake target_snapshot must match the frozen target")
+        if (
+            "target_document" in intake
+            and intake.get("target_document") != target_rel.as_posix()
+        ):
+            errors.append("convention intake target_document must match the selected target source")
+    if errors:
+        raise GateError("convention preflight failed:\n" + "\n".join(f"- {error}" for error in errors))
+    return {
+        "schema_version": 1,
+        "phase": "pre_lens",
+        "profile_sha256": _sha(profile_raw),
+        "intake_sha256": _sha(intake_raw),
+        "target_snapshot": expected_snapshot,
+        "target_document": target_rel.as_posix(),
+        "validation_result": "pass",
+    }
+
+
 def _prepare(args: argparse.Namespace) -> int:
     if not RUN_ID_RE.fullmatch(args.run_id):
         raise GateError("run-id must match [a-z0-9][a-z0-9-]{0,63}")
@@ -655,12 +712,16 @@ def _prepare(args: argparse.Namespace) -> int:
         raise GateError("choose exactly one of --terms or --no-terms")
     if bool(args.docmodel) == bool(args.no_docmodel):
         raise GateError("choose exactly one of --docmodel or --no-docmodel")
+    if bool(args.convention_profile) != bool(args.convention_intake):
+        raise GateError("--convention-profile and --convention-intake must be supplied together")
 
     target_rel = _normalize_rel(args.target, "target")
     decisions_rel = _normalize_rel(args.decisions, "decisions") if args.decisions else None
     axes_rel = _normalize_rel(args.axes, "axes") if args.axes else None
     terms_rel = _normalize_rel(args.terms, "terms") if args.terms else None
     docmodel_rel = _normalize_rel(args.docmodel, "docmodel") if args.docmodel else None
+    convention_profile_rel = _normalize_rel(args.convention_profile, "convention profile") if args.convention_profile else None
+    convention_intake_rel = _normalize_rel(args.convention_intake, "convention intake") if args.convention_intake else None
     review_path = _directory_argument(args.review_folder, "review folder")
     review_fd = _open_directory(review_path, "review folder")
     try:
@@ -686,6 +747,23 @@ def _prepare(args: argparse.Namespace) -> int:
             raise GateError(f"target: line cap exceeded ({line_count} > {MAX_TARGET_LINES})")
         target_sha = _sha(target_raw)
         target_numbered = _numbered_target(target_text, target_rel.as_posix(), target_sha)
+
+        convention_profile_raw = None
+        convention_intake_raw = None
+        convention_preflight = None
+        if convention_profile_rel is not None and convention_intake_rel is not None:
+            convention_profile_raw = _read_relative(
+                review_fd, convention_profile_rel, "convention profile", MAX_SIDECAR_BYTES
+            )
+            convention_intake_raw = _read_relative(
+                review_fd, convention_intake_rel, "convention intake", MAX_SIDECAR_BYTES
+            )
+            convention_preflight = _validate_convention_pair(
+                convention_profile_raw,
+                convention_intake_raw,
+                target_rel=target_rel,
+                target_sha=target_sha,
+            )
 
         if axes_rel:
             axes_raw = _read_relative(review_fd, axes_rel, "axes", MAX_SIDECAR_BYTES)
@@ -715,7 +793,15 @@ def _prepare(args: argparse.Namespace) -> int:
 
         if len(provenance) > MAX_PROVENANCE_FILES:
             raise GateError(f"provenance file cap exceeded ({len(provenance)} > {MAX_PROVENANCE_FILES})")
-        captured_total = sum(len(x) for x in (target_raw, axes_raw, decisions_raw or b"", terms_raw or b"", docmodel_raw or b"")) + sum(map(len, provenance.values()))
+        captured_total = sum(len(x) for x in (
+            target_raw,
+            axes_raw,
+            decisions_raw or b"",
+            terms_raw or b"",
+            docmodel_raw or b"",
+            convention_profile_raw or b"",
+            convention_intake_raw or b"",
+        )) + sum(map(len, provenance.values()))
         if captured_total > MAX_CAPTURE_BYTES:
             raise GateError(f"capture byte cap exceeded ({captured_total} > {MAX_CAPTURE_BYTES})")
 
@@ -739,6 +825,9 @@ def _prepare(args: argparse.Namespace) -> int:
                 _write_relative(run_fd, PurePosixPath("frozen/terms.yaml"), terms_raw)
             if docmodel_raw is not None:
                 _write_relative(run_fd, PurePosixPath("frozen/docmodel.yaml"), docmodel_raw)
+            if convention_profile_raw is not None and convention_intake_raw is not None:
+                _write_relative(run_fd, PurePosixPath("frozen/convention-profile.yaml"), convention_profile_raw)
+                _write_relative(run_fd, PurePosixPath("frozen/convention-intake.yaml"), convention_intake_raw)
             for name, raw in provenance.items():
                 _write_relative(run_fd, PurePosixPath(f"frozen/provenance/{name}"), raw)
             _phase("freeze")
@@ -754,6 +843,12 @@ def _prepare(args: argparse.Namespace) -> int:
                 term_audit = _normalize_term_scan_anchors(term_audit_raw)
                 _write_relative(run_fd, PurePosixPath("deterministic/TERM_SCAN_RAW.md"), term_audit_raw)
                 _write_relative(run_fd, PurePosixPath("deterministic/TERM_SCAN.md"), term_audit)
+            if convention_preflight is not None:
+                _write_relative(
+                    run_fd,
+                    PurePosixPath("deterministic/CONVENTION_PREFLIGHT.json"),
+                    _json_bytes(convention_preflight),
+                )
             _phase("validate")
 
             _write_relative(run_fd, PurePosixPath("lens/L1/PROMPT.md"), _prompt_l1(target_sha))
@@ -773,7 +868,7 @@ def _prepare(args: argparse.Namespace) -> int:
             _write_relative(run_fd, PurePosixPath("handoff/ANCHOR_AUDIT.md"), b"# Anchor audit\n\nRun the command in SYNTHESIS.md. Preserve the complete stdout audit header. ANCHOR-FAIL or PROMO-FAIL blocks delivery; this check detects anchor loss, not truth or missed defects.\n")
             _write_relative(run_fd, PurePosixPath("handoff/VERIFICATION.md"), _verification_guide())
             _write_relative(run_fd, PurePosixPath("handoff/HUMAN_DECISION.md"), _human_guide(args.unassured))
-            _write_relative(run_fd, PurePosixPath("results/README.md"), b"# Append-only result slots\n\nWrite fresh-context outputs as L1.md, L2.md, L3.md, SYNTHESIS.md, ANCHOR_AUDIT.txt, VERIFICATION-*.md, and HUMAN_DECISION.md. Never overwrite an earlier attempt; add a numeric suffix. Results are excluded from the prepared-input digest.\n")
+            _write_relative(run_fd, PurePosixPath("results/README.md"), b"# Append-only result slots\n\nWrite fresh-context outputs as L1.md, L2.md, L3.md, INTERMEDIATE.yaml, SYNTHESIS.md, ANCHOR_AUDIT.txt, VERIFICATION-*.md, HUMAN_DECISION.md, and the v2 final receipt DONE.md. Never overwrite an earlier attempt; add a numeric suffix. Results are excluded from the prepared-input digest. A prepared packet is not reviewed, passed, or done; validate DONE.md separately with `docloop review-gate validate-result`.\n")
             _phase("prompts")
 
             sidecars = {
@@ -781,6 +876,14 @@ def _prepare(args: argparse.Namespace) -> int:
                 "axes": {"source": axes_source, "frozen_sha256": _sha(axes_raw)},
                 "terms": None if terms_rel is None else {"source": terms_rel.as_posix(), "frozen_sha256": _sha(terms_raw or b"")},
                 "docmodel": None if docmodel_rel is None else {"source": docmodel_rel.as_posix(), "frozen_sha256": _sha(docmodel_raw or b""), "validation": "limited packet preflight; human-approved semantics"},
+                "convention": None if convention_profile_rel is None else {
+                    "profile_source": convention_profile_rel.as_posix(),
+                    "profile_frozen_sha256": _sha(convention_profile_raw or b""),
+                    "intake_source": convention_intake_rel.as_posix() if convention_intake_rel is not None else None,
+                    "intake_frozen_sha256": _sha(convention_intake_raw or b""),
+                    "phase": "pre_lens",
+                    "validation": "pass",
+                },
             }
             run_manifest = {
                 "schema_version": SCHEMA_VERSION,
@@ -843,6 +946,8 @@ def _prepare_parser() -> argparse.ArgumentParser:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--docmodel")
     g.add_argument("--no-docmodel", action="store_true")
+    ap.add_argument("--convention-profile")
+    ap.add_argument("--convention-intake")
     return ap
 
 
@@ -852,8 +957,14 @@ def usage() -> str:
   docloop review-gate prepare <review-folder> <run-id> <target-relative-path>
       (--decisions FILE | --unassured) [--axes FILE]
       (--terms FILE | --no-terms) (--docmodel FILE | --no-docmodel)
+      [--convention-profile FILE --convention-intake FILE]
   docloop review-gate check <review-gate-run-folder>
   docloop review-gate validate-decisions <decisions.yaml> [--skip-hash]
+  docloop review-gate validate-intermediate <run-folder> <ledger-relative-path> [--closed]
+  docloop review-gate validate-result <run-folder> <receipt-relative-path>
+  docloop review-gate validate-convention-profile <profile.yaml>
+  docloop review-gate validate-convention-intake <intake.yaml> --profile <profile.yaml>
+  docloop review-gate materialize-docmodel <intake.yaml> --profile <profile.yaml> [--output FILE]
   docloop review-gate scan-terms <terms.yaml> <target>
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
 
@@ -875,6 +986,11 @@ def main(argv: list[str] | None = None) -> int:
         return _check_prepared(rest[0])
     scripts = {
         "validate-decisions": TOOL_DIR / "validate_decisions.py",
+        "validate-intermediate": TOOL_DIR / "validate_review_intermediate.py",
+        "validate-result": TOOL_DIR / "validate_review_result.py",
+        "validate-convention-profile": TOOL_DIR / "validate_convention_profile.py",
+        "validate-convention-intake": TOOL_DIR / "validate_convention_intake.py",
+        "materialize-docmodel": TOOL_DIR / "materialize_docmodel.py",
         "scan-terms": TOOL_DIR / "scan_terms.py",
         "audit-anchors": TOOL_DIR / "audit_anchors.py",
     }

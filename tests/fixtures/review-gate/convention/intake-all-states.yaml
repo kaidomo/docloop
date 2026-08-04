@@ -1,0 +1,68 @@
+schema_version: 1
+phase: pre_lens
+profile_id: synthetic-v1
+template_id: synthetic-v1
+target_snapshot: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+target_document: docs/example.md
+recorded_at: "2026-08-04"
+records:
+  - question_id: q-unanswered
+    applicability:
+      result: applicable
+      evidence: Section U is present, but no authority answered.
+    asked: true
+    response: null
+    authority: null
+    scope: null
+    source: null
+    approval: unanswered
+  - question_id: q-inapplicable
+    applicability:
+      result: inapplicable
+      evidence: Section I is absent from the target snapshot.
+    asked: false
+    response: null
+    authority: null
+    scope: null
+    source: null
+    approval: inapplicable
+  - question_id: q-document
+    applicability:
+      result: applicable
+      evidence: Section D exists only in docs/example.md.
+    asked: true
+    response: derived
+    authority: product owner
+    scope: document
+    source: {type: decision_record, ref: decisions/D-001.md}
+    approval: approved_to_draft
+  - question_id: q-template
+    applicability:
+      result: applicable
+      evidence: Section T is part of the synthetic template.
+    asked: true
+    response: canonical
+    authority: template owner
+    scope: template
+    source: {type: meeting_record, ref: meetings/M-001.md}
+    approval: approved_to_draft
+  - question_id: q-unapproved
+    applicability:
+      result: applicable
+      evidence: Section X exists in the target snapshot.
+    asked: true
+    response: canonical
+    authority: reviewer proposal
+    scope: template
+    source: {type: review_note, ref: reviews/R-001.md}
+    approval: unapproved
+  - question_id: q-approved
+    applicability:
+      result: applicable
+      evidence: Section A exists in the target snapshot.
+    asked: true
+    response: reference
+    authority: product owner
+    scope: template
+    source: {type: decision_record, ref: decisions/D-002.md}
+    approval: approved_to_draft

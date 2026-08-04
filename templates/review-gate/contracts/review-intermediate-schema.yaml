@@ -1,0 +1,122 @@
+# Executable cross-record and digest validation is owned by
+# skills/review-gate/scripts/validate_review_intermediate.py. This schema documents
+# the closed-world field shapes; the validator additionally proves provenance,
+# classification outcome, authority hashes, and question-resolution lineage.
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: review-gate intermediate envelope
+type: object
+required: [review_intermediate]
+properties:
+  review_intermediate:
+    type: object
+    required:
+      - schema_version
+      - snapshot_id
+      - target
+      - state
+      - source_candidate_inventory
+      - candidate_atoms
+      - findings
+      - questions
+      - drifts
+      - suppressed
+      - nonissues
+      - classification_ledger
+    properties:
+      schema_version: {const: 1}
+      snapshot_id: {$ref: "#/$defs/nonempty"}
+      target: {$ref: "#/$defs/nonempty"}
+      state: {enum: [open, closed]}
+      source_candidate_inventory:
+        type: array
+        items: {$ref: "#/$defs/source_candidate"}
+      candidate_atoms:
+        type: array
+        items: {$ref: "#/$defs/candidate_atom"}
+      findings:
+        type: array
+        items: {type: object}
+      questions:
+        type: array
+        items: {type: object}
+      drifts:
+        type: array
+        items: {type: object}
+      suppressed:
+        type: array
+        items: {type: object}
+      nonissues:
+        type: array
+        items: {type: object}
+      classification_ledger:
+        type: array
+        items: {$ref: "#/$defs/ledger_row"}
+    additionalProperties: false
+additionalProperties: false
+$defs:
+  nonempty:
+    type: string
+    minLength: 1
+  string_list:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items: {$ref: "#/$defs/nonempty"}
+  source_candidate:
+    type: object
+    required: [source_candidate_id, lens, statement, evidence_anchors]
+    properties:
+      source_candidate_id: {$ref: "#/$defs/nonempty"}
+      lens: {$ref: "#/$defs/nonempty"}
+      statement: {$ref: "#/$defs/nonempty"}
+      evidence_anchors: {$ref: "#/$defs/string_list"}
+    additionalProperties: false
+  classification_basis:
+    type: object
+    required: [co_reference, semantic_values, presentation_rule, evidence]
+    properties:
+      co_reference: {enum: [proven, unknown, not_coreferential]}
+      semantic_values: {enum: [equal, different, unknown, not_applicable]}
+      presentation_rule: {enum: [not_violated, binding_violated, intentional_variant, unknown, not_applicable]}
+      evidence: {$ref: "#/$defs/nonempty"}
+    additionalProperties: false
+  candidate_atom:
+    type: object
+    required: [candidate_atom_id, source_candidate_refs, statement, evidence_anchors, classification_basis]
+    properties:
+      candidate_atom_id: {$ref: "#/$defs/nonempty"}
+      source_candidate_refs: {$ref: "#/$defs/string_list"}
+      statement: {$ref: "#/$defs/nonempty"}
+      evidence_anchors: {$ref: "#/$defs/string_list"}
+      classification_basis: {$ref: "#/$defs/classification_basis"}
+      derived_from_question_atom_refs:
+        type: array
+        uniqueItems: true
+        items: {$ref: "#/$defs/nonempty"}
+    additionalProperties: false
+  ledger_row:
+    type: object
+    required: [candidate_atom_id, outcome, target_record_id, evidence_anchors]
+    properties:
+      candidate_atom_id: {$ref: "#/$defs/nonempty"}
+      outcome: {enum: [finding, question, drift, suppressed, nonissue]}
+      target_record_id: {$ref: "#/$defs/nonempty"}
+      evidence_anchors: {$ref: "#/$defs/string_list"}
+    additionalProperties: false
+  authority_ref:
+    oneOf:
+      - type: object
+        required: [kind, path, sha256]
+        properties:
+          kind: {const: approved_docmodel}
+          path: {$ref: "#/$defs/nonempty"}
+          sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        additionalProperties: false
+      - type: object
+        required: [kind, path, sha256, decision_id]
+        properties:
+          kind: {const: decision_registry}
+          path: {$ref: "#/$defs/nonempty"}
+          sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+          decision_id: {$ref: "#/$defs/nonempty"}
+        additionalProperties: false

@@ -1,0 +1,117 @@
+# docmodel.yaml 스키마 정본 — review-gate 문서 구조 선언
+# 위치: 템플릿당 1개. 같은 형식의 문서 전부가 공유한다(문서당이 아니다).
+#   - 템플릿 단위 선언: playbooks/review-gate/contracts/docmodel.<템플릿>.yaml
+#   - 문서 고유의 예외가 있으면 대상 폴더의 docmodel.yaml이 override(선택)
+# 지위(CONTRACT §1 ③에 준함): 선언이 있으면 게이트는 절의 지위·우선순위·대응 규약을
+#   추측하지 않고 이 파일을 읽는다. 없으면 그 축은 판정하지 않는다.
+#
+# ⚠️ 이 선언이 기계 판정으로 바꾸는 것은 **구조적 부재**뿐이다 —
+#   "주인으로 지정된 자리에 항목이 없다", "대응 규약이 요구하는 짝이 없다".
+#   한 자리 안의 자기모순, 사양의 불완전성(값·단위·경계 누락)은 그대로 사람·LLM 판단이다.
+
+meta:
+  template: <문자열, 필수>          # 템플릿 식별자 (이 선언을 공유하는 문서군)
+  updated_at: <YYYY-MM-DD, 필수>
+  approval_state: <approved|draft, 필수>
+  suppression_eligible: <bool, 필수> # approved면 true, draft면 false. intake/draft는 억제 근거가 아니다.
+  approved_by: <문자열|null, 필수>   # approved면 nonempty, draft면 null.
+  source_profile: <경로 또는 profile id, 선택>
+  source_intake_sha256: <sha256, 선택> # materialized draft의 intake bytes 결속
+  target_snapshot: <snapshot id, 선택>
+  target_document: <문서 id 또는 경로, 선택> # document-scope draft의 대상
+  answer_scopes: [<template|document>, ...] # materialized draft에 반영된 답변 범위
+  materialized_question_ids: [<question id>, ...] # 반영된 intake 질문
+  source_ref: <경로, 선택>          # 규약의 출처(회의록·정본 규약 등). 있으면 source_hash 필수
+  source_hash: <sha256, 선택>
+
+sections:                           # 1개 이상, 각 항목:
+  - id: <문자열, 필수>              # 절 번호·이름 (예: "3", "참고")
+    title: <문자열, 필수>
+    role: <enum, 필수>              # canonical | derived | reference | undetermined
+                                    #   canonical    — 여기서 정한다. 충돌 시 이긴다
+                                    #   derived      — canonical을 받아 적는 뷰. 충돌 시 진다
+                                    #   reference    — 이해를 돕는 자료. 구현 대상이 아니다
+                                    #   undetermined — 역할이 아직 정해지지 않았다.
+                                    #     ⚠️ "정본이 아니다"와 "받아 적는 뷰다"는 다른 주장이다.
+                                    #     precedence에서 지는 것만 정해졌다면 derived가 아니라 이 값을 쓴다.
+                                    #     이 절에 대해 게이트는 **역할 축** 판정을 하지 않으며,
+                                    #     그것을 억제 근거로도 쓸 수 없다(하단 fail-closed 규칙).
+                                    #     ⚠️ role은 **역할 축**(지위·충돌 승패)만 정한다. **부재 축**은
+                                    #     ownership이 따로 연다 — 두 축은 독립이다. 그래서
+                                    #     `role: undetermined`인 절도 ownership에 등재되면
+                                    #     그 detail에 한해 부재 판정이 가능하다(r1-02).
+                                    #     막히는 것은 "이 절이 정본인가"이지 "이 절이 그 값을 담아야 하는가"가 아니다.
+    stale_is_defect: <bool, 선택>   # true면 "본문에서 확정된 내용이 이 절에 미결로 남아 있음"이 결함
+                                    #   (기본 false)
+
+precedence:                         # 충돌 시 승자. sections[].role로 결정되지 않는 쌍만 적는다
+  - wins: <section id, 필수>
+    over: [<section id>, ...]
+    note: <문자열, 선택>
+
+correspondence:                     # 표 ↔ 표 대응 규약. 없으면 게이트는 대응 축을 판정하지 않는다
+  - from: <section id, 필수>
+    to: <section id, 필수>
+    rule: <enum, 필수>              # summary_ok | strict_1to1 | upward_only
+                                    #   summary_ok   — 대응은 참고용. 빈자리는 결함이 아니다
+                                    #   strict_1to1  — 양방향 1:1. 흡수·분산·결손 전부 결함
+                                    #   upward_only  — to의 모든 항목은 from에 근거가 있어야 한다.
+                                    #                  from → to의 1:N 분산은 허용
+    matrix_location: <경로, 선택>   # strict_1to1일 때 권장 — 대응 관계를 본문에 밀어넣지 않고
+                                    #   별도 대조표에 둔다. 엄격함은 얻고 본문은 읽기 좋게 남는다
+    note: <문자열, 선택>
+
+ownership:                          # 세부 종류별 주인. 선언된 항목만 부재 판정이 가능해진다
+                                    # ⚠️ **두 축을 분리해 적는다**(r1-03). "반드시 있어야 하는 자리"와
+                                    #   "값이 어긋났을 때 이기는 자리"는 **같은 절이 아닐 수 있다.**
+                                    #   한 필드에 묶으면 그 조합을 표현할 수 없다 — 실제로 막혔다:
+                                    #   필터 항목 수는 §5에 **있어야 하지만**(필드의 성질) 값 다툼은 §3이 이긴다(정본).
+  - detail: <문자열, 필수>          # 세부의 종류 (예: "페이지당 개수·정렬")
+    required_in: <section id, 필수> # **부재 축** — 여기 없으면 결함. 여기 있으면 다른 절에 없어도 정상
+    value_authority: <section id, 선택>
+                                    # **값 축** — 이 detail의 값이 갈렸을 때 이기는 절. **기본값 = required_in.**
+                                    #   ⚠️ precedence에서 유도하지 않는다(r3-01). precedence는 **절 간 일반 승패**이고
+                                    #   여기는 **이 detail의 값을 누가 갖고 있느냐**라 다른 사실이다. 유도하면
+                                    #   그 detail이 존재하지도 않는 절이 값 권위로 나온다(실제로 그렇게 됐다).
+                                    #   **명시하는 경우 = required_in이 아닌 다른 절이 그 값을 실제로 갖고 있을 때.**
+                                    #   이때 명시는 중복이 아니라 **"그 절도 이 값을 갖는다"는 추가 사실**이다.
+                                    #
+                                    #   검증 규칙 (r4-01 — 초판은 "precedence상 이겨야 한다"였고 너무 좁았다):
+                                    #   ⓐ **존재 의무** — 명시된 절은 그 detail을 **실제로 갖고 있어야 한다.**
+                                    #      갖고 있지 않으면 비교할 값이 없어 모순 축이 조용히 빈다.
+                                    #      선언만으로는 확인 불가이므로 **스모크·게이트가 실물로 검사**한다.
+                                    #   ⓑ **detail-local 권위를 허용한다** — 일반 precedence에 그 쌍이 **없어도 된다.**
+                                    #      거부는 **명시적으로 반대되는 precedence가 있을 때만**
+                                    #      (즉 required_in이 value_authority를 이긴다고 선언돼 있을 때).
+                                    #      초판 규칙은 이걸 막아서, 특정 detail만 다른 절이 권위인 경우를 표현하려면
+                                    #      precedence에 **거짓 일반화**를 넣어야 했다.
+                                    #
+                                    # ⛔ **표현하지 못하는 것 — 알고 남긴다**(r4-01, 실사용 전까지 확장하지 않는다):
+                                    #   **권위 절이 둘 이상**인 경우(예: 공통 필드는 §5, Web 값은 §6, Mobile 값은 §7).
+                                    #   이 필드는 단일 scalar라 하나만 고를 수 있고, 나머지는 거짓 mirror가 된다.
+                                    #   **현재 계약의 답은 "detail을 쪼개라"** — `필드 정의(Web)`·`필드 정의(Mobile)`처럼
+                                    #   권위가 하나가 되도록 나눈다. `value_authorities` + scope 같은 확장은
+                                    #   **실제 사례가 나오기 전에는 만들지 않는다**(측정 없는 기계 추가 금지).
+    mirrors_ok: [<section id>, ...] # 선택. 값을 복창해도 되는 절.
+                                    #   **required_in·value_authority는 여기 적지 않는다** — 그 둘은
+                                    #   복창본이 아니다. 정본을 mirror로 적으면 비교 방향이 뒤집힌다(r1-03).
+                                    #   (복창본이 주인과 다르면 그건 대응 축이 아니라 모순 축이다)
+                                    #   ⚠️ 복창본이 **일부만** 담은 경우("부분 복창")의 판정은 아직 계약에 없다 —
+                                    #   현재 잠정 규칙은 "복창된 범위 안에서만 판정한다"이며 확정이 아니다.
+
+# 미확정 항목의 취급 (fail-closed — CONTRACT §2와 같은 방향):
+# - 선언되지 않은 절·대응·주인에 대해 게이트는 **판정하지 않는다.**
+# - 그리고 미확정을 **억제 근거로 쓸 수 없다.** "규약이 없으니 결함 아님"은 금지 —
+#   낡거나 빈 레지스트리로 유효 finding을 죽이는 것과 같은 실패다.
+# - 미확정 자리에서 나온 실제 candidate atom은 severity 없는 convention question으로 올린다.
+#   `unresolved`는 classification verifier result이지 finding status가 아니다. 원 question atom은
+#   question에서 종결하고, 답 이후의 finding/drift/nonissue는 lineage가 있는 새 atom으로 만든다.
+# - `approval_state: draft` 또는 `suppression_eligible: false`인 파일은 판정·억제에 사용할 수 없다.
+#
+# 알려진 한계 (Codex 피어리뷰 minor 1 — 재설계 시 볼 것):
+# - `role`이 '문서에서의 목적'과 '충돌 시 우선순위'를 한 값에 묶는다. 그래서
+#   "§3보다 우선하지는 않지만 독립 요구사항 등록부다" 같은 조합을 표현할 값이 없다.
+#   undetermined는 그 상황을 '미정'으로 피해 가는 것이지 표현하는 것이 아니다.
+# - `rule` 세 값이 거칠다. 표현 못 하는 것: 행 대응은 필수지만 1:N·N:1 허용 /
+#   의미 내용은 승계하되 변경 태그·provenance 표기는 승계 대상 아님 /
+#   양방향 근거는 필요하되 cardinality는 자유.
