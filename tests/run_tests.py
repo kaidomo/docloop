@@ -2838,6 +2838,7 @@ if review_gate_suite.stderr:
 check("review-gate focused suite", review_gate_suite.returncode == 0)
 
 for suite_name, suite_file in (
+        ("release/version contract suite", "test_release.py"),
         ("review-gate convention suite", "test_review_gate_convention.py"),
         ("review-gate intermediate contract suite", "test_review_gate_intermediate_contract.py"),
         ("review-gate v2 receipt suite", "test_review_gate_v2.py"),

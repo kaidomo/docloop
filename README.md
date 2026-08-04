@@ -27,10 +27,12 @@ document unless you approve it.
 
 ```bash
 git clone https://github.com/kaidomo/docloop && cd docloop
+# Optional: pin an installation to an existing release, for example: git checkout v0.12.0
 pip install -r requirements.txt       # the one library the checks need (PyYAML)
 chmod +x bin/docloop
 export PATH="$PWD/bin:$PATH"          # use docloop in this terminal session (add this line to your shell profile to keep it)
 export DOCLOOP_MODEL=codex            # which AI CLI docloop should drive: codex or claude
+docloop --version                     # print the product release version
 ```
 
 Requirements: Python 3 + PyYAML, and one of the `codex` or `claude` CLIs on your PATH.
@@ -163,6 +165,7 @@ choices, artifacts, failure behavior, and manual completion contract.
 - [`docs/policy-layer.md`](docs/policy-layer.md) — the one file (`policy.yaml`) that holds your org's document rules.
 - [`docs/direction.md`](docs/direction.md) — what's inside today, and what is planned but not shipped.
 - [`docs/design.md`](docs/design.md) — why documents need a verification kernel, and where docloop draws the line.
+- [`docs/releasing.md`](docs/releasing.md) — prepare, validate, tag, and recover a release without moving published tags.
 
 ## License
 

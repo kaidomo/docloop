@@ -1,10 +1,17 @@
 # Changelog
 
 All notable changes to docloop are documented here. This project adheres to
-[Semantic Versioning](https://semver.org/). A version is tagged on every merge to `main`.
+[Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
+`vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
 ## [0.13.0] — 2026-08-04
 ### Added
+- **Product version and guarded release path / 제품 버전·보호된 릴리즈 경로.** Root
+  `VERSION` is the product-release SSOT; `docloop --version` and `docloop version`
+  expose it without invoking a model. Read-only release checks keep VERSION, the first
+  CHANGELOG version, an annotated tag, its peeled commit, and `main` ancestry aligned.
+  Least-privilege CI and tag workflows verify the full suite before GitHub Release
+  publication; subsystem `TOOL_VERSION` protocol markers remain independent.
 - **Bound v2 review ledger and receipt validation / 패킷 결합 v2 리뷰 원장·receipt 검증.**
   New review-gate runs can validate complete candidate-to-atom-to-terminal lineage,
   non-blocking drift, authority-bound questions, immutable public records, and an exact

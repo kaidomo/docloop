@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pushed tag with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: python3 -m pip install -r requirements.txt
+      - name: Run full regression suite
+        run: python3 tests/run_tests.py
+      - name: Verify release tag contract
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          validation="$(python3 tools/check_release.py --tag "$RELEASE_TAG" --main-ref origin/main)"
+          printf '%s\n' "$validation" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: verify
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish GitHub Release for the existing tag
+        run: |
+          release_url="$(gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            --fail-on-no-commits)"
+          printf 'Published GitHub Release: %s\n' "$release_url" | tee -a "$GITHUB_STEP_SUMMARY"
