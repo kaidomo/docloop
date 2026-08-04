@@ -25,10 +25,12 @@ PRD·정책서·변경계획을 쓰고 나서 터미널에서 docloop을 돌린�
 
 ```bash
 git clone https://github.com/kaidomo/docloop && cd docloop
+# 선택: 기존 릴리즈에 설치 버전 고정(예: git checkout v0.12.0)
 pip install -r requirements.txt       # 점검기가 쓰는 라이브러리 하나(PyYAML)
 chmod +x bin/docloop
 export PATH="$PWD/bin:$PATH"          # 이 터미널 세션에서 docloop 사용(유지하려면 이 줄을 셸 프로필에 추가)
 export DOCLOOP_MODEL=codex            # docloop이 구동할 AI CLI: codex 또는 claude
+docloop --version                     # 제품 릴리즈 버전 출력
 ```
 
 필요 사항: Python 3 + PyYAML, 그리고 `codex` 또는 `claude` CLI 중 하나가 PATH에 있어야 한다.
@@ -156,6 +158,7 @@ front gate는 이 순서를 검사하는 구현용 guard이며 공개 실행 tra
 - [`docs/policy-layer.md`](docs/policy-layer.md) — 조직 문서 규칙을 담는 한 파일(`policy.yaml`).
 - [`docs/direction.md`](docs/direction.md) — 지금 안에 있는 것, 그리고 계획이지만 미출시인 것.
 - [`docs/design.md`](docs/design.md) — 왜 문서에는 검증 커널이 필요한가, docloop이 긋는 선.
+- [`docs/releasing.md`](docs/releasing.md) — 공개 태그를 이동하지 않고 릴리즈를 준비·검증·태그하고 실패를 복구하는 방법.
 
 ## 라이선스
 

@@ -16,6 +16,20 @@ MODEL="${DOCLOOP_MODEL:-codex}"
 
 die() { echo "docloop: $*" >&2; exit 1; }
 
+product_version() {
+  local file="$ROOT/VERSION" value raw
+  [ -f "$file" ] || die "VERSION file not found: $file"
+  value="$(cat "$file")"
+  raw="$(cat "$file"; printf x)"; raw="${raw%x}"
+  if [ "$raw" != "$value" ] && [ "$raw" != "$value"$'\n' ]; then
+    die "VERSION must contain exactly one stable SemVer value (X.Y.Z)"
+  fi
+  if [[ ! "$value" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    die "VERSION must contain exactly one stable SemVer value (X.Y.Z)"
+  fi
+  printf 'docloop %s\n' "$value"
+}
+
 # run_model <prompt-text> <rw|ro>
 # Feeds the assembled prompt to the configured model CLI, in the current folder.
 run_model() {
@@ -51,6 +65,7 @@ usage() {
   cat <<EOF
 docloop — a verification-first document kernel (wraps codex / claude -p)
 
+  docloop version                    print the product release version
   docloop init <folder> [inputs...]   scaffold a work folder (inputs/ work/ outputs/ reports/)
   docloop plan   [request...]         vague ask -> structured manifest (intake interview)
   docloop draft  [notes...]           write sections from evidence (reconcile)
@@ -81,6 +96,7 @@ EOF
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  --version|version) product_version ;;
   init)
     [ "$#" -ge 1 ] || die "usage: docloop init <folder> [inputs...]"
     python3 "$LIB/init_workspace.py" "$@" ;;
