@@ -106,7 +106,13 @@ else:
 check("preflight rejects target-document mismatch", mismatch_closed)
 
 
-def _prepare_fixture(root: Path, run_id: str, *, target_document: str = "draft.md"):
+def _prepare_fixture(
+    root: Path,
+    run_id: str,
+    *,
+    target_document: str | None = "draft.md",
+    template_only: bool = False,
+):
     root.mkdir()
     target = root / "draft.md"
     target.write_text("# Demo\n\nPrepared target.\n", encoding="utf-8")
@@ -117,7 +123,28 @@ def _prepare_fixture(root: Path, run_id: str, *, target_document: str = "draft.m
         (CONVENTION_FIXTURES / "intake-all-states.yaml").read_text(encoding="utf-8")
     )
     intake["target_snapshot"] = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
-    intake["target_document"] = target_document
+    if target_document is None:
+        intake.pop("target_document", None)
+    else:
+        intake["target_document"] = target_document
+    if template_only:
+        document_record = next(
+            record for record in intake["records"] if record["question_id"] == "q-document"
+        )
+        document_record.update(
+            {
+                "applicability": {
+                    "result": "inapplicable",
+                    "evidence": "Document-scoped section is absent from this target.",
+                },
+                "asked": False,
+                "response": None,
+                "authority": None,
+                "scope": None,
+                "source": None,
+                "approval": "inapplicable",
+            }
+        )
     (root / "profile.yaml").write_text(
         yaml.safe_dump(profile, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -178,6 +205,29 @@ with tempfile.TemporaryDirectory() as td:
         result_proc.returncode != 0
         and "prepared packet validation failed" in result_proc.stderr
         and "frontmatter" not in result_proc.stderr,
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    review = Path(td) / "review"
+    proc = _prepare_fixture(
+        review,
+        "template-only",
+        target_document=None,
+        template_only=True,
+    )
+    check(
+        "template-only convention intake may omit target_document",
+        proc.returncode == 0
+        and (review / "review-gate" / "template-only" / "COMPLETE.json").is_file(),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    review = Path(td) / "review"
+    proc = _prepare_fixture(review, "document-omission", target_document=None)
+    check(
+        "document-scoped intake omission fails before reservation",
+        proc.returncode != 0
+        and not (review / "review-gate" / "document-omission").exists(),
     )
 
 with tempfile.TemporaryDirectory() as td:

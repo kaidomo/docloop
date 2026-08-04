@@ -6,13 +6,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from validate_convention_intake import validate_data as validate_intake_data
+if __package__:
+    from .validate_convention_intake import validate_data as validate_intake_data
+else:
+    from validate_convention_intake import validate_data as validate_intake_data
 LENSES = ("L1", "L2", "L3")
 
 
 def _intermediate_validator() -> Any:
-    """Load the optional #160 dependency only when candidate inventory is used."""
-    from validate_review_intermediate import validate_data
+    """Load the optional ledger validator only when candidate inventory is used."""
+    if __package__:
+        from .validate_review_intermediate import validate_data
+    else:
+        from validate_review_intermediate import validate_data
 
     return validate_data
 
@@ -29,11 +35,11 @@ class FrontGateTrace:
         self.events.append({"sequence": len(self.events) + 1, "event": event, **payload})
 
     def preflight(self, intake: Any, profile: Any) -> None:
+        if self._intake_validated:
+            raise RuntimeError("front-gate preflight may run only once")
         errors = validate_intake_data(intake, profile)
         if errors:
             raise ValueError("invalid convention intake: " + "; ".join(errors))
-        if self.events:
-            raise RuntimeError("front-gate preflight may run only once")
         self._intake_validated = True
         unanswered = [
             record["question_id"]

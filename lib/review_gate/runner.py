@@ -685,7 +685,10 @@ def _validate_convention_pair(
     else:
         if intake.get("target_snapshot") != expected_snapshot:
             errors.append("convention intake target_snapshot must match the frozen target")
-        if intake.get("target_document") != target_rel.as_posix():
+        if (
+            "target_document" in intake
+            and intake.get("target_document") != target_rel.as_posix()
+        ):
             errors.append("convention intake target_document must match the selected target source")
     if errors:
         raise GateError("convention preflight failed:\n" + "\n".join(f"- {error}" for error in errors))

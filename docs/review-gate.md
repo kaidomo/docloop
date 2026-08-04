@@ -37,10 +37,12 @@ Choose each input explicitly:
   checks basic YAML, approval, provenance, and hashes, but does not claim full schema
   validation or generalization to other document types.
 - Convention preflight: optionally pass both `--convention-profile profile.yaml` and
-  `--convention-intake intake.yaml`. The pair must cover the profile exactly once,
-  declare `phase: pre_lens`, and bind `target_snapshot` and `target_document` to the
-  actual selected target. Missing, partial, duplicate-key, stale, or mismatched input
-  fails before a run directory is reserved. Approved answers may later be materialized
+  `--convention-intake intake.yaml`. The pair must cover the profile exactly once and
+  declare `phase: pre_lens`. `target_snapshot` always binds to the actual target hash.
+  An answered document-scoped record requires `target_document`, and any present
+  `target_document` must match the selected target source. Missing, partial,
+  duplicate-key, stale, or mismatched input fails before a run directory is reserved.
+  Approved answers may later be materialized
   only as a non-authoritative draft; they are not suppression authority.
 
 Every provenance reference used by decisions, terms, or a docmodel is frozen before
@@ -244,7 +246,6 @@ justified number of repeated runs, or a correct final document. The term scan is
 deterministic only for relationships encoded in the supplied dictionary. Human
 review, disposition, and verification remain mandatory.
 
-The bounded #160 ledger/receipt and generic #161 convention-preflight contracts are
-supported. [#162](https://github.com/kaidomo/docuauthring/issues/162)
-second-document/docmodel generalization remains deferred. No transferability,
+The deterministic ledger/receipt and generic convention-preflight contracts are
+supported. Second-document/docmodel generalization remains deferred. No transferability,
 completeness, or model-independence guarantee is implied.

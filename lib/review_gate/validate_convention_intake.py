@@ -11,12 +11,20 @@ from typing import Any
 
 import yaml
 
-from validate_convention_profile import (
-    DuplicateKeyError,
-    SCOPES,
-    load_yaml,
-    validate_data as validate_profile_data,
-)
+if __package__:
+    from .validate_convention_profile import (
+        DuplicateKeyError,
+        SCOPES,
+        load_yaml,
+        validate_data as validate_profile_data,
+    )
+else:
+    from validate_convention_profile import (
+        DuplicateKeyError,
+        SCOPES,
+        load_yaml,
+        validate_data as validate_profile_data,
+    )
 
 
 SCHEMA_VERSION = 1

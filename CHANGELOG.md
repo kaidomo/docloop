@@ -21,8 +21,8 @@ All notable changes to docloop are documented here. This project adheres to
 ### Compatibility
 - Ordinary docloop commands and review-gate preparation without convention inputs are
   CLI- and lens-visibility-compatible; v0.13 updates packet versions and handoffs.
-  `review-gate check` still proves prepared-input integrity only. Upstream
-  #162 multi-document/docmodel generalization remains deferred; no model independence,
+  `review-gate check` still proves prepared-input integrity only.
+  Multi-document/docmodel generalization remains deferred; no model independence,
   completeness, or generalization guarantee is added.
 
 ## [0.12.0] — 2026-08-03
@@ -65,8 +65,8 @@ All notable changes to docloop are documented here. This project adheres to
 ### Compatibility
 - Existing `plan`, `draft`, `review`, `panel`, `gate`, `contribute`, `curate`, and
   other commands are unchanged unless `review-gate` is explicitly invoked. This port
-  excluded unsettled upstream docuauthring #162 (second-document/docmodel
-  generalization); v0.13.0 later adds the bounded #160/#161 protocol slices.
+  excluded second-document/docmodel generalization; v0.13.0 later adds the
+  deterministic ledger/receipt and convention-preflight protocol slices.
 
 ## [0.11.0] — 2026-08-03
 ### Added

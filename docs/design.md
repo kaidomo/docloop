@@ -142,7 +142,7 @@ means the review passed or the document is done.
 
 This command is deliberately explicit and additive. It neither intercepts ordinary
 review requests nor changes any existing command. It still refuses unmeasured promises
-from upstream: #162 generalized multi-document docmodels, severity ordering, complete
+from upstream: generalized multi-document docmodels, severity ordering, complete
 detection, model independence, and any claim that the prescribed P1/done verifier
 counts are empirically justified remain outside the contract. See the
 [review-gate guide](review-gate.md) for the executable and human contracts.

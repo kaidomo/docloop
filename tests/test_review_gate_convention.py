@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused regression tests for the generic #161 convention front gate."""
+"""Focused regression tests for the generic convention front gate."""
 
 from __future__ import annotations
 
@@ -304,13 +304,34 @@ class MaterializerTests(ConventionFixture):
 
 
 class FrontGateTests(ConventionFixture):
+    def test_front_gate_imports_in_package_mode(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from lib.review_gate.front_gate import "
+                    "FrontGateTrace, _intermediate_validator; "
+                    "FrontGateTrace(); _intermediate_validator()"
+                ),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_preflight_must_precede_each_lens_and_runs_once(self) -> None:
         trace = FrontGateTrace()
         with self.assertRaisesRegex(RuntimeError, "before validated convention intake"):
             trace.start_lens("L1")
         trace.preflight(self.intake, self.profile)
+        trace.events.clear()
+        invalid = deepcopy(self.intake)
+        invalid["phase"] = "post_lens"
         with self.assertRaisesRegex(RuntimeError, "only once"):
-            trace.preflight(self.intake, self.profile)
+            trace.preflight(invalid, self.profile)
+        self.assertEqual(trace.events, [])
         for lens in LENSES:
             trace.start_lens(lens)
         self.assertEqual(
