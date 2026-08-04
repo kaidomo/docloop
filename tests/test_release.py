@@ -71,9 +71,10 @@ def make_git_repo(*, tag_kind: str = "annotated", off_main: bool = False) -> Pat
 
 
 # Real checkout and CLI behavior.
+current_version = (ROOT / "VERSION").read_text(encoding="ascii").strip()
 for args in (("--version",), ("version",)):
     result = run(str(BIN), *args, cwd=Path(tempfile.gettempdir()))
-    check(f"CLI {' '.join(args)} prints product version", result.returncode == 0 and result.stdout == "docloop 0.13.0\n")
+    check(f"CLI {' '.join(args)} prints product version", result.returncode == 0 and result.stdout == f"docloop {current_version}\n")
 
 help_result = run(str(BIN), "--help")
 check("CLI help remains available and lists version", help_result.returncode == 0 and "docloop version" in help_result.stdout)
@@ -81,7 +82,7 @@ unknown = run(str(BIN), "definitely-unknown")
 check("unknown command remains nonzero and actionable", unknown.returncode != 0 and "unknown command 'definitely-unknown'" in unknown.stderr)
 
 real_validation = run_validator(ROOT)
-check("real checkout passes tagless release validation", real_validation.returncode == 0 and "VERSION 0.13.0" in real_validation.stdout)
+check("real checkout passes tagless release validation", real_validation.returncode == 0 and f"VERSION {current_version}" in real_validation.stdout)
 
 # VERSION and CHANGELOG format contract.
 valid_versions = (b"0.13.0\n", b"0.13.0")
@@ -163,6 +164,7 @@ if ci_path.exists() and release_path.exists():
     check("release concurrency is tag-keyed and non-cancelling", release.get("concurrency", {}).get("group") == "release-${{ github.ref_name }}" and release.get("concurrency", {}).get("cancel-in-progress") is False)
     check("publish has explicit no-checkout GitHub context", "actions/checkout" not in str(publish) and publish.get("env") == {"GH_REPO": "${{ github.repository }}", "GH_TOKEN": "${{ github.token }}"})
     check("release creation verifies existing tag and generates notes", all(flag in release_raw for flag in ("gh release create \"$GITHUB_REF_NAME\"", "--title \"$GITHUB_REF_NAME\"", "--verify-tag", "--generate-notes", "--fail-on-no-commits")))
+    check("release validation preserves failure status and summary diagnostics", "set -o pipefail" in release_raw and "2>&1 | tee -a \"$GITHUB_STEP_SUMMARY\"" in release_raw)
     check("first-party actions are SHA-pinned", all(value in ci_raw + release_raw for value in ("3d3c42e5aac5ba805825da76410c181273ba90b1", "5fda3b95a4ea91299a34e894583c3862153e4b97")))
     uses_lines = [line.strip() for line in (ci_raw + release_raw).splitlines() if line.strip().startswith("uses:")]
     check("workflows use no third-party actions", all("actions/checkout@" in line or "actions/setup-python@" in line for line in uses_lines))
