@@ -223,7 +223,7 @@ if ci_path.exists() and release_path.exists():
     check("release validates existing releases before no-op", "--github-release-json" in release_raw and "existing-release.json" in release_raw)
     check("release creation verifies tag and uses changelog notes", all(flag in release_raw for flag in ("gh release create \"$RELEASE_TAG\"", "--title \"$RELEASE_TAG\"", "--verify-tag", "--notes-file", "--fail-on-no-commits")) and "--generate-notes" not in release_raw)
     check("release validation runs full tests", "python3 tests/run_tests.py" in release_raw)
-    check("release verifies repository-local signer and remote tag target", "--tag \"$RELEASE_TAG\"" in release_raw and "remote_tag_object" in release_raw and "remote_tag_commit" in release_raw)
+    check("release verifies repository-local signer and remote main/tag target", "--tag \"$RELEASE_TAG\"" in release_raw and "remote_tag_object" in release_raw and "remote_tag_commit" in release_raw and "git/ref/heads/main" in release_raw)
     check("first-party actions are SHA-pinned", all(value in ci_raw + release_raw for value in ("3d3c42e5aac5ba805825da76410c181273ba90b1", "5fda3b95a4ea91299a34e894583c3862153e4b97")))
     uses_lines = [line.strip() for line in (ci_raw + release_raw).splitlines() if line.strip().startswith("uses:")]
     check("workflows use no third-party actions", all("actions/checkout@" in line or "actions/setup-python@" in line for line in uses_lines))

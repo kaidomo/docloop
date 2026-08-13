@@ -48,7 +48,7 @@ bytes. If the file is absent, release validation stops closed.
 The dispatch workflow checks out the existing tag with full history, runs the complete
 test suite, verifies VERSION/CHANGELOG/tag equality, confirms that the tag object is
 annotated, trusted by the repository-local signer allowlist, and peels to a commit
-reachable from `origin/main`. An existing Release is accepted only when its tag, title,
+exactly equal to the live `origin/main` tip. An existing Release is accepted only when its tag, title,
 draft/prerelease flags, and body exactly match the dated CHANGELOG section. Missing,
 partial, conflicting, or API-error states fail closed. Tag pushes do not publish
 Releases; no generated notes or release assets are published.

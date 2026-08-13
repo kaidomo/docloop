@@ -103,6 +103,8 @@ jobs:
           test "$remote_tag_object" = "$EXPECTED_TAG_OBJECT"
           remote_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$remote_tag_object" --jq '.object.sha')"
           test "$tag_commit" = "$remote_tag_commit"; test "$tag_commit" = "$EXPECTED_TAG_COMMIT"
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test "$current_main" = "$EXPECTED_TAG_COMMIT"
           lookup_error="$RUNNER_TEMP/release-lookup.err"
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
             --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
@@ -117,6 +119,14 @@ jobs:
               cat "$lookup_error" >&2
               exit "$lookup_status"
             fi
+            # Re-freeze the immutable tag and live main immediately before the
+            # first external write; the lookup above is not a transaction lock.
+            remote_tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+            test "$remote_tag_object" = "$EXPECTED_TAG_OBJECT"
+            remote_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$remote_tag_object" --jq '.object.sha')"
+            test "$remote_tag_commit" = "$EXPECTED_TAG_COMMIT"
+            current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+            test "$current_main" = "$EXPECTED_TAG_COMMIT"
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
@@ -130,3 +140,7 @@ jobs:
               --tag "$RELEASE_TAG" \
               --github-release-json "$RUNNER_TEMP/created-release.json"
           fi
+          final_tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+          test "$final_tag_object" = "$EXPECTED_TAG_OBJECT"
+          final_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$final_tag_object" --jq '.object.sha')"
+          test "$final_tag_commit" = "$EXPECTED_TAG_COMMIT"
