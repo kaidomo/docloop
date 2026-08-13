@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -12,6 +13,12 @@ from pathlib import Path
 
 STABLE_SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 CHANGELOG_VERSION = re.compile(r"^## \[([^]]+)]", re.MULTILINE)
+ALLOWED_SIGNERS = Path(".github/release_allowed_signers")
+RELEASE_HEADING = re.compile(
+    r"^##\s*\[(?P<version>[^]]+)\]\s+[—-]\s+"
+    r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\s*$",
+    re.MULTILINE,
+)
 
 
 class ReleaseError(RuntimeError):
@@ -45,6 +52,20 @@ def read_changelog_version(root: Path) -> str:
     if not match:
         raise ReleaseError("CHANGELOG has no release header in the form '## [X.Y.Z]'")
     return match.group(1)
+
+
+def read_release_notes(root: Path, version: str) -> str:
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    first = CHANGELOG_VERSION.search(text)
+    match = RELEASE_HEADING.match(text, first.start()) if first else None
+    if match is None or match.group("version") != version:
+        raise ReleaseError(f"CHANGELOG has no dated release section [{version}]")
+    following = re.search(r"^##\s*\[", text[match.end():], re.MULTILINE)
+    end = match.end() + following.start() if following else len(text)
+    notes = text[match.end():end].strip("\n")
+    if not notes.strip():
+        raise ReleaseError(f"CHANGELOG release section [{version}] is empty")
+    return notes + "\n"
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -101,9 +122,40 @@ def validate_tag(root: Path, tag: str, version: str, main_ref: str) -> tuple[str
             "Fetch complete history and tags before retrying."
         )
 
-    signature = git(root, "verify-tag", "--raw", tag)
-    signature_status = "verified" if signature.returncode == 0 else "unverified"
-    return commit, signature_status
+    allowed_signers = root / ALLOWED_SIGNERS
+    if not allowed_signers.is_file():
+        raise ReleaseError(
+            f"trusted signer file is missing: {allowed_signers}; "
+            "production signer bytes must be provided by the repository owner"
+        )
+    tracked = git(root, "ls-files", "--error-unmatch", str(ALLOWED_SIGNERS))
+    if tracked.returncode != 0:
+        raise ReleaseError(f"trusted signer file is not tracked in the tag commit: {allowed_signers}")
+    if any(
+        git(root, *args, str(ALLOWED_SIGNERS)).returncode != 0
+        for args in (("diff", "--quiet", "HEAD", "--"), ("diff", "--cached", "--quiet", "HEAD", "--"))
+    ):
+        raise ReleaseError(f"trusted signer file has uncommitted changes: {allowed_signers}")
+    status = git(root, "status", "--short", "--untracked-files=all", "--", str(ALLOWED_SIGNERS))
+    if status.returncode != 0 or status.stdout.strip():
+        raise ReleaseError(f"trusted signer file is not cleanly bound to the tag commit: {allowed_signers}")
+    committed_signers = git(root, "show", f"{tag_ref}:{ALLOWED_SIGNERS}")
+    if committed_signers.returncode != 0 or committed_signers.stdout.encode() != allowed_signers.read_bytes():
+        raise ReleaseError(f"trusted signer file does not match the tag commit: {allowed_signers}")
+    signature = git(
+        root,
+        "-c",
+        f"gpg.ssh.allowedSignersFile={allowed_signers}",
+        "verify-tag",
+        "--raw",
+        tag,
+    )
+    if signature.returncode != 0:
+        detail = signature.stderr.strip() or "signature verification failed"
+        raise ReleaseError(
+            f"tag {tag!r} must carry a valid signature from {allowed_signers}: {detail}"
+        )
+    return commit, "verified"
 
 
 def parse_args() -> argparse.Namespace:
@@ -120,6 +172,8 @@ def parse_args() -> argparse.Namespace:
         default="origin/main",
         help="Git ref that must contain the peeled tag commit (default: origin/main)",
     )
+    parser.add_argument("--notes-file", type=Path, help="write validated CHANGELOG notes here")
+    parser.add_argument("--github-release-json", type=Path, help="validate an existing Release payload")
     return parser.parse_args()
 
 
@@ -127,12 +181,32 @@ def main() -> int:
     args = parse_args()
     root = args.repo_root.resolve()
     try:
+        if args.github_release_json and not args.tag:
+            raise ReleaseError("--tag is required when validating an existing Release")
         version = read_version(root)
         changelog_version = read_changelog_version(root)
         if changelog_version != version:
             raise ReleaseError(
                 f"CHANGELOG first version {changelog_version!r} does not match VERSION {version!r}"
             )
+
+        notes = read_release_notes(root, version)
+        if args.notes_file:
+            args.notes_file.parent.mkdir(parents=True, exist_ok=True)
+            args.notes_file.write_text(notes, encoding="utf-8")
+        if args.github_release_json:
+            try:
+                payload = json.loads(args.github_release_json.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ReleaseError(f"existing Release JSON cannot be read: {exc}") from exc
+            expected = {"tagName": args.tag, "name": args.tag, "isDraft": False, "isPrerelease": False}
+            if not isinstance(payload, dict):
+                raise ReleaseError("existing Release JSON must be an object")
+            errors = [f"existing Release {key} must be {value!r}" for key, value in expected.items() if key not in payload or payload[key] != value]
+            if "body" not in payload or not isinstance(payload["body"], str) or payload["body"] != notes:
+                errors.append("existing Release body does not match CHANGELOG notes")
+            if errors:
+                raise ReleaseError("; ".join(errors))
 
         summary = f"release check passed: VERSION {version}, CHANGELOG {changelog_version}"
         if args.tag:

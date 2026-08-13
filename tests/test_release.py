@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -41,7 +42,7 @@ def write_contract(repo: Path, version: bytes = b"0.13.0\n", changelog: str | No
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "VERSION").write_bytes(version)
     (repo / "CHANGELOG.md").write_text(
-        changelog or "# Changelog\n\n## [0.13.0] — test\n",
+        changelog or "# Changelog\n\n## [0.13.0] — 2026-08-04\n\n### Changed\n- test\n",
         encoding="utf-8",
     )
 
@@ -56,13 +57,26 @@ def make_git_repo(*, tag_kind: str = "annotated", off_main: bool = False) -> Pat
     git(repo, "init", "-b", "main")
     git(repo, "config", "user.name", "Release Test")
     git(repo, "config", "user.email", "release-test@example.invalid")
-    git(repo, "add", "VERSION", "CHANGELOG.md")
+    key = repo / "release-test-key"
+    run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key))
+    allowed_key = key
+    if tag_kind == "untrusted":
+        allowed_key = repo / "other-release-test-key"
+        run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(allowed_key))
+    (repo / ".github").mkdir()
+    (repo / ".github" / "release_allowed_signers").write_text(
+        f"release-test@example.invalid {allowed_key.with_suffix('.pub').read_text(encoding='utf-8').strip()}\n",
+        encoding="utf-8",
+    )
+    git(repo, "config", "gpg.format", "ssh")
+    git(repo, "config", "user.signingkey", str(key))
+    git(repo, "add", "VERSION", "CHANGELOG.md", ".github/release_allowed_signers")
     git(repo, "commit", "-m", "base")
     if off_main:
         git(repo, "switch", "-c", "release-candidate")
         git(repo, "commit", "--allow-empty", "-m", "off main")
-    if tag_kind == "annotated":
-        git(repo, "tag", "-a", "v0.13.0", "-m", "v0.13.0")
+    if tag_kind in ("annotated", "untrusted"):
+        git(repo, "tag", "-s", "v0.13.0", "-m", "v0.13.0")
     elif tag_kind == "lightweight":
         git(repo, "tag", "v0.13.0")
     if off_main:
@@ -142,6 +156,50 @@ try:
 finally:
     shutil.rmtree(off_main)
 
+missing_signer = make_git_repo()
+try:
+    (missing_signer / ".github" / "release_allowed_signers").unlink()
+    result = run_validator(missing_signer, "--tag", "v0.13.0", "--main-ref", "main")
+    check("missing production signer bytes fail closed", result.returncode != 0 and "trusted signer file is missing" in result.stderr)
+finally:
+    shutil.rmtree(missing_signer)
+
+untrusted_signer = make_git_repo(tag_kind="untrusted")
+try:
+    result = run_validator(untrusted_signer, "--tag", "v0.13.0", "--main-ref", "main")
+    check("wrong production signer fails closed", result.returncode != 0 and "valid signature" in result.stderr)
+finally:
+    shutil.rmtree(untrusted_signer)
+
+release_payload = make_git_repo()
+try:
+    payload = release_payload / "release.json"
+    payload.write_text(json.dumps({
+        "tagName": "v0.13.0",
+        "name": "v0.13.0",
+        "isDraft": False,
+        "isPrerelease": False,
+        "body": "### Changed\n- test\n",
+    }), encoding="utf-8")
+    result = run_validator(release_payload, "--tag", "v0.13.0", "--main-ref", "main", "--github-release-json", str(payload))
+    check("matching existing Release is an exact no-op", result.returncode == 0)
+    payload.write_text(json.dumps({"tagName": "v0.13.0", "name": "v0.13.0", "isDraft": False, "isPrerelease": False, "body": "### Changed\n- tampered\n"}), encoding="utf-8")
+    result = run_validator(release_payload, "--tag", "v0.13.0", "--main-ref", "main", "--github-release-json", str(payload))
+    check("conflicting existing Release body fails closed", result.returncode != 0 and "body" in result.stderr)
+    payload.write_text(json.dumps({"tagName": "v0.13.0", "name": "wrong", "isDraft": True, "isPrerelease": False, "body": "### Changed\n- test\n"}), encoding="utf-8")
+    result = run_validator(release_payload, "--tag", "v0.13.0", "--main-ref", "main", "--github-release-json", str(payload))
+    check("conflicting existing Release metadata fails closed", result.returncode != 0 and "name" in result.stderr and "isDraft" in result.stderr)
+    payload.write_text("{}", encoding="utf-8")
+    result = run_validator(release_payload, "--tag", "v0.13.0", "--main-ref", "main", "--github-release-json", str(payload))
+    check("partial existing Release fails closed", result.returncode != 0 and "tagName" in result.stderr)
+    payload.write_text("not-json", encoding="utf-8")
+    result = run_validator(release_payload, "--tag", "v0.13.0", "--main-ref", "main", "--github-release-json", str(payload))
+    check("malformed existing Release JSON fails closed", result.returncode != 0 and "cannot be read" in result.stderr)
+    result = run_validator(release_payload, "--github-release-json", str(payload))
+    check("existing Release validation requires exact tag input", result.returncode != 0 and "--tag is required" in result.stderr)
+finally:
+    shutil.rmtree(release_payload)
+
 # Workflow permissions and publication shape.
 ci_path = ROOT / ".github" / "workflows" / "ci.yml"
 release_path = ROOT / ".github" / "workflows" / "release.yml"
@@ -155,16 +213,17 @@ if ci_path.exists() and release_path.exists():
     check("CI triggers on PR and main push", "pull_request" in ci_on and ci_on.get("push", {}).get("branches") == ["main"])
     check("CI grants contents read only", ci.get("permissions") == {"contents": "read"})
     check("CI runs full suite and release validator", "python3 tests/run_tests.py" in ci_raw and "python3 tools/check_release.py" in ci_raw)
-    check("release triggers only on v* tag pushes", release_on == {"push": {"tags": ["v*"]}})
+    check("release triggers only through workflow dispatch", release_on == {"workflow_dispatch": {"inputs": {"tag": {"description": "Signed release tag to publish (for example, v0.13.0)", "required": True, "type": "string"}}}})
     verify = release["jobs"]["verify"]
     publish = release["jobs"]["publish"]
-    check("release verify has read-only contents", verify.get("permissions") == {"contents": "read"})
+    check("verify job has read-only contents", verify.get("permissions") is None and release.get("permissions") == {"contents": "read"})
     check("publish depends on verify and alone has write", publish.get("needs") == "verify" and publish.get("permissions") == {"contents": "write"})
-    check("release checkout fetches full history", "fetch-depth: 0" in release_raw and "ref: ${{ github.ref }}" in release_raw)
-    check("release concurrency is tag-keyed and non-cancelling", release.get("concurrency", {}).get("group") == "release-${{ github.ref_name }}" and release.get("concurrency", {}).get("cancel-in-progress") is False)
-    check("publish has explicit no-checkout GitHub context", "actions/checkout" not in str(publish) and publish.get("env") == {"GH_REPO": "${{ github.repository }}", "GH_TOKEN": "${{ github.token }}"})
-    check("release creation verifies existing tag and generates notes", all(flag in release_raw for flag in ("gh release create \"$GITHUB_REF_NAME\"", "--title \"$GITHUB_REF_NAME\"", "--verify-tag", "--generate-notes", "--fail-on-no-commits")))
-    check("release validation preserves failure status and summary diagnostics", "set -o pipefail" in release_raw and "2>&1 | tee -a \"$GITHUB_STEP_SUMMARY\"" in release_raw)
+    check("release checkout fetches full history and exact input tag", "fetch-depth: 0" in release_raw and "ref: ${{ inputs.tag }}" in release_raw)
+    check("release concurrency is tag-keyed and non-cancelling", release.get("concurrency", {}).get("group") == "release-${{ github.repository }}-${{ inputs.tag }}" and release.get("concurrency", {}).get("cancel-in-progress") is False)
+    check("release validates existing releases before no-op", "--github-release-json" in release_raw and "existing-release.json" in release_raw)
+    check("release creation verifies tag and uses changelog notes", all(flag in release_raw for flag in ("gh release create \"$RELEASE_TAG\"", "--title \"$RELEASE_TAG\"", "--verify-tag", "--notes-file", "--fail-on-no-commits")) and "--generate-notes" not in release_raw)
+    check("release validation runs full tests", "python3 tests/run_tests.py" in release_raw)
+    check("release verifies repository-local signer and remote tag target", "--tag \"$RELEASE_TAG\"" in release_raw and "remote_tag_object" in release_raw and "remote_tag_commit" in release_raw)
     check("first-party actions are SHA-pinned", all(value in ci_raw + release_raw for value in ("3d3c42e5aac5ba805825da76410c181273ba90b1", "5fda3b95a4ea91299a34e894583c3862153e4b97")))
     uses_lines = [line.strip() for line in (ci_raw + release_raw).splitlines() if line.strip().startswith("uses:")]
     check("workflows use no third-party actions", all("actions/checkout@" in line or "actions/setup-python@" in line for line in uses_lines))
