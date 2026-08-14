@@ -152,7 +152,7 @@ finally:
 off_main = make_git_repo(off_main=True)
 try:
     result = run_validator(off_main, "--tag", "v0.13.0", "--main-ref", "main")
-    check("off-main annotated tag is rejected", result.returncode != 0 and "reachable" in result.stderr.lower())
+    check("off-main annotated tag is rejected", result.returncode != 0 and "equal" in result.stderr.lower())
 finally:
     shutil.rmtree(off_main)
 

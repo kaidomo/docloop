@@ -12,10 +12,9 @@ docloop currently supports stable Semantic Versioning values and tags only: `X.Y
 
 1. Update `VERSION` to the intended stable version and update the first
    `CHANGELOG.md` heading to the same value. Curate the release notes there.
-2. Install the release-check dependency and run the local contract and regression checks:
+2. Run the local contract and regression checks:
 
    ```bash
-   python3 -m pip install -r requirements.txt
    docloop --version
    python3 tools/check_release.py
    python3 tests/test_release.py
@@ -35,23 +34,24 @@ has a configured signing identity:
 git switch main
 git pull --ff-only origin main
 version="$(cat VERSION)"
-git tag -s "v${version}" -m "docloop v${version}"
+git tag -s "v${version}" -m "docloop v${version}"   # recommended when signing is configured
+# Or, when signing is unavailable:
+# git tag -a "v${version}" -m "docloop v${version}"
 git show "v${version}"
 git push origin "refs/tags/v${version}"
 ```
 
-The repository must carry `.github/release_allowed_signers` with the reviewed production
-SSH public signer entry before publication. Signed annotated tags are mandatory; do not
-use an unsigned fallback. Do not create placeholder or disposable production signer
-bytes. If the file is absent, release validation stops closed.
+Inspect the tag and its signature status manually before pushing. The automated release
+contract requires an annotated tag and reports signature verification status, but it
+does not claim cryptographic trust. Enforcing trust requires a separately reviewed list
+of trusted signer identities or keys and a verification mechanism.
 
-The dispatch workflow checks out the existing tag with full history, runs the complete
+The tag-push workflow checks out the existing tag with full history, runs the complete
 test suite, verifies VERSION/CHANGELOG/tag equality, confirms that the tag object is
-annotated, trusted by the repository-local signer allowlist, and peels to a commit
-exactly equal to the live `origin/main` tip. An existing Release is accepted only when its tag, title,
-draft/prerelease flags, and body exactly match the dated CHANGELOG section. Missing,
-partial, conflicting, or API-error states fail closed. Tag pushes do not publish
-Releases; no generated notes or release assets are published.
+annotated and peels to a commit reachable from `origin/main`, and only then creates a
+GitHub Release. The workflow never creates, moves, or replaces a tag. Generated GitHub
+notes supplement the curated CHANGELOG; no package, duplicate source archive, or
+checksum asset is published.
 
 ## Failure recovery
 

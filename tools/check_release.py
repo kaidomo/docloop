@@ -68,6 +68,11 @@ def read_release_notes(root: Path, version: str) -> str:
     return notes + "\n"
 
 
+def canonical_release_body(body: str) -> str:
+    """Use one newline-normalized representation for Release comparisons."""
+    return body.rstrip("\r\n") + "\n"
+
+
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -77,7 +82,7 @@ def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def validate_tag(root: Path, tag: str, version: str, main_ref: str) -> tuple[str, str]:
+def validate_tag(root: Path, tag: str, version: str, main_ref: str, *, check_main: bool = True) -> tuple[str, str]:
     expected = f"v{version}"
     if tag != expected:
         raise ReleaseError(f"tag {tag!r} does not match VERSION {version!r}; expected {expected!r}")
@@ -104,22 +109,18 @@ def validate_tag(root: Path, tag: str, version: str, main_ref: str) -> tuple[str
         detail = commit_result.stderr.strip() or "tag does not peel to a commit"
         raise ReleaseError(f"tag {tag!r} cannot be peeled to a commit: {detail}")
     commit = commit_result.stdout.strip()
-    main_commit_result = git(root, "rev-parse", "--verify", f"{main_ref}^{{commit}}")
-    if main_commit_result.returncode != 0:
+    main_commit_result = git(root, "rev-parse", "--verify", f"{main_ref}^{{commit}}") if check_main else None
+    if main_commit_result is not None and main_commit_result.returncode != 0:
         detail = main_commit_result.stderr.strip() or "main ref is absent"
         raise ReleaseError(
             f"cannot resolve main ref {main_ref!r}: {detail}. "
             "Fetch complete history and tags first (for example: git fetch --tags origin main)."
         )
 
-    ancestry = git(root, "merge-base", "--is-ancestor", commit, main_commit_result.stdout.strip())
-    if ancestry.returncode == 1:
-        raise ReleaseError(f"tag {tag!r} peels to {commit}, which is not reachable from {main_ref!r}")
-    if ancestry.returncode != 0:
-        detail = ancestry.stderr.strip() or "ancestry could not be determined"
+    main_commit = main_commit_result.stdout.strip() if main_commit_result is not None else ""
+    if main_commit and commit != main_commit:
         raise ReleaseError(
-            f"cannot prove {tag!r} ancestry under {main_ref!r}: {detail}. "
-            "Fetch complete history and tags before retrying."
+            f"tag {tag!r} peels to {commit}, but must equal the current {main_ref!r} commit {main_commit}"
         )
 
     allowed_signers = root / ALLOWED_SIGNERS
@@ -172,8 +173,18 @@ def parse_args() -> argparse.Namespace:
         default="origin/main",
         help="Git ref that must contain the peeled tag commit (default: origin/main)",
     )
+    parser.add_argument(
+        "--skip-main-check",
+        action="store_true",
+        help="validate an existing Release before live-main gating",
+    )
     parser.add_argument("--notes-file", type=Path, help="write validated CHANGELOG notes here")
     parser.add_argument("--github-release-json", type=Path, help="validate an existing Release payload")
+    parser.add_argument(
+        "--expect-draft",
+        action="store_true",
+        help="validate a newly-created draft Release before it is published",
+    )
     return parser.parse_args()
 
 
@@ -193,24 +204,26 @@ def main() -> int:
         notes = read_release_notes(root, version)
         if args.notes_file:
             args.notes_file.parent.mkdir(parents=True, exist_ok=True)
-            args.notes_file.write_text(notes, encoding="utf-8")
+            args.notes_file.write_text(canonical_release_body(notes), encoding="utf-8")
         if args.github_release_json:
             try:
                 payload = json.loads(args.github_release_json.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise ReleaseError(f"existing Release JSON cannot be read: {exc}") from exc
-            expected = {"tagName": args.tag, "name": args.tag, "isDraft": False, "isPrerelease": False}
+            expected = {"tagName": args.tag, "name": args.tag, "isDraft": args.expect_draft, "isPrerelease": False}
             if not isinstance(payload, dict):
                 raise ReleaseError("existing Release JSON must be an object")
             errors = [f"existing Release {key} must be {value!r}" for key, value in expected.items() if key not in payload or payload[key] != value]
-            if "body" not in payload or not isinstance(payload["body"], str) or payload["body"] != notes:
+            if "body" not in payload or not isinstance(payload["body"], str) or canonical_release_body(payload["body"]) != canonical_release_body(notes):
                 errors.append("existing Release body does not match CHANGELOG notes")
             if errors:
                 raise ReleaseError("; ".join(errors))
 
         summary = f"release check passed: VERSION {version}, CHANGELOG {changelog_version}"
         if args.tag:
-            commit, signature = validate_tag(root, args.tag, version, args.main_ref)
+            commit, signature = validate_tag(
+                root, args.tag, version, args.main_ref, check_main=not args.skip_main_check
+            )
             summary += f", tag {args.tag}, commit {commit}, signature={signature}"
         print(summary)
         return 0
