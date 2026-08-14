@@ -17,7 +17,6 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       tag_object: ${{ steps.evidence.outputs.tag_object }}
@@ -37,7 +36,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -46,6 +45,7 @@ jobs:
         run: python3 -m pip install -r requirements.txt
       - name: Require an annotated tag object
         run: |
+          set -euo pipefail
           git show-ref --verify refs/remotes/origin/main
           test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
       - name: Validate tag and changelog notes
@@ -58,15 +58,17 @@ jobs:
       - id: evidence
         name: Freeze verification evidence
         run: |
+          set -euo pipefail
           # shellcheck disable=SC2129
           printf 'tag_object=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG")" >>"$GITHUB_OUTPUT"
           printf 'tag_commit=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" >>"$GITHUB_OUTPUT"
           printf 'notes_sha=%s\n' "$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
           printf 'signer_sha=%s\n' "$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
           printf 'workflow_sha=%s\n' "$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
 
   publish:
-    if: github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
     permissions:
@@ -88,16 +90,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release_response="$RUNNER_TEMP/release-lookup.response"
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --include --silent \
-            >"$release_response"; then
-            sed -n '/^{/,$p' "$release_response" | jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
+          release_list="$RUNNER_TEMP/release-list.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$release_list"
+          existing_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$release_list")"
+          if test -n "$existing_release"; then
+            printf '%s\n' "$existing_release" | jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
               >"$RUNNER_TEMP/existing-release.json"
             python3 tools/check_release.py \
               --tag "$RELEASE_TAG" \
@@ -105,12 +108,6 @@ jobs:
               --github-release-json "$RUNNER_TEMP/existing-release.json"
             echo "Release $RELEASE_TAG already exists and matches the release contract."
           else
-            lookup_status=$?
-            http_status="$(awk '/^HTTP/{status=$2} END{print status}' "$release_response")"
-            if test "$http_status" != "404"; then
-              cat "$release_response" >&2
-              exit "$lookup_status"
-            fi
             # Re-freeze the immutable tag and live main immediately before the
             # first external write; the lookup above is not a transaction lock.
             python3 tools/check_release.py \
@@ -135,15 +132,19 @@ jobs:
               --draft \
               --title "$RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$RUNNER_TEMP/created-release-list.json"
+            created_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$RUNNER_TEMP/created-release-list.json")"
+            test -n "$created_release"
+            release_id="$(jq -r .id <<<"$created_release")"
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
               >"$RUNNER_TEMP/created-release.json"
             python3 tools/check_release.py \
               --tag "$RELEASE_TAG" \
               --expect-draft \
               --github-release-json "$RUNNER_TEMP/created-release.json"
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
               >"$RUNNER_TEMP/published-release.json"
             python3 tools/check_release.py \

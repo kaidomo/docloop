@@ -218,7 +218,7 @@ if ci_path.exists() and release_path.exists():
     publish = release["jobs"]["publish"]
     check("verify job has read-only contents", verify.get("permissions") is None and release.get("permissions") == {"contents": "read"})
     check("publish depends on verify and alone has write", publish.get("needs") == "verify" and publish.get("permissions") == {"contents": "write"})
-    check("release checkout fetches full history and exact input tag", "fetch-depth: 0" in release_raw and "ref: ${{ inputs.tag }}" in release_raw)
+    check("release checkout fetches full history and explicit input tag", "fetch-depth: 0" in release_raw and "ref: refs/tags/${{ inputs.tag }}" in release_raw)
     check("release concurrency is tag-keyed and non-cancelling", release.get("concurrency", {}).get("group") == "release-${{ github.repository }}-${{ inputs.tag }}" and release.get("concurrency", {}).get("cancel-in-progress") is False)
     check("release validates existing releases before no-op", "--github-release-json" in release_raw and "existing-release.json" in release_raw)
     check("release creation verifies tag and uses changelog notes", all(flag in release_raw for flag in ("gh release create \"$RELEASE_TAG\"", "--title \"$RELEASE_TAG\"", "--verify-tag", "--notes-file", "--fail-on-no-commits")) and "--generate-notes" not in release_raw)

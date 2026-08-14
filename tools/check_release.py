@@ -70,7 +70,8 @@ def read_release_notes(root: Path, version: str) -> str:
 
 def canonical_release_body(body: str) -> str:
     """Use one newline-normalized representation for Release comparisons."""
-    return body.rstrip("\r\n") + "\n"
+    normalized = body.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.rstrip("\n") + "\n"
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
