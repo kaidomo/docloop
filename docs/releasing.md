@@ -67,3 +67,39 @@ Repository administrators should add a ruleset protecting `v*` tags from updates
 deletion, and enable GitHub Release immutability where available. The Actions setting
 must allow the repository `GITHUB_TOKEN` to create Releases; the workflow grants
 `contents: write` only to the publication job after verification succeeds.
+
+### 잔류 draft Release 복구 절차
+
+release 워크플로 실행 중 오류가 나면 draft Release가 남을 수 있습니다. 이후 재실행은 기존 Release가 draft가 아닌 published 상태와 일치하는지 검증하므로, 남은 draft는 내용이 의도한 값과 일치하더라도 fail-closed 됩니다. 복구 절차:
+
+1. 해당 tag의 draft Release 존재 여부를 확인합니다.
+2. draft의 tag/name/body가 의도한 값과 일치하는지 확인합니다(기록용 — 삭제 여부를 바꾸지 않습니다).
+3. 기존 draft가 있으면 일치 여부와 무관하게 항상 삭제합니다.
+4. 삭제 후 workflow를 재dispatch합니다.
+
+draft를 검증 없이 자동으로 publish하지 않는 것이 이 워크플로의 fail-closed 정책입니다.
+
+## Trusted signer registration is a dispatch precondition
+
+`.github/release_allowed_signers` must contain the maintainer's real production SSH
+public key before the release workflow can be dispatched meaningfully. Without it,
+`tools/check_release.py` (invoked from the `verify` job's "Validate tag and changelog
+notes" step) raises `ReleaseError` and hard-fails the run before any release evidence is
+frozen — the workflow does not proceed to publish with an unregistered signer.
+
+Separately from that front gate, the `verify` job's evidence step and the `publish`
+job's `EXPECTED_*` comparison independently compute `signer_sha`, `notes_sha`, and
+`workflow_sha` via `sha256sum` command substitution. Local reproduction (isolated clone,
+`.github/release_allowed_signers` absent) confirmed that, before this hardening, a failed
+`sha256sum` inside `$(...)` does **not** abort the step even under `set -euo pipefail` —
+it collapses to an empty string, which a later bare `test "" = ""` comparison then passes
+unconditionally. This was a latent fail-open in the evidence-freezing and expectation-
+comparison logic. It was not exploitable in practice only because the earlier
+`tools/check_release.py` signer check already hard-fails the run first — so the observed
+behavior end-to-end was "fail-closed by an upstream gate, with a fail-open bug sitting
+unused behind it." This PR closes the latent bug structurally: each of `signer_sha`,
+`notes_sha`, and `workflow_sha` (and the evidence step's `tag_object`/`tag_commit`) is now
+assigned to a local variable, checked with `test -n` before use, and only then written to
+`$GITHUB_OUTPUT` or compared against its `EXPECTED_*` counterpart — so a missing or
+unreadable input now hard-fails at the point of computation instead of silently freezing
+an empty expectation.

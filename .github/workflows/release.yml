@@ -59,14 +59,27 @@ jobs:
         name: Freeze verification evidence
         run: |
           set -euo pipefail
+          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          notes_sha="$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)"
+          signer_sha="$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)"
+          workflow_sha="$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)"
+          # A failed command substitution above (e.g. sha256sum on a missing
+          # file) collapses to an empty string instead of aborting the step,
+          # even under set -e. Gate every value explicitly so a missing or
+          # unreadable input hard-fails here instead of silently freezing an
+          # empty expectation that a later `test "" = ""` would accept.
+          test -n "$tag_object"
+          test -n "$tag_commit"
+          test -n "$notes_sha"
+          test -n "$signer_sha"
+          test -n "$workflow_sha"
           # shellcheck disable=SC2129
-          printf 'tag_object=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG")" >>"$GITHUB_OUTPUT"
-          printf 'tag_commit=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" >>"$GITHUB_OUTPUT"
-          printf 'notes_sha=%s\n' "$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
-          printf 'signer_sha=%s\n' "$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
-          printf 'workflow_sha=%s\n' "$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
-          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG")"
-          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          printf 'tag_object=%s\n' "$tag_object" >>"$GITHUB_OUTPUT"
+          printf 'tag_commit=%s\n' "$tag_commit" >>"$GITHUB_OUTPUT"
+          printf 'notes_sha=%s\n' "$notes_sha" >>"$GITHUB_OUTPUT"
+          printf 'signer_sha=%s\n' "$signer_sha" >>"$GITHUB_OUTPUT"
+          printf 'workflow_sha=%s\n' "$workflow_sha" >>"$GITHUB_OUTPUT"
 
   publish:
     needs: verify
@@ -114,11 +127,24 @@ jobs:
               --tag "$RELEASE_TAG" \
               --main-ref origin/main \
               --notes-file "$RUNNER_TEMP/release-notes.md"
-            test "$(git rev-parse "refs/tags/$RELEASE_TAG")" = "$EXPECTED_TAG_OBJECT"
-            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_TAG_COMMIT"
-            test "$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)" = "$EXPECTED_NOTES_SHA"
-            test "$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)" = "$EXPECTED_SIGNER_SHA"
-            test "$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)" = "$EXPECTED_WORKFLOW_SHA"
+            current_tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+            current_tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            current_notes_sha="$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)"
+            current_signer_sha="$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)"
+            current_workflow_sha="$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)"
+            # Same rationale as the evidence step: a failed command
+            # substitution here must not silently downgrade to an empty
+            # string that trivially equals an equally-empty EXPECTED_* value.
+            test -n "$current_tag_object"
+            test -n "$current_tag_commit"
+            test -n "$current_notes_sha"
+            test -n "$current_signer_sha"
+            test -n "$current_workflow_sha"
+            test "$current_tag_object" = "$EXPECTED_TAG_OBJECT"
+            test "$current_tag_commit" = "$EXPECTED_TAG_COMMIT"
+            test "$current_notes_sha" = "$EXPECTED_NOTES_SHA"
+            test "$current_signer_sha" = "$EXPECTED_SIGNER_SHA"
+            test "$current_workflow_sha" = "$EXPECTED_WORKFLOW_SHA"
             remote_tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
             test "$remote_tag_object" = "$EXPECTED_TAG_OBJECT"
             remote_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$remote_tag_object" --jq '.object.sha')"
