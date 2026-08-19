@@ -82,8 +82,8 @@ draft를 검증 없이 자동으로 publish하지 않는 것이 이 워크플로
 ## Trusted signer registration is a dispatch precondition
 
 `.github/release_allowed_signers` must contain one or more of the maintainer's real
-production SSH public keys (one line per machine's signing key is supported) before
-the release workflow can be dispatched meaningfully. Without it,
+production SSH public keys before the release workflow can be dispatched
+meaningfully; additional signing keys may be listed one per line. Without it,
 `tools/check_release.py` (invoked from the `verify` job's "Validate tag and changelog
 notes" step) raises `ReleaseError` and hard-fails the run before any release evidence is
 frozen — the workflow does not proceed to publish with an unregistered signer.
