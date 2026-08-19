@@ -135,6 +135,8 @@ jobs:
             # Same rationale as the evidence step: a failed command
             # substitution here must not silently downgrade to an empty
             # string that trivially equals an equally-empty EXPECTED_* value.
+            test -n "$current_tag_object"
+            test -n "$current_tag_commit"
             test -n "$current_notes_sha"
             test -n "$current_signer_sha"
             test -n "$current_workflow_sha"
