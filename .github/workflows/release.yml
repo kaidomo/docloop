@@ -1,55 +1,157 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Signed release tag to publish (for example, v0.13.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.repository }}-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   verify:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
+    outputs:
+      tag_object: ${{ steps.evidence.outputs.tag_object }}
+      tag_commit: ${{ steps.evidence.outputs.tag_commit }}
+      notes_sha: ${{ steps.evidence.outputs.notes_sha }}
+      signer_sha: ${{ steps.evidence.outputs.signer_sha }}
+      workflow_sha: ${{ steps.evidence.outputs.workflow_sha }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
-      - name: Check out the pushed tag with full history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate dispatch tag input before checkout
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
           fetch-depth: 0
           persist-credentials: false
+          ref: refs/tags/${{ inputs.tag }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
       - name: Install dependencies
         run: python3 -m pip install -r requirements.txt
-      - name: Run full regression suite
-        run: python3 tests/run_tests.py
-      - name: Verify release tag contract
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Require an annotated tag object
         run: |
-          set -o pipefail
-          python3 tools/check_release.py --tag "$RELEASE_TAG" --main-ref origin/main \
-            2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          git show-ref --verify refs/remotes/origin/main
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+      - name: Validate tag and changelog notes
+        run: |
+          python3 tools/check_release.py \
+            --tag "$RELEASE_TAG" \
+            --main-ref origin/main \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          python3 tests/run_tests.py
+      - id: evidence
+        name: Freeze verification evidence
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2129
+          printf 'tag_object=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG")" >>"$GITHUB_OUTPUT"
+          printf 'tag_commit=%s\n' "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" >>"$GITHUB_OUTPUT"
+          printf 'notes_sha=%s\n' "$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+          printf 'signer_sha=%s\n' "$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+          printf 'workflow_sha=%s\n' "$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          test -n "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
 
   publish:
     needs: verify
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    runs-on: ubuntu-latest
     env:
-      GH_REPO: ${{ github.repository }}
-      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      EXPECTED_TAG_OBJECT: ${{ needs.verify.outputs.tag_object }}
+      EXPECTED_TAG_COMMIT: ${{ needs.verify.outputs.tag_commit }}
+      EXPECTED_NOTES_SHA: ${{ needs.verify.outputs.notes_sha }}
+      EXPECTED_SIGNER_SHA: ${{ needs.verify.outputs.signer_sha }}
+      EXPECTED_WORKFLOW_SHA: ${{ needs.verify.outputs.workflow_sha }}
     steps:
-      - name: Publish GitHub Release for the existing tag
+      - name: Validate dispatch tag input before checkout
         run: |
-          release_url="$(gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --verify-tag \
-            --generate-notes \
-            --fail-on-no-commits)"
-          printf 'Published GitHub Release: %s\n' "$release_url" | tee -a "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: refs/tags/${{ inputs.tag }}
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_list="$RUNNER_TEMP/release-list.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$release_list"
+          existing_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$release_list")"
+          if test -n "$existing_release"; then
+            printf '%s\n' "$existing_release" | jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
+              >"$RUNNER_TEMP/existing-release.json"
+            python3 tools/check_release.py \
+              --tag "$RELEASE_TAG" \
+              --skip-main-check \
+              --github-release-json "$RUNNER_TEMP/existing-release.json"
+            echo "Release $RELEASE_TAG already exists and matches the release contract."
+          else
+            # Re-freeze the immutable tag and live main immediately before the
+            # first external write; the lookup above is not a transaction lock.
+            python3 tools/check_release.py \
+              --tag "$RELEASE_TAG" \
+              --main-ref origin/main \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG")" = "$EXPECTED_TAG_OBJECT"
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_TAG_COMMIT"
+            test "$(sha256sum "$RUNNER_TEMP/release-notes.md" | cut -d' ' -f1)" = "$EXPECTED_NOTES_SHA"
+            test "$(sha256sum .github/release_allowed_signers | cut -d' ' -f1)" = "$EXPECTED_SIGNER_SHA"
+            test "$(sha256sum .github/workflows/release.yml | cut -d' ' -f1)" = "$EXPECTED_WORKFLOW_SHA"
+            remote_tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+            test "$remote_tag_object" = "$EXPECTED_TAG_OBJECT"
+            remote_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$remote_tag_object" --jq '.object.sha')"
+            test "$remote_tag_commit" = "$EXPECTED_TAG_COMMIT"
+            current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+            test "$current_main" = "$EXPECTED_TAG_COMMIT"
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --fail-on-no-commits \
+              --draft \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$RUNNER_TEMP/created-release-list.json"
+            created_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$RUNNER_TEMP/created-release-list.json")"
+            test -n "$created_release"
+            release_id="$(jq -r .id <<<"$created_release")"
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
+              >"$RUNNER_TEMP/created-release.json"
+            python3 tools/check_release.py \
+              --tag "$RELEASE_TAG" \
+              --expect-draft \
+              --github-release-json "$RUNNER_TEMP/created-release.json"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
+              >"$RUNNER_TEMP/published-release.json"
+            python3 tools/check_release.py \
+              --tag "$RELEASE_TAG" \
+              --github-release-json "$RUNNER_TEMP/published-release.json"
+          fi
+          final_tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+          test "$final_tag_object" = "$EXPECTED_TAG_OBJECT"
+          final_tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$final_tag_object" --jq '.object.sha')"
+          test "$final_tag_commit" = "$EXPECTED_TAG_COMMIT"
