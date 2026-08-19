@@ -70,11 +70,11 @@ must allow the repository `GITHUB_TOKEN` to create Releases; the workflow grants
 
 ### 잔류 draft Release 복구 절차
 
-release 워크플로 실행 중 오류가 나면 draft Release가 남을 수 있습니다. 이후 재실행은 이 draft를 발견하고 fail-closed 되어 자동으로 이어서 publish하지 않습니다. 복구 절차:
+release 워크플로 실행 중 오류가 나면 draft Release가 남을 수 있습니다. 이후 재실행은 기존 Release가 draft가 아닌 published 상태와 일치하는지 검증하므로, 남은 draft는 내용이 의도한 값과 일치하더라도 fail-closed 됩니다. 복구 절차:
 
 1. 해당 tag의 draft Release 존재 여부를 확인합니다.
-2. draft의 tag/name/body가 의도한 값과 일치하는지 확인합니다.
-3. 안전하지 않거나 불일치하면 draft를 삭제합니다.
+2. draft의 tag/name/body가 의도한 값과 일치하는지 확인합니다(기록용 — 삭제 여부를 바꾸지 않습니다).
+3. 기존 draft가 있으면 일치 여부와 무관하게 항상 삭제합니다.
 4. 삭제 후 workflow를 재dispatch합니다.
 
 draft를 검증 없이 자동으로 publish하지 않는 것이 이 워크플로의 fail-closed 정책입니다.
