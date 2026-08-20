@@ -153,6 +153,18 @@ class FrontGateTrace:
             prior_round_output_round_no=(
                 ((block.get("prior_round") or {}).get("output_ref") or {}).get("round_no")
             ),
+            # docauth#293: round_no alone only stops round_label forgery — docauth#290's
+            # _validate_v2 checks that output_ref.path/.sha256 name a real, internally
+            # matching file, but nothing bound *which* file that is to what the gate
+            # recorded. Without this a receipt could swap output_ref for any other real,
+            # correctly-hashed file in the packet after the gate ran. Same minimal-binding
+            # precedent as round_no above, applied to the two fields _validate_v2 verifies.
+            prior_round_output_ref_path=(
+                ((block.get("prior_round") or {}).get("output_ref") or {}).get("path")
+            ),
+            prior_round_output_ref_sha256=(
+                ((block.get("prior_round") or {}).get("output_ref") or {}).get("sha256")
+            ),
         )
 
     def start_lens(self, lens_id: str) -> None:

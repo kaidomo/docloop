@@ -666,28 +666,74 @@ class ReviewGateV2Tests(unittest.TestCase):
                 any("cannot read input_gate.prior_round.output_ref" in e for e in errors), errors
             )
 
-            # Codex r1-01: output_ref.path/.sha256 are verified to be REAL and
-            # SELF-consistent, but -- unlike round_no -- neither is bound to the
-            # front gate trace (docauth's own #292 fix has the identical gap; not
-            # closed here, tracked as a docauth follow-up). Document the actual
-            # current behavior rather than silently relying on an unstated
-            # assumption: substituting a different real, correctly-hashed file
-            # still passes.
-            substituted = copy.deepcopy(receipt)
-            other_path = root / "frozen" / "prior-r1-other.md"
-            other_payload = b"a different real prior-round output\n"
-            other_path.write_bytes(other_payload)
-            substituted["input_gate"]["prior_round"]["output_ref"] = {
-                "path": "frozen/prior-r1-other.md",
-                "sha256": hashlib.sha256(other_payload).hexdigest(),
-                "round_no": 1,
+    def test_receipt_cannot_swap_output_ref_for_another_real_matching_file(self) -> None:
+        # docauth#293 (closes a known gap from docauth#290/docloop#42's original
+        # port -- previously documented as an accepted "known gap" assertion right
+        # here, now replaced by this rejection test):
+        # output_ref.path/.sha256 being real and self-consistent was never enough --
+        # round_no alone was trace-bound, so a receipt could leave round_no untouched
+        # and swap path/sha256 to point at a DIFFERENT real, correctly-hashed file
+        # already sitting in the packet. Existence + self-consistency both still
+        # passed. Now output_ref.path/.sha256 are trace-bound the same way
+        # open_items_ledger_ref already was.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original_path = root / "frozen" / "prior-r1-original.md"
+            original_path.parent.mkdir(parents=True, exist_ok=True)
+            original_payload = b"original prior-round output\n"
+            original_path.write_bytes(original_payload)
+            original_sha = hashlib.sha256(original_payload).hexdigest()
+            extra = {
+                "prior_round": {
+                    "exists": True,
+                    "output_ref": {
+                        "path": "frozen/prior-r1-original.md",
+                        "sha256": original_sha,
+                        "round_no": 1,
+                    },
+                },
             }
-            _write_receipt(receipt_path, substituted)
+            _, receipt, _, receipt_path = _packet(root, extra_input_gate=extra)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            comparison_path = root / "frozen" / "comparison-r1-r2-swap.md"
+            comparison_payload = (result.COMPARISON_TABLE_SIGNATURE + "\nfixture\n").encode("utf-8")
+            comparison_path.write_bytes(comparison_payload)
+            receipt["round_context"] = {
+                "round_label": "r2",
+                "comparison_ref": {
+                    "path": "frozen/comparison-r1-r2-swap.md",
+                    "sha256": hashlib.sha256(comparison_payload).hexdigest(),
+                },
+            }
+            _write_receipt(receipt_path, receipt)
             errors = result.validate(root, "results/DONE.md", expected)
-            self.assertFalse(
-                any("output_ref" in e for e in errors),
-                "known gap (docauth follow-up pending): output_ref identity is not "
-                f"trace-bound, so a substituted real file is not rejected; got {errors}",
+            self.assertFalse(any("output_ref" in e for e in errors), errors)  # sanity: valid baseline
+
+            # A distinct real file with its OWN self-consistent hash -- not the same
+            # payload the original uses, or the two would collide on sha256 and this
+            # test would only ever exercise the path binding, never sha256 binding.
+            swapped_path = root / "frozen" / "prior-r1-swapped.md"
+            swapped_payload = b"a different real prior-round output (swap target)\n"
+            swapped_path.write_bytes(swapped_payload)
+            swapped_sha = hashlib.sha256(swapped_payload).hexdigest()
+            tampered = copy.deepcopy(receipt)
+            tampered["input_gate"]["prior_round"]["output_ref"]["path"] = "frozen/prior-r1-swapped.md"
+            tampered["input_gate"]["prior_round"]["output_ref"]["sha256"] = swapped_sha
+            _write_receipt(receipt_path, tampered)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any(
+                    "does not match receipt" in e and "prior_round_output_ref_path" in e
+                    for e in errors
+                ),
+                errors,
+            )
+            self.assertTrue(
+                any(
+                    "does not match receipt" in e and "prior_round_output_ref_sha256" in e
+                    for e in errors
+                ),
+                errors,
             )
 
     def test_prior_round_output_ref_fifo_is_rejected_instead_of_hanging(self) -> None:

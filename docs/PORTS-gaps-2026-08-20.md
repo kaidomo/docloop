@@ -125,3 +125,17 @@ new #2 read used a plain `read_bytes()`, reintroducing the exact FIFO-open-hang 
 8 pre-existing, unrelated `pm-authoring`/`asistobe-authoring` failures remain).
 `docs/PORTS.md`'s two rows were updated with the re-synced blob hashes (recomputed via
 `git hash-object`/`git rev-parse`, not copied from truncated `check_ports.py` output).
+
+**Update (2026-08-20, same day): the r1-01 known gap above is now closed too.** A Codex
+review of THIS port (separate from the docauth-side review) caught that #2 above only
+proved `output_ref.path`/`.sha256` name a real, self-consistent file — not that it's the
+file the front gate actually recorded (round_no alone was trace-bound). Filed as
+docauth#293, fixed in docauth PR #294 (`record_input_gate()` now also emits
+`prior_round_output_ref_path`/`sha256` into the trace event; `_validate_front_gate_binding`
+binds both), re-ported here: `lib/review_gate/front_gate.py` and
+`validate_review_result.py`'s `bound` tuple. New test
+`test_receipt_cannot_swap_output_ref_for_another_real_matching_file` in
+`tests/test_review_gate_v2.py` — supersedes the "known gap" documentation assertion that
+used to live at the end of `test_prior_round_output_ref_must_point_at_real_matching_bytes`
+(that block is now a real rejection test, moved out). `docs/PORTS.md` re-synced again
+against upstream main `4714d6e` for both `validate_review_result.py` and `front_gate.py`.
