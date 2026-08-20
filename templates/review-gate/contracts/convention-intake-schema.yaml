@@ -6,6 +6,12 @@ schema_version: 1
 phase: pre_lens                    # required: intake completes before lens execution
 profile_id: <convention profile id>
 template_id: <target template id>
+
+profile_applicability:              # optional; omitted means applicable
+  result: inapplicable              # applicable | inapplicable
+  reason: <why this profile is not for the target's template>
+  observed_sections: [<section id observed in the target>, ...]
+
 target_snapshot: <sha256:64hex | commit:7~64hex | export:stable-id>
 target_document: <document id or path, optional>
 recorded_at: <YYYY-MM-DD>
@@ -33,3 +39,14 @@ records:                            # exactly one record per profile question
 #   suppression authority and never mutates the approved docmodel automatically.
 # - document scope requires target_document. Unanswered prompts are never emitted
 #   into a docmodel draft.
+#
+# Profile applicability (#193):
+# - Omitting profile_applicability, or declaring result: applicable, requires
+#   template_id to equal the profile's template_id — the original rule, unchanged.
+# - result: inapplicable is a recorded claim, not an opt-out. It requires a nonempty
+#   reason and the sections actually observed in the target, and it is refused when
+#   template_id equals the profile's own template_id, or when any profile question's
+#   all_sections_present is satisfied by observed_sections. records must be empty.
+# - A non-applicable intake admits lens execution but yields no convention authority:
+#   the front gate publishes structure_axis: undetermined and docmodel
+#   materialization is refused. The structure axis (CONTRACT §1 ⑤) is not judged.

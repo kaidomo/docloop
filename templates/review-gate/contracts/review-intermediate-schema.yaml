@@ -103,14 +103,18 @@ $defs:
       target_record_id: {$ref: "#/$defs/nonempty"}
       evidence_anchors: {$ref: "#/$defs/string_list"}
     additionalProperties: false
+  # docauth#242: both kinds now point `path`/`sha256` at an independent REGISTRY file
+  # (never at the document being approved/decided itself), so neither kind can be
+  # satisfied by a file that merely claims about itself that it is approved/decided.
   authority_ref:
     oneOf:
       - type: object
-        required: [kind, path, sha256]
+        required: [kind, path, sha256, approval_id]
         properties:
           kind: {const: approved_docmodel}
-          path: {$ref: "#/$defs/nonempty"}
-          sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+          path: {$ref: "#/$defs/nonempty"}          # docmodel-approvals.yaml registry path
+          sha256: {type: string, pattern: "^[0-9a-f]{64}$"}  # registry file's own bytes
+          approval_id: {$ref: "#/$defs/nonempty"}   # id of the approval entry within it
         additionalProperties: false
       - type: object
         required: [kind, path, sha256, decision_id]

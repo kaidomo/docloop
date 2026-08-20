@@ -14,8 +14,11 @@ from typing import Any
 
 import yaml
 
-from validate_convention_intake import validate_data as validate_intake_data
-from validate_convention_profile import load_yaml
+from validate_convention_intake import (
+    declares_profile_not_applicable,
+    validate_data as validate_intake_data,
+)
+from validate_convention_profile import identity_key, load_yaml
 
 
 IDENTITY_FIELDS = {
@@ -26,17 +29,51 @@ IDENTITY_FIELDS = {
 }
 
 
+def _identity_tuple(item: Any, identity_fields: tuple[str, ...]) -> tuple[Any, ...]:
+    """Comparison key for a declaration entry's identity fields.
+
+    NFC-normalized via identity_key() so NFC/NFD spellings of the same identity
+    merge into one entry instead of materializing as two (r6-04, PR #227 r6,
+    PR #246 referral) -- the stored item keeps its original spelling; only the
+    lookup key is normalized.
+    """
+    return tuple(
+        identity_key(value) if isinstance(value, str) else value
+        for value in (item.get(field) for field in identity_fields)
+    )
+
+
+def _normalized_for_comparison(item: dict[str, Any], identity_fields: tuple[str, ...]) -> dict[str, Any]:
+    """`item` with its identity fields folded to their identity_key() form.
+
+    Two entries whose only difference is the NFC/NFD spelling of the identity
+    field itself are the same declaration, not a conflict -- only a
+    difference in some other field is a genuine conflict.
+    """
+    normalized = dict(item)
+    for field in identity_fields:
+        value = normalized.get(field)
+        if isinstance(value, str):
+            normalized[field] = identity_key(value)
+    return normalized
+
+
 def _merge_named_list(existing: list[Any], incoming: list[Any], key: str) -> list[Any]:
     identity_fields = IDENTITY_FIELDS[key]
     result = deepcopy(existing)
     indexes: dict[tuple[Any, ...], int] = {}
     for index, item in enumerate(result):
         if isinstance(item, dict):
-            indexes[tuple(item.get(field) for field in identity_fields)] = index
+            indexes[_identity_tuple(item, identity_fields)] = index
     for item in incoming:
-        identity = tuple(item.get(field) for field in identity_fields)
+        identity = _identity_tuple(item, identity_fields)
         if identity in indexes:
-            if result[indexes[identity]] != item:
+            existing_item = result[indexes[identity]]
+            if isinstance(existing_item, dict) and isinstance(item, dict):
+                conflict = _normalized_for_comparison(existing_item, identity_fields) != _normalized_for_comparison(item, identity_fields)
+            else:
+                conflict = existing_item != item
+            if conflict:
                 rendered = ", ".join(str(part) for part in identity)
                 raise ValueError(
                     f"conflicting approved declarations for {key}[{rendered}]"
@@ -51,6 +88,11 @@ def materialize(profile: dict[str, Any], intake: dict[str, Any], intake_sha256: 
     errors = validate_intake_data(intake, profile)
     if errors:
         raise ValueError("invalid convention intake: " + "; ".join(errors))
+    if declares_profile_not_applicable(intake):
+        raise ValueError(
+            "profile is declared not applicable to this template; refusing to materialize "
+            "a docmodel from a non-applicable convention profile"
+        )
     records = {record["question_id"]: record for record in intake["records"]}
     declarations: dict[str, list[Any]] = {}
     materialized_ids: list[str] = []
@@ -70,7 +112,10 @@ def materialize(profile: dict[str, Any], intake: dict[str, Any], intake_sha256: 
 
     draft: dict[str, Any] = {
         "meta": {
-            "template": intake["template_id"],
+            # The validator accepts either spelling of a canonically equivalent id, so
+            # the draft records the canonical one: the template names the draft file and
+            # the "refusing to overwrite" guard is itself an equality check.
+            "template": identity_key(intake["template_id"]),
             "updated_at": intake["recorded_at"],
             "approved_by": None,
             "approval_state": "draft",
@@ -88,11 +133,15 @@ def materialize(profile: dict[str, Any], intake: dict[str, Any], intake_sha256: 
     return draft
 
 
-def materialize_paths(profile_path: Path, intake_path: Path) -> dict[str, Any]:
-    profile = load_yaml(profile_path)
-    intake = load_yaml(intake_path)
-    digest = hashlib.sha256(intake_path.read_bytes()).hexdigest()
-    return materialize(profile, intake, digest)
+def equivalent_siblings(output: Path) -> list[Path]:
+    """Existing files whose name is the same identity as `output`'s, however spelled."""
+    if output.exists():
+        return [output]
+    # No `except OSError` here on purpose: a directory we cannot read is a directory we
+    # cannot clear, and "we found no draft" would be a guess, not an answer. The caller
+    # reports the failure instead of writing.
+    wanted = identity_key(output.name)
+    return [path for path in output.parent.iterdir() if identity_key(path.name) == wanted]
 
 
 def _canonical_output_path(path: Path) -> Path:
@@ -154,6 +203,13 @@ def _write_new(path: Path, raw: bytes) -> None:
         os.close(fd)
 
 
+def materialize_paths(profile_path: Path, intake_path: Path) -> dict[str, Any]:
+    profile = load_yaml(profile_path)
+    intake = load_yaml(intake_path)
+    digest = hashlib.sha256(intake_path.read_bytes()).hexdigest()
+    return materialize(profile, intake, digest)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("intake", type=Path)
@@ -168,6 +224,16 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or args.intake.with_name(
         f"docmodel.{draft['meta']['template']}.draft.yaml"
     )
+    # The guard is an equality check on a filename, so it has to compare identities too:
+    # a draft written under an older, differently spelled name is still that draft.
+    try:
+        existing = next(iter(sorted(equivalent_siblings(output))), None)
+    except OSError as exc:
+        print(f"FAIL: could not inspect the output directory: {exc}", file=sys.stderr)
+        return 1
+    if existing is not None:
+        print(f"FAIL: refusing to overwrite existing draft: {existing}", file=sys.stderr)
+        return 1
     try:
         raw = yaml.safe_dump(draft, allow_unicode=True, sort_keys=False).encode("utf-8")
         _write_new(output, raw)

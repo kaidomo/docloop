@@ -8,10 +8,13 @@
 # ⚠️ 이 선언이 기계 판정으로 바꾸는 것은 **구조적 부재**뿐이다 —
 #   "주인으로 지정된 자리에 항목이 없다", "대응 규약이 요구하는 짝이 없다".
 #   한 자리 안의 자기모순, 사양의 불완전성(값·단위·경계 누락)은 그대로 사람·LLM 판단이다.
+# 표기 규칙: 날짜(YYYY-MM-DD)는 **반드시 따옴표로 감싼 문자열**로 쓴다. 따옴표가 없으면
+#   YAML이 datetime.date 객체로 파싱한다(#194·#226) — 지금은 이 필드를 문자열로 강제하는
+#   검증기가 없어 안 터질 뿐이고, 검증기가 붙거나 이 값을 문자열로 다루는 코드가 늘면 터진다.
 
 meta:
   template: <문자열, 필수>          # 템플릿 식별자 (이 선언을 공유하는 문서군)
-  updated_at: <YYYY-MM-DD, 필수>
+  updated_at: "<YYYY-MM-DD, 필수 — 반드시 따옴표>"  # 예: updated_at: "2026-08-02" (따옴표 없으면 date 객체로 파싱돼 FAIL, #194·#226)
   approval_state: <approved|draft, 필수>
   suppression_eligible: <bool, 필수> # approved면 true, draft면 false. intake/draft는 억제 근거가 아니다.
   approved_by: <문자열|null, 필수>   # approved면 nonempty, draft면 null.

@@ -15,14 +15,22 @@ if __package__:
     from .validate_convention_profile import (
         DuplicateKeyError,
         SCOPES,
+        _validate_string_list,
+        identity_key,
+        is_stable_id,
         load_yaml,
+        same_identity,
         validate_data as validate_profile_data,
     )
 else:
     from validate_convention_profile import (
         DuplicateKeyError,
         SCOPES,
+        _validate_string_list,
+        identity_key,
+        is_stable_id,
         load_yaml,
+        same_identity,
         validate_data as validate_profile_data,
     )
 
@@ -30,10 +38,11 @@ else:
 SCHEMA_VERSION = 1
 APPROVAL_STATES = {"unanswered", "inapplicable", "unapproved", "approved_to_draft"}
 APPLICABILITY_RESULTS = {"applicable", "inapplicable"}
-SNAPSHOT_ID = re.compile(
-    r"^(?:sha256:[0-9a-f]{64}|commit:[0-9a-f]{7,64}|export:[^\s]+)$"
-)
-DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+PROFILE_APPLICABILITY_RESULTS = {"applicable", "inapplicable"}
+# r2-01 again: these are compared and carried as identities too, and `$` also matches
+# before a trailing newline — so they are matched in full, never partially.
+SNAPSHOT_ID = re.compile(r"(?:sha256:[0-9a-f]{64}|commit:[0-9a-f]{7,64}|export:[^\s]+)")
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _nonempty(value: Any) -> bool:
@@ -53,6 +62,66 @@ def _exact_keys(value: Any, required: set[str], optional: set[str], label: str) 
     return errors
 
 
+def declares_profile_not_applicable(data: Any) -> bool:
+    """True when the intake declares this profile is not for the target's template."""
+    if not isinstance(data, dict):
+        return False
+    declaration = data.get("profile_applicability")
+    return isinstance(declaration, dict) and declaration.get("result") == "inapplicable"
+
+
+def _validate_profile_applicability(declaration: Any, data: Any, profile: Any) -> list[str]:
+    """Validate the profile-level applicability declaration.
+
+    Non-applicability is a recorded, falsifiable claim, not an opt-out: it is only
+    admissible for a *different* template, and it is refused when the profile's own
+    applicability conditions are satisfied by the sections the intake reports observing.
+    """
+    if not isinstance(declaration, dict):
+        return ["profile_applicability must be a mapping"]
+    result = declaration.get("result")
+    if result == "applicable":
+        return _exact_keys(declaration, {"result"}, set(), "profile_applicability")
+    if result not in PROFILE_APPLICABILITY_RESULTS:
+        return ["profile_applicability.result must be applicable or inapplicable"]
+
+    errors = _exact_keys(
+        declaration,
+        {"result", "reason", "observed_sections"},
+        set(),
+        "profile_applicability",
+    )
+    if not _nonempty(declaration.get("reason")):
+        errors.append("profile_applicability.reason must be nonempty")
+    section_errors = _validate_string_list(
+        declaration.get("observed_sections"), "profile_applicability.observed_sections"
+    )
+    errors.extend(section_errors)
+
+    if same_identity(data.get("template_id"), profile.get("template_id")):
+        errors.append(
+            "profile_applicability must not declare the profile's own template_id "
+            "inapplicable; answer the profile questions instead"
+        )
+    if not section_errors:
+        # r2-03: the falsification check is also an equality test. Compared raw, the
+        # decomposed spelling of a section the target really has would read as absent
+        # and leave a contradicted claim unchallenged.
+        observed = {identity_key(section) for section in declaration["observed_sections"]}
+        for question in profile["questions"]:
+            required = {
+                identity_key(section)
+                for section in question["applicability"]["all_sections_present"]
+            }
+            if required.issubset(observed):
+                errors.append(
+                    "profile_applicability is contradicted by observed_sections: question "
+                    f"{question['id']} is applicable because all of its required sections "
+                    f"({', '.join(sorted(required))}) are present"
+                )
+    return errors
+
+
 def validate_data(data: Any, profile: Any) -> list[str]:
     errors = validate_profile_data(profile)
     if errors:
@@ -63,7 +132,7 @@ def validate_data(data: Any, profile: Any) -> list[str]:
             "schema_version", "phase", "profile_id", "template_id", "target_snapshot",
             "recorded_at", "records",
         },
-        {"target_document"},
+        {"target_document", "profile_applicability"},
         "intake",
     )
     if not isinstance(data, dict):
@@ -72,13 +141,32 @@ def validate_data(data: Any, profile: Any) -> list[str]:
         errors.append("schema_version must be 1")
     if data.get("phase") != "pre_lens":
         errors.append("phase must be pre_lens so convention intake precedes lens execution")
-    if data.get("profile_id") != profile.get("profile_id"):
+    if not same_identity(data.get("profile_id"), profile.get("profile_id")):
         errors.append("profile_id must match the convention profile")
-    if data.get("template_id") != profile.get("template_id"):
-        errors.append("template_id must match the convention profile")
-    if not isinstance(data.get("target_snapshot"), str) or not SNAPSHOT_ID.match(data["target_snapshot"]):
+    # r1-01: equality with the profile's template_id used to imply this invariant. The
+    # non-applicable branch drops that equality, so the stable-id rule must be explicit —
+    # otherwise a null/empty template_id yields a declaration that names no template.
+    # r2-01: the rule has to hold *exactly*, because the anti-bypass rules below are
+    # equality checks — any spelling of the profile's own template that this rule lets
+    # through while comparing unequal is a way to declare an applicable profile away.
+    template_id = data.get("template_id")
+    if not is_stable_id(template_id):
+        errors.append("template_id must be a stable nonempty id without spaces, slashes, or invisible characters")
+    not_applicable = declares_profile_not_applicable(data)
+    if "profile_applicability" in data:
+        errors.extend(_validate_profile_applicability(
+            data["profile_applicability"], data, profile
+        ))
+    if not not_applicable and not same_identity(
+        data.get("template_id"), profile.get("template_id")
+    ):
+        errors.append(
+            "template_id must match the convention profile, or the intake must declare "
+            "profile_applicability.result: inapplicable with a reason and observed_sections"
+        )
+    if not isinstance(data.get("target_snapshot"), str) or not SNAPSHOT_ID.fullmatch(data["target_snapshot"]):
         errors.append("target_snapshot must be a stable nonempty sha256, commit, or export identifier")
-    if not isinstance(data.get("recorded_at"), str) or not DATE.match(data["recorded_at"]):
+    if not isinstance(data.get("recorded_at"), str) or not DATE.fullmatch(data["recorded_at"]):
         errors.append("recorded_at must be YYYY-MM-DD")
     if "target_document" in data and not _nonempty(data.get("target_document")):
         errors.append("target_document must be nonempty when present")
@@ -87,6 +175,13 @@ def validate_data(data: Any, profile: Any) -> list[str]:
     records = data.get("records")
     if not isinstance(records, list):
         errors.append("records must be a list")
+        return errors
+    if not_applicable:
+        if records:
+            errors.append(
+                "profile_applicability.result: inapplicable requires an empty records list; "
+                "a non-applicable profile has no questions to answer"
+            )
         return errors
     seen: set[str] = set()
     for index, record in enumerate(records):
