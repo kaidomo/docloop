@@ -74,3 +74,28 @@ to review-gate/docmodel. Not touched in either pass.
 `docauth` main advanced to `1b95a95` (2026-08-20, after this pass's `d6d5e7f` pin) while
 this port was in progress. Not re-synced in this pass — the newer commits were not
 inspected for review-gate relevance. Next re-port should diff `d6d5e7f..1b95a95` first.
+
+### docauth#290 — 3 findings, verified as upstream's own current behavior, filed upstream
+
+Codex round-2 review of this PR's `_validate_front_gate_binding`/`validate_docmodel_approvals.py`
+raised 3 findings. Checked directly against docauth `main` (d6d5e7f) before dispositioning —
+all three are docauth's own existing behavior, not regressions from this port:
+
+1. **`open_items`/`classified_record_ids` not bound to the front-gate trace** — a receipt
+   can rewrite `input_gate.open_items.ledger_ref` to `none` or edit `classified_record_ids`
+   after the gate recorded it; `_validate_front_gate_binding`'s `bound` tuple in
+   `validate_review_result.py` doesn't cover this field.
+2. **`prior_round.output_ref.path`/`.sha256` not verified** — only `round_no` is bound;
+   whether the named prior-round output actually exists or hashes correctly is unchecked.
+   (docauth's own comment already flags this as known-unclosed scope.)
+3. **TOCTOU window in `validate_docmodel_approvals.py`** — `relative_to()` → `stat()` →
+   later `read_bytes()` leaves a swap window; symlink/hardlink checks exist but don't close
+   the stat-to-read race.
+
+Filed as **docauth#290** (kaidomo/docauth) rather than fixed unilaterally in docloop, per
+this project's own principle (logic changes go to docauth first, then re-port — fixing only
+in docloop would silently diverge from the canonical source). Full disposition record:
+`~/claude_codex_review/docloop-review-gate-2026-08-20-r2/REVIEW_BRIEF.md` (r1-01/r1-02/r1-03).
+**Release/merge timing for this PR pending user decision on whether to hold for docauth#290
+or merge now and re-port the fix separately once it lands** (as of 2026-08-20, not yet
+decided either way).
