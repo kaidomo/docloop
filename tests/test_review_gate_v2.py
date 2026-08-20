@@ -506,6 +506,33 @@ class ReviewGateV2Tests(unittest.TestCase):
             errors = result.validate(root, "results/DONE.md", expected)
             self.assertTrue(any("front_gate_ref.sha256 does not match" in error for error in errors), errors)
 
+    def test_front_gate_ref_must_use_the_canonical_trace_filename(self) -> None:
+        # docauth#296: "inside run_root" (the containment fence _resolve_front_gate_trace
+        # already enforced) alone still let a receipt point at ANY file within
+        # run_root -- including a real, byte-matching, otherwise-valid trace someone
+        # placed under a different name. Pinning front_gate_ref.path to one fixed,
+        # non-declarable filename closes that "point elsewhere in run_root" evasion.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, _, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            real_trace_path = root / "deterministic" / "FRONT_GATE_TRACE.json"
+            renamed_trace_path = root / "deterministic" / "renamed-but-otherwise-real-trace.json"
+            renamed_trace_path.write_bytes(real_trace_path.read_bytes())
+            receipt["front_gate_ref"] = {
+                "path": "deterministic/renamed-but-otherwise-real-trace.json",
+                "sha256": hashlib.sha256(renamed_trace_path.read_bytes()).hexdigest(),
+            }
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any(
+                    "front_gate_ref.path must be 'deterministic/FRONT_GATE_TRACE.json'" in e
+                    for e in errors
+                ),
+                errors,
+            )
+
     def test_structure_axis_must_match_trace_non_applicability(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

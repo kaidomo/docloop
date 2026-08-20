@@ -258,6 +258,11 @@ def _resolve_packet_relative(packet_root: Path, raw_path: Any, label: str) -> tu
     return resolved, []
 
 
+#: docauth#296: front_gate_ref must always name this one file, relative to
+#: input_gate.run_root -- matches what runner.py's `prepare` already writes.
+FRONT_GATE_TRACE_CANONICAL_RELPATH = "deterministic/FRONT_GATE_TRACE.json"
+
+
 def _resolve_front_gate_trace(
     packet_root: Path, ref: Any, errors: list[str], *, run_root: Path | None
 ) -> list[Any] | None:
@@ -287,6 +292,24 @@ def _resolve_front_gate_trace(
             trace_path.relative_to(run_root)
         except ValueError:
             errors.append("front_gate_ref.path must be inside input_gate.run_root")
+            return None
+        # docauth#296: "inside run_root" alone still lets a receipt point at ANY
+        # file within run_root -- including one an attacker (or a stale trace left
+        # over from mid-run tooling) planted there -- since nothing besides digest
+        # self-consistency was ever checked. Pinning the path to one fixed,
+        # non-declarable location closes the "point elsewhere in run_root" evasion:
+        # every producer of a real trace (runner.py's prepare) writes to the same
+        # conventional filename, so a validator reading front_gate_ref no longer
+        # trusts the receipt's own choice of filename. This does NOT defend against
+        # an attacker who overwrites that one canonical file with forged content --
+        # the same class of risk the receipt itself is already exposed to, and out
+        # of scope for this fix (see docauth#296's own scope note: it needs a real
+        # root-of-trust mechanism, which this is not).
+        if trace_path != run_root / FRONT_GATE_TRACE_CANONICAL_RELPATH:
+            errors.append(
+                f"front_gate_ref.path must be {FRONT_GATE_TRACE_CANONICAL_RELPATH!r} "
+                "relative to input_gate.run_root"
+            )
             return None
     try:
         payload = trace_path.read_bytes()

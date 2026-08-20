@@ -139,3 +139,24 @@ binds both), re-ported here: `lib/review_gate/front_gate.py` and
 used to live at the end of `test_prior_round_output_ref_must_point_at_real_matching_bytes`
 (that block is now a real rejection test, moved out). `docs/PORTS.md` re-synced again
 against upstream main `4714d6e` for both `validate_review_result.py` and `front_gate.py`.
+
+**Update (2026-08-20, same day): a deeper, orthogonal gap found and partially closed —
+`front_gate_ref` itself.** A Codex review of the #293 re-port above caught something
+bigger: `_resolve_front_gate_trace` only checked `front_gate_ref.path` was somewhere
+*inside* `input_gate.run_root` — a receipt could point at ANY file there (including one
+an attacker planted), and every field `_validate_front_gate_binding` binds (all 8 of
+them, not just `output_ref`) ultimately depends on trusting that one reference. Verified
+against docauth's own source: this is docauth's original design from #228②, not a port
+bug — `source_copy` has the identical gap. Filed as docauth#296. User chose (of pin-path
+/ document-only / full-redesign) the narrow, reversible mitigation: pin
+`front_gate_ref.path` to the one fixed conventional filename this repo's own
+`runner.py`'s `prepare` already writes (`deterministic/FRONT_GATE_TRACE.json`), closing
+the "point elsewhere in run_root" evasion but not forgery of that one canonical file
+itself, or the identical `source_copy` gap — both remain open, recorded, not silently
+dropped. Fixed in docauth PR #297, re-ported here (`validate_review_result.py`'s
+`_resolve_front_gate_trace`, new `FRONT_GATE_TRACE_CANONICAL_RELPATH` constant). No
+existing docloop test needed a fixture fix — this repo's tests already consistently
+wrote to the canonical path via the real `FrontGateTrace` producer, unlike docauth's
+ad-hoc-filename fixtures. New test
+`test_front_gate_ref_must_use_the_canonical_trace_filename`. `docs/PORTS.md` re-synced
+again against upstream main `628ae44`.
