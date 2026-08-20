@@ -667,7 +667,9 @@ class ReviewGateV2Tests(unittest.TestCase):
             )
 
     def test_receipt_cannot_swap_output_ref_for_another_real_matching_file(self) -> None:
-        # docauth#293 (closes the docauth#290/r1-01 known gap documented above):
+        # docauth#293 (closes a known gap from docauth#290/docloop#42's original
+        # port -- previously documented as an accepted "known gap" assertion right
+        # here, now replaced by this rejection test):
         # output_ref.path/.sha256 being real and self-consistent was never enough --
         # round_no alone was trace-bound, so a receipt could leave round_no untouched
         # and swap path/sha256 to point at a DIFFERENT real, correctly-hashed file
