@@ -96,7 +96,8 @@ accepted-state 검증, 제한, privacy, 동시 실행, 수동 보존·삭제는
 
 ```bash
 docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PRD.md \
-  --decisions decisions.yaml --terms terms.yaml --no-docmodel
+  --decisions decisions.yaml --terms terms.yaml --no-docmodel \
+  --editing-state frozen --target-maturity complete
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
 docloop review-gate validate-result \
@@ -124,14 +125,23 @@ v2 receipt의 `packet_binding`은 `run_id`, `target_source`, `target_snapshot`,
 `validate-result`는 receipt를 읽기 전에 prepared packet 무결성을 검사하고, 다른 run의
 binding, 변경된 ledger 바이트, 닫힌 원장과 다른 공개 receipt record, 안전하지 않은
 receipt·ledger 경로를 거부한다. receipt 본문 전체 바이트를 해시 결합하는 것은 아니다.
-기존 v1 done receipt도 계속 유효하다.
+`schema_version: 1` receipt는 이제 done으로 검증될 수 없다 — input gate가 도입되기 전의
+형식이기 때문이다. 이미 닫힌 v1 receipt를 확인하려면 `--legacy`를 쓴다(필드 완전성만
+확인할 뿐 판정은 아니다).
 
-선택적 `--convention-profile FILE --convention-intake FILE` 쌍은 run 디렉터리를 예약하기
-전에 profile과 pre-lens 답변을 검증한다. 이 기록은 준비 완료만 나타내며 `lens_started`를
-기록하거나 렌즈를 실행하지 않는다. `materialize-docmodel`은 `approved_to_draft` 답만
+`prepare`는 `--editing-state`/`--target-maturity`도 요구하며(대상이 draft이거나 maturity가
+unknown이면 `--open-items-ledger`도 필요), 모든 렌즈를 내부 순서 guard로 통과시켜 그
+CONTRACT §1 input gate를 기록하고 결과를 `deterministic/FRONT_GATE_TRACE.json`에
+동결한다 — 이 trace는 해시로 결합되며 done receipt의 `front_gate_ref`가 요구한다. 이를 위한
+별도의 공개 명령은 아직 없으며, trace는 오직 `prepare`만 생성한다. 선택적
+`--convention-profile FILE --convention-intake FILE` 쌍은 run 디렉터리를 예약하기 전에
+profile과 pre-lens 답변을 검증한다. `materialize-docmodel`은 `approved_to_draft` 답만
 사용해 `approval_state: draft`, `approved_by: null`, `suppression_eligible: false`인 새
-draft를 만들고, 현재 run의 L3 입력이나 suppression authority로 자동 사용하지 않는다. 사람이 승인한 뒤 새 run에서 명시적으로 선택해야 한다. 내부
-front gate는 이 순서를 검사하는 구현용 guard이며 공개 실행 trace나 명령이 아니다.
+draft를 만든다. 이 draft는 현재 run의 L3 입력이나 suppression authority로 자동 인정되지
+않으며, 사람이 승인한 뒤 이후 run에서 명시적으로 선택해야 한다 — 그리고 docauth#242 이후로
+`approved_docmodel` authority 참조는 docmodel 파일 스스로의 주장이 아니라 독립적인
+`docmodel-approvals.yaml` registry 항목에 결합된다. 전체 input-gate·front-gate-trace·
+docmodel-approvals 계약은 [review-gate 가이드](docs/review-gate.md)를 참고한다.
 
 `review-gate check`와 receipt 검증은 경로·파일 종류·해시·run binding 같은 기계적
 불변식을 확인할 뿐 리뷰 통과를 선언하지 않는다. finding이 맞는지, 모든 문제를 찾았는지,

@@ -1,5 +1,7 @@
 # Design: writing has no oracle — so docloop is a verification kernel
 
+한국어: [design.ko.md](design.ko.md)
+
 ## The coding-harness pattern, and why it works
 
 A wave of thin "coding harnesses" wrap a model CLI in a loop: generate a change,

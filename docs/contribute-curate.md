@@ -1,5 +1,7 @@
 # Optional contribution and curation flow
 
+한국어: [contribute-curate.ko.md](contribute-curate.ko.md)
+
 `contribute`, `curate`, and `draft-curated` form an explicitly opt-in branch for
 collecting several named perspectives before drafting. Nothing in this branch runs
 unless you call it. The existing `docloop plan` and `docloop draft` commands do not
