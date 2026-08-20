@@ -120,12 +120,8 @@ new #2 read used a plain `read_bytes()`, reintroducing the exact FIFO-open-hang 
 `test_prior_round_output_ref_fifo_is_rejected_instead_of_hanging`,
 `test_docmodel_approval_hard_link_and_fifo_rejected` (all in `tests/test_review_gate_v2.py`).
 
-**`docs/PORTS.md` provenance note — intentionally NOT updated yet for these 2 rows.**
-Because docauth PR #292 is still unmerged, docauth `main` does not yet contain this fix —
-`check_ports.py`'s "upstream main" resolution will keep showing
-`STALE-downstream: lib/review_gate/validate_review_result.py` and
-`...validate_docmodel_approvals.py` (edited without row update) until #292 merges. This is
-expected and intentional: updating `docs/PORTS.md`'s docauth-blob-hash column now would
-misrepresent provenance (claiming sync against content `main` doesn't have). **Once
-docauth#292 merges**, re-run `check_ports.py` and update both rows' docauth-blob-hash +
-docloop-blob-hash columns together in a small follow-up commit.
+**`docs/PORTS.md` provenance — resolved.** docauth PR #291 and #292 merged to `main`
+(`d012910`, 2026-08-20). `check_ports.py` re-run clean for both rows (0 STALE — only the
+8 pre-existing, unrelated `pm-authoring`/`asistobe-authoring` failures remain).
+`docs/PORTS.md`'s two rows were updated with the re-synced blob hashes (recomputed via
+`git hash-object`/`git rev-parse`, not copied from truncated `check_ports.py` output).
