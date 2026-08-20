@@ -635,7 +635,22 @@ class ReviewGateV2Tests(unittest.TestCase):
             }
             _, receipt, _, receipt_path = _packet(root, extra_input_gate=extra)
             expected = copy.deepcopy(receipt["packet_binding"])
-            receipt["round_context"] = {"round_label": "r2"}
+            comparison_path = root / "frozen" / "comparison-r1-r2.md"
+            comparison_payload = (result.COMPARISON_TABLE_SIGNATURE + "\nfixture\n").encode("utf-8")
+            comparison_path.write_bytes(comparison_payload)
+            receipt["round_context"] = {
+                "round_label": "r2",
+                "comparison_ref": {
+                    "path": "frozen/comparison-r1-r2.md",
+                    "sha256": hashlib.sha256(comparison_payload).hexdigest(),
+                },
+            }
+            _write_receipt(receipt_path, receipt)
+            # Codex r1-02: assert a clean baseline before tampering, so a later
+            # rejection actually demonstrates the new check firing (not just some
+            # other, unrelated error already present in an unverified fixture).
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertFalse(any("output_ref" in e for e in errors), errors)
 
             bad = copy.deepcopy(receipt)
             bad["input_gate"]["prior_round"]["output_ref"]["sha256"] = "0" * 64
@@ -649,6 +664,30 @@ class ReviewGateV2Tests(unittest.TestCase):
             errors = result.validate(root, "results/DONE.md", expected)
             self.assertTrue(
                 any("cannot read input_gate.prior_round.output_ref" in e for e in errors), errors
+            )
+
+            # Codex r1-01: output_ref.path/.sha256 are verified to be REAL and
+            # SELF-consistent, but -- unlike round_no -- neither is bound to the
+            # front gate trace (docauth's own #292 fix has the identical gap; not
+            # closed here, tracked as a docauth follow-up). Document the actual
+            # current behavior rather than silently relying on an unstated
+            # assumption: substituting a different real, correctly-hashed file
+            # still passes.
+            substituted = copy.deepcopy(receipt)
+            other_path = root / "frozen" / "prior-r1-other.md"
+            other_payload = b"a different real prior-round output\n"
+            other_path.write_bytes(other_payload)
+            substituted["input_gate"]["prior_round"]["output_ref"] = {
+                "path": "frozen/prior-r1-other.md",
+                "sha256": hashlib.sha256(other_payload).hexdigest(),
+                "round_no": 1,
+            }
+            _write_receipt(receipt_path, substituted)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertFalse(
+                any("output_ref" in e for e in errors),
+                "known gap (docauth follow-up pending): output_ref identity is not "
+                f"trace-bound, so a substituted real file is not rejected; got {errors}",
             )
 
     def test_prior_round_output_ref_fifo_is_rejected_instead_of_hanging(self) -> None:
