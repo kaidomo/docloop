@@ -4,6 +4,42 @@ All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
 `vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
+## [0.14.0] — 2026-08-20
+### Added
+- **Docmodel-approval forgery gate / docmodel 승인 위조 방지 게이트.** An
+  `approved_docmodel` authority no longer self-declares approval through its own
+  metadata; it must bind to an independent `docmodel-approvals.yaml` registry entry
+  (`approval_id` plus a freshness-checked `docmodel_sha256`). The registry's own
+  `docmodel_path` read is fd-anchored (`O_NOFOLLOW|O_NONBLOCK`, single `fstat`+`read`),
+  closing a TOCTOU window and a FIFO-open-hang risk.
+- **Input-gate / front-gate execution trace / 입력 게이트·프런트게이트 실행 추적.**
+  `review-gate prepare` now records a digest-bound pre-lens trace (editing state,
+  target maturity, archived source-copy hash, open-items ledger reference, prior-round
+  reference) before any lens runs, and a done receipt's declarations are checked
+  against that trace rather than trusted as self-reported. Receipts also carry
+  `structure_axis`, `execution`, `scale_disclosure`, and `round_context` fields, all
+  machine-bound to the recorded execution.
+- **Bilingual documentation / 문서 한국어 병행 제공.** 12 `docs/*.md` files gained
+  parallel `.ko.md` companions (English primary, Korean links back to English),
+  extending the existing `README.md`/`README.ko.md` pattern.
+
+### Fixed
+- **Receipt-binding gaps (docauth#290).** `input_gate.open_items.ledger_ref` and
+  `input_gate.prior_round.output_ref` could be declared in a done receipt without
+  matching what the front-gate trace actually recorded, or without naming a real file
+  at all; both are now verified. The `output_ref` file read is fd-anchored for the same
+  FIFO-hang reason as the docmodel-approvals fix above.
+
+### Known limitations
+- `output_ref.path`/`.sha256` are verified to be real and self-consistent, but — unlike
+  `round_no` — not bound to the front-gate trace, so a receipt could still substitute a
+  different real, correctly-hashed file. Tracked upstream as
+  [docauth#293](https://github.com/kaidomo/docauth/issues/293); not a regression from
+  this release.
+- `match_review_rounds.py` (the round-comparison generator) is not ported. First-round
+  reviews are fully supported end-to-end; a second round's comparison file must be
+  hand-authored to match the expected format until this generator is ported.
+
 ## [0.13.0] — 2026-08-04
 ### Added
 - **Product version and guarded release path / 제품 버전·보호된 릴리즈 경로.** Root
