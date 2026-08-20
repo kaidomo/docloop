@@ -343,6 +343,16 @@ def _validate_front_gate_binding(receipt: dict[str, Any], events: list[Any], err
         ("source_copy_sha256", source_copy.get("sha256")),
         ("prior_round_exists", prior_round.get("exists")),
         ("prior_round_output_round_no", prior_round_output_ref.get("round_no")),
+        # docauth#293: round_no digest-binding (above) only stops round_label forgery —
+        # nothing bound *which file* output_ref.path/.sha256 name to what the front gate
+        # recorded. docauth#290's file-existence/hash check below only proves the
+        # referenced file is real and internally self-consistent, not that it is the
+        # file the gate actually pointed at; a receipt could swap in any other real,
+        # correctly-hashed file from the packet after the gate ran. Same minimal-binding
+        # precedent as prior_round_output_round_no, applied to the two fields that check
+        # verifies.
+        ("prior_round_output_ref_path", prior_round_output_ref.get("path")),
+        ("prior_round_output_ref_sha256", prior_round_output_ref.get("sha256")),
         ("open_items_ledger_ref", open_items.get("ledger_ref")),
     )
     for field, receipt_value in bound:
