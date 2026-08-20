@@ -4,6 +4,27 @@ All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
 `vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
+## [0.14.2] — 2026-08-20
+### Fixed
+- **`front_gate_ref` is now pinned to a fixed filename / 고정 파일명 강제.** 0.14.1
+  noted that `front_gate_ref` was checked only for internal self-consistency, not
+  against an independent root of trust — a receipt could point at *any* file inside
+  `input_gate.run_root`, so every trace-bound field could in principle be forged
+  together by substituting a whole trace file elsewhere in that folder. `front_gate_ref.path`
+  is now required to be the exact conventional filename `docloop review-gate prepare`
+  already writes (`deterministic/FRONT_GATE_TRACE.json`), closing the "point elsewhere
+  in run_root" evasion (upstream [docauth#296](https://github.com/kaidomo/docauth/issues/296)).
+
+### Known limitations
+- This closes *where* the trace can be referenced from, not *whether* that one
+  canonical file itself could be forged — the same class of risk the receipt file
+  itself is already exposed to. `source_copy` has an identical structural gap
+  (self-declared path+hash only, no independent proof), left open by the same scope
+  decision. A real root-of-trust mechanism for either is a bigger, separate design
+  question, tracked at [docauth#296](https://github.com/kaidomo/docauth/issues/296).
+- `match_review_rounds.py` (the round-comparison generator) is still not ported — see
+  0.14.0.
+
 ## [0.14.1] — 2026-08-20
 ### Fixed
 - **`prior_round.output_ref` is now trace-bound / `output_ref` 프런트게이트 결속.**
