@@ -158,10 +158,34 @@ jobs:
               --draft \
               --title "$RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$RUNNER_TEMP/created-release-list.json"
-            created_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$RUNNER_TEMP/created-release-list.json")"
-            test -n "$created_release"
+            # docloop#44: gh release create returns as soon as the write is accepted,
+            # but an immediate re-list can still lose the race against GitHub's own
+            # read-after-write propagation on the list endpoint and come back empty.
+            # This MUST stay the list endpoint (not GET /releases/tags/{tag}): that
+            # single-resource endpoint only returns PUBLISHED releases -- confirmed
+            # empirically (querying it for a live draft release returns 404 even
+            # though the draft exists and shows up in the list endpoint) -- and the
+            # release is still a draft at this exact point in the script. A short
+            # bounded retry absorbs the list endpoint's lag instead of hard-failing
+            # (and leaving an orphaned draft release behind) on the first miss.
+            created_release_attempts=0
+            while :; do
+              created_release_attempts=$((created_release_attempts + 1))
+              gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                >"$RUNNER_TEMP/created-release-list.json"
+              created_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$RUNNER_TEMP/created-release-list.json")"
+              if test -n "$created_release"; then
+                break
+              fi
+              if test "$created_release_attempts" -ge 5; then
+                echo "release $RELEASE_TAG not found in releases list after $created_release_attempts attempts" >&2
+                exit 1
+              fi
+              sleep 2
+            done
             release_id="$(jq -r .id <<<"$created_release")"
+            test -n "$release_id"
+            test "$release_id" != "null"
             gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
               >"$RUNNER_TEMP/created-release.json"
