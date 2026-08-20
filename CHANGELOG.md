@@ -4,6 +4,29 @@ All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
 `vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
+## [0.14.1] — 2026-08-20
+### Fixed
+- **`prior_round.output_ref` is now trace-bound / `output_ref` 프런트게이트 결속.**
+  0.14.0 verified `output_ref.path`/`.sha256` were real and self-consistent, but not
+  that they named the file the front gate actually recorded — a receipt could swap in
+  a different real, correctly-hashed file from the packet after the gate ran. Closes
+  the known limitation noted in 0.14.0 (upstream [docauth#293](https://github.com/kaidomo/docauth/issues/293)).
+- **Release workflow reliability / 릴리즈 워크플로 안정성.** The post-create release
+  lookup could lose a race against GitHub API read-after-write propagation right after
+  `gh release create`, leaving an orphaned draft release behind (this is how 0.14.0's
+  own publish needed a manual recovery step). Wrapped in a bounded retry; no effect on
+  `docloop` itself, release tooling only ([#44](https://github.com/kaidomo/docloop/issues/44)).
+
+### Known limitations
+- `front_gate_ref` itself is checked only for internal self-consistency (declared hash
+  matches the referenced file's actual bytes), not against an independent root of
+  trust — so in principle every trace-bound field, not just `output_ref`, could be
+  forged together by substituting the whole trace file. This is docauth's own original
+  design from #228② (not new in this release); tracked upstream as
+  [docauth#296](https://github.com/kaidomo/docauth/issues/296).
+- `match_review_rounds.py` (the round-comparison generator) is still not ported — see
+  0.14.0.
+
 ## [0.14.0] — 2026-08-20
 ### Added
 - **Docmodel-approval forgery gate / docmodel 승인 위조 방지 게이트.** An
