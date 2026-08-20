@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
+import stat as stat_module
 import sys
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,45 @@ _StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _s
 
 def _is_str(v: Any) -> bool:
     return isinstance(v, str) and v.strip() != ""
+
+
+def _read_verified_docmodel(path: Path, tag: str) -> tuple[bytes | None, str | None]:
+    """Read ``path`` through a single O_NOFOLLOW|O_NONBLOCK fd (docauth#290).
+
+    stat()/is_file()/read_bytes() on a *path* are three separate syscalls that each
+    re-resolve the name -- a file swapped in between any of them (TOCTOU) defeats
+    whatever check just ran, even after the symlink guard the caller already applied.
+    Opening with O_NOFOLLOW and doing every remaining check (regular file, hard-link
+    count, the read itself) via fstat()/read() on that ONE descriptor closes the
+    window: nothing after a successful open() can be swapped out from under it.
+    O_NONBLOCK matters on its own: without it, open() on a FIFO blocks indefinitely
+    at open() time (not read time) -- this hung the docauth forgery test before the
+    flag was added, so the FIFO risk is caught before any fstat() check can reject it.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        return None, f"{tag}: docmodel_path 로드 실패: {exc}"
+    try:
+        fd_stat = os.fstat(fd)
+        if not stat_module.S_ISREG(fd_stat.st_mode):
+            return None, f"{tag}: docmodel_path must be a regular file"
+        if fd_stat.st_nlink > 1:
+            return None, (
+                f"{tag}: docmodel_path must not be a hard link (st_nlink={fd_stat.st_nlink}); "
+                "it must be a private file nothing else can edit"
+            )
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks), None
+    except OSError as exc:
+        return None, f"{tag}: docmodel_path 로드 실패: {exc}"
+    finally:
+        os.close(fd)
 
 
 def load(path: Path, content: bytes | None = None) -> Any:
@@ -185,33 +226,19 @@ def validate(
             docmodel_path = raw_docmodel_target.resolve()
             try:
                 docmodel_path.relative_to(resolved_packet_root)
-                stat = docmodel_path.stat()
-            except (ValueError, OSError) as exc:
+            except ValueError as exc:
                 E.append(f"{tag}: docmodel_path 로드 실패: {exc}")
                 continue
-            # Codex r5-01: stat() alone doesn't require a REGULAR file -- a FIFO can
-            # pass the symlink/hardlink checks below and then block read_bytes()
-            # indefinitely. Match validate_input_gate.py's existing is_file() check
-            # (which sits in the same position, right after stat()).
-            if not docmodel_path.is_file():
-                E.append(f"{tag}: docmodel_path must be a regular file")
-                continue
-            # Codex r4-01: `is_symlink()` alone misses a HARD link -- a second directory
-            # entry for the same inode, indistinguishable from "a real file" by that
-            # check, that can carry a clean, non-draft-looking name while its bytes (and
-            # any later edits through the OTHER name) are the draft's. Same r2-04
-            # precedent as the symlink guard above: st_nlink > 1 means this path is not
-            # a private, dedicated file.
-            if stat.st_nlink > 1:
-                E.append(
-                    f"{tag}: docmodel_path must not be a hard link (st_nlink={stat.st_nlink}); "
-                    "it must be a private file nothing else can edit"
-                )
-                continue
-            try:
-                current_bytes = docmodel_path.read_bytes()
-            except OSError as exc:
-                E.append(f"{tag}: docmodel_path 로드 실패: {exc}")
+            # docauth#290: stat()/is_file()/read_bytes() on a *path* are three separate
+            # syscalls that each re-resolve the name -- a file swapped in between any of
+            # them (TOCTOU) defeats whatever check just ran, even after the symlink guard
+            # above. Opening with O_NOFOLLOW and doing every remaining check (regular
+            # file, hard-link count -- the r4-01/r5-01 checks below, now on one fd -- and
+            # the read itself) via fstat()/read() on that ONE descriptor closes the
+            # window: nothing after a successful open() can be swapped out from under it.
+            current_bytes, read_error = _read_verified_docmodel(docmodel_path, tag)
+            if read_error is not None:
+                E.append(read_error)
                 continue
             current_hash = hashlib.sha256(current_bytes).hexdigest()
             if current_hash != docmodel_sha256:

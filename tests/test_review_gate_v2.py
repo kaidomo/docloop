@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -22,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from lib.review_gate import front_gate  # noqa: E402
 from lib.review_gate import runner as RG  # noqa: E402
+from lib.review_gate import validate_docmodel_approvals as docmodel_approvals  # noqa: E402
 from lib.review_gate import validate_review_intermediate as intermediate  # noqa: E402
 from lib.review_gate import validate_review_result as result  # noqa: E402
 
@@ -30,11 +32,17 @@ sys.path.insert(0, str(TESTS_ROOT))
 from review_gate_output_helpers import write_docmodel_approval  # noqa: E402
 
 
-def _write_front_gate_trace(root: Path, target_path: Path, target_snapshot: str) -> dict:
+def _write_front_gate_trace(
+    root: Path, target_path: Path, target_snapshot: str, *, extra_input_gate: dict | None = None
+) -> dict:
     """Record a real input gate + all three lenses, mirroring what `docloop
     review-gate prepare` does internally, and return the receipt fields a done
     receipt must carry to bind to it (front_gate_ref/input_gate/structure_axis/
-    execution/scale_disclosure/round_context)."""
+    execution/scale_disclosure/round_context).
+
+    `extra_input_gate` merges extra fields (e.g. `open_items`, a real `prior_round`)
+    into the input gate BEFORE the trace records it, so trace and receipt start
+    from the same gate-recorded declaration (docauth#290 fixture parity)."""
     trace = front_gate.FrontGateTrace()
     trace.preflight(
         RG._synthetic_convention_intake(target_snapshot=target_snapshot, recorded_at="2026-08-20"),
@@ -48,6 +56,8 @@ def _write_front_gate_trace(root: Path, target_path: Path, target_snapshot: str)
         "prior_round": {"exists": False},
         "run_root": ".",
     }
+    if extra_input_gate:
+        input_gate.update(extra_input_gate)
     trace.record_input_gate(input_gate, root, target_snapshot=target_snapshot)
     for lens_id in front_gate.LENSES:
         trace.start_lens(lens_id)
@@ -164,7 +174,7 @@ def _write_receipt(path: Path, receipt: dict) -> None:
     )
 
 
-def _packet(root: Path) -> tuple[dict, dict, Path, Path]:
+def _packet(root: Path, *, extra_input_gate: dict | None = None) -> tuple[dict, dict, Path, Path]:
     (root / "frozen").mkdir(parents=True, exist_ok=True)
     (root / "results").mkdir(exist_ok=True)
     authority = root / "frozen" / "approved-docmodel.yaml"
@@ -175,7 +185,7 @@ def _packet(root: Path) -> tuple[dict, dict, Path, Path]:
     target_source = "docs/target.md"
     target_path = root / "frozen" / "target.txt"
     target_path.write_bytes(target)
-    front_gate_fields = _write_front_gate_trace(root, target_path, snapshot)
+    front_gate_fields = _write_front_gate_trace(root, target_path, snapshot, extra_input_gate=extra_input_gate)
 
     envelope = yaml.safe_load(
         (FIXTURES / "v2-ledger.yaml").read_text(encoding="utf-8")
@@ -575,6 +585,142 @@ class ReviewGateV2Tests(unittest.TestCase):
             self.assertTrue(
                 any("registered open items classify findings, they never" in error for error in errors),
                 errors,
+            )
+
+    def test_open_items_ledger_ref_binding_rejects_rewritten_declaration(self) -> None:
+        # docauth#290: the front gate trace already records open_items_ledger_ref
+        # (#206), but nothing compared it to the receipt's own declaration until
+        # now -- a receipt could rewrite input_gate.open_items.ledger_ref to
+        # "none" (or a different file) after the gate recorded it.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            open_items_ref = {"path": "frozen/open-items.yaml", "sha256": "f" * 64}
+            _, receipt, _, receipt_path = _packet(
+                root, extra_input_gate={"open_items": {"ledger_ref": open_items_ref}}
+            )
+            expected = copy.deepcopy(receipt["packet_binding"])
+            # sanity: gate and receipt agree on the ledger_ref, so this binding
+            # raises nothing (other, unrelated errors are not what this test is about).
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertFalse(any("open_items_ledger_ref" in e for e in errors), errors)
+
+            receipt["input_gate"]["open_items"] = {"ledger_ref": "none"}
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any(
+                    "open_items_ledger_ref" in e and "does not match receipt" in e
+                    for e in errors
+                ),
+                errors,
+            )
+
+    def test_prior_round_output_ref_must_point_at_real_matching_bytes(self) -> None:
+        # docauth#290: prior_round_output_round_no is digest-bound (front gate
+        # binding), so the NUMBER cannot be rewritten after the gate recorded it --
+        # but nothing verified output_ref.path/.sha256 actually name a real,
+        # matching file until now.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            output_path = root / "frozen" / "prior-r1.md"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_payload = b"prior round output\n"
+            output_path.write_bytes(output_payload)
+            output_sha = hashlib.sha256(output_payload).hexdigest()
+            extra = {
+                "prior_round": {
+                    "exists": True,
+                    "output_ref": {"path": "frozen/prior-r1.md", "sha256": output_sha, "round_no": 1},
+                },
+            }
+            _, receipt, _, receipt_path = _packet(root, extra_input_gate=extra)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            receipt["round_context"] = {"round_label": "r2"}
+
+            bad = copy.deepcopy(receipt)
+            bad["input_gate"]["prior_round"]["output_ref"]["sha256"] = "0" * 64
+            _write_receipt(receipt_path, bad)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(any("output_ref.sha256 does not match" in e for e in errors), errors)
+
+            missing = copy.deepcopy(receipt)
+            missing["input_gate"]["prior_round"]["output_ref"]["path"] = "frozen/does-not-exist.md"
+            _write_receipt(receipt_path, missing)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any("cannot read input_gate.prior_round.output_ref" in e for e in errors), errors
+            )
+
+    def test_prior_round_output_ref_fifo_is_rejected_instead_of_hanging(self) -> None:
+        # Codex r1-01 (docauth#290): a plain read_bytes() on output_ref.path would
+        # block indefinitely open()-ing a FIFO -- the same hang class the docmodel-
+        # approvals TOCTOU fix (#290 fix 3) already caught elsewhere. output_ref
+        # must go through the same fd-anchored read (_read_packet_file_bytes).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fifo_path = root / "frozen" / "prior-r1.fifo"
+            fifo_path.parent.mkdir(parents=True, exist_ok=True)
+            os.mkfifo(fifo_path)
+            extra = {
+                "prior_round": {
+                    "exists": True,
+                    "output_ref": {"path": "frozen/prior-r1.fifo", "sha256": "0" * 64, "round_no": 1},
+                },
+            }
+            _, receipt, _, receipt_path = _packet(root, extra_input_gate=extra)
+            receipt["round_context"] = {"round_label": "r2"}
+            expected = copy.deepcopy(receipt["packet_binding"])
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any(
+                    "cannot read input_gate.prior_round.output_ref" in e
+                    or "must be a regular file" in e
+                    for e in errors
+                ),
+                f"FIFO output_ref should be rejected, not hang; got: {errors}",
+            )
+
+    def test_docmodel_approval_hard_link_and_fifo_rejected(self) -> None:
+        # docauth#290 fix 3: docmodel_path was read via separate stat()/is_file()/
+        # read_bytes() calls (a TOCTOU window) and a FIFO could hang open() before
+        # any of those checks ran. _read_verified_docmodel opens with
+        # O_NOFOLLOW|O_NONBLOCK and does every check on that one fd.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "frozen").mkdir(parents=True)
+            docmodel_path = root / "frozen" / "approved-docmodel.yaml"
+            docmodel_path.write_bytes((FIXTURES / "approved-docmodel.yaml").read_bytes())
+            write_docmodel_approval(root, "frozen/approved-docmodel.yaml")
+            registry_path = root / "frozen" / "docmodel-approvals.yaml"
+
+            hard_link_path = root / "frozen" / "approved-docmodel-alias.yaml"
+            os.link(docmodel_path, hard_link_path)
+            hardlink_registry = root / "frozen" / "hardlink-docmodel-approvals.yaml"
+            hardlink_registry.write_text(
+                registry_path.read_text(encoding="utf-8").replace(
+                    "docmodel_path: frozen/approved-docmodel.yaml",
+                    "docmodel_path: frozen/approved-docmodel-alias.yaml",
+                ),
+                encoding="utf-8",
+            )
+            errors = docmodel_approvals.validate(hardlink_registry, packet_root=root)
+            self.assertTrue(any("hard link" in e for e in errors), errors)
+
+            fifo_path = root / "frozen" / "docmodel.fifo.yaml"
+            os.mkfifo(fifo_path)
+            fifo_registry = root / "frozen" / "fifo-docmodel-approvals.yaml"
+            fifo_registry.write_text(
+                registry_path.read_text(encoding="utf-8").replace(
+                    "docmodel_path: frozen/approved-docmodel.yaml",
+                    "docmodel_path: frozen/docmodel.fifo.yaml",
+                ),
+                encoding="utf-8",
+            )
+            errors = docmodel_approvals.validate(fifo_registry, packet_root=root)
+            self.assertTrue(
+                any("must be a regular file" in e for e in errors),
+                f"FIFO docmodel_path should be rejected, not hang; got: {errors}",
             )
 
     def test_receipt_and_ledger_bind_to_packet_target(self) -> None:

@@ -7,8 +7,10 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 from typing import Any
 
@@ -205,6 +207,36 @@ def _resolve_ledger(
     return ledger
 
 
+def _read_packet_file_bytes(path: Path, label: str) -> tuple[bytes | None, str | None]:
+    """Read ``path`` through a single O_NOFOLLOW|O_NONBLOCK fd (docauth#290 r1-01, Codex).
+
+    Mirrors validate_docmodel_approvals.py's ``_read_verified_docmodel``: fstat and
+    read both run on the one descriptor a successful open() returned, so nothing
+    after that open() can substitute the bytes being hashed, and O_NONBLOCK keeps
+    a FIFO from hanging the open() itself instead of being rejected by the
+    S_ISREG check right after.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        return None, f"cannot read {label}: {exc}"
+    try:
+        fd_stat = os.fstat(fd)
+        if not stat.S_ISREG(fd_stat.st_mode):
+            return None, f"{label} must be a regular file"
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks), None
+    except OSError as exc:
+        return None, f"cannot read {label}: {exc}"
+    finally:
+        os.close(fd)
+
+
 def _resolve_packet_relative(packet_root: Path, raw_path: Any, label: str) -> tuple[Path | None, list[str]]:
     """Canonicalize and packet-fence a packet-relative path reference.
 
@@ -304,12 +336,14 @@ def _validate_front_gate_binding(receipt: dict[str, Any], events: list[Any], err
     source_copy = input_gate.get("source_copy") if isinstance(input_gate.get("source_copy"), dict) else {}
     prior_round = input_gate.get("prior_round") if isinstance(input_gate.get("prior_round"), dict) else {}
     prior_round_output_ref = prior_round.get("output_ref") if isinstance(prior_round.get("output_ref"), dict) else {}
+    open_items = input_gate.get("open_items") if isinstance(input_gate.get("open_items"), dict) else {}
     bound = (
         ("editing_state", input_gate.get("editing_state")),
         ("target_maturity", input_gate.get("target_maturity")),
         ("source_copy_sha256", source_copy.get("sha256")),
         ("prior_round_exists", prior_round.get("exists")),
         ("prior_round_output_round_no", prior_round_output_ref.get("round_no")),
+        ("open_items_ledger_ref", open_items.get("ledger_ref")),
     )
     for field, receipt_value in bound:
         if event.get(field) != receipt_value:
@@ -816,6 +850,41 @@ def _validate_v2(
     )
     if events is not None:
         _validate_front_gate_binding(receipt, events, errors)
+
+    # docauth#290: prior_round_output_round_no is digest-bound above (front gate
+    # binding), so the *number* cannot be rewritten after the gate recorded it --
+    # but nothing checked that output_ref.path/.sha256 actually name a real file
+    # until now. Without this, a receipt could reference a prior-round output that
+    # does not exist, or whose bytes were tampered with, and pass. Same evidentiary
+    # standard classification_ledger_ref/front_gate_ref/round_context.comparison_ref
+    # already get. Reads through the fd-anchored helper (Codex r1-01) so a FIFO in
+    # place of the file cannot hang validation the way a plain read_bytes() would.
+    if isinstance(input_gate, dict):
+        prior_round_for_output = input_gate.get("prior_round")
+        output_ref = (
+            prior_round_for_output.get("output_ref")
+            if isinstance(prior_round_for_output, dict)
+            else None
+        )
+        if isinstance(output_ref, dict):
+            output_path, output_path_errors = _resolve_packet_relative(
+                packet_root,
+                output_ref.get("path"),
+                "input_gate.prior_round.output_ref.path",
+            )
+            errors.extend(output_path_errors)
+            if output_path is not None:
+                output_payload, read_error = _read_packet_file_bytes(
+                    output_path, "input_gate.prior_round.output_ref"
+                )
+                if read_error is not None:
+                    errors.append(read_error)
+                else:
+                    if hashlib.sha256(output_payload).hexdigest() != output_ref.get("sha256"):
+                        errors.append(
+                            "input_gate.prior_round.output_ref.sha256 does not match "
+                            "the referenced file's bytes"
+                        )
 
     _validate_structure_axis(receipt, errors)
     _validate_execution(receipt.get("execution"), errors)

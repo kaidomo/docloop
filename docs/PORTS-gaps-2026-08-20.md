@@ -96,6 +96,36 @@ Filed as **docauth#290** (kaidomo/docauth) rather than fixed unilaterally in doc
 this project's own principle (logic changes go to docauth first, then re-port — fixing only
 in docloop would silently diverge from the canonical source). Full disposition record:
 `~/claude_codex_review/docloop-review-gate-2026-08-20-r2/REVIEW_BRIEF.md` (r1-01/r1-02/r1-03).
-**Release/merge timing for this PR pending user decision on whether to hold for docauth#290
-or merge now and re-port the fix separately once it lands** (as of 2026-08-20, not yet
-decided either way).
+
+**Update (2026-08-20, same day): fixed in docauth, re-ported here.** User decided not to
+hold this PR: fix docauth#290 immediately (docauth PR
+https://github.com/kaidomo/docauth/pull/292, branch
+`fix/review-gate-290-trace-binding-toctou`, still **unmerged** — user merges docauth PRs
+themselves) and re-port the same fix into this branch in the same session, rather than
+merging #42 first and re-porting later. All 3 findings above are closed:
+
+1. `open_items.ledger_ref` added to `_validate_front_gate_binding`'s `bound` tuple.
+2. `input_gate.prior_round.output_ref.path`/`.sha256` now resolved and hash-verified
+   against the real file.
+3. `validate_docmodel_approvals.py`'s `docmodel_path` read is now fd-anchored
+   (`_read_verified_docmodel`, `O_NOFOLLOW|O_NONBLOCK`, single `fstat`+`read`).
+
+A Codex peer review of the docauth fix itself (before its PR was opened) then found the
+new #2 read used a plain `read_bytes()`, reintroducing the exact FIFO-open-hang bug fix
+#3 had just closed — carried into this port too, as `_read_packet_file_bytes` in
+`lib/review_gate/validate_review_result.py` (symmetric with
+`validate_docmodel_approvals.py`'s `_read_verified_docmodel`). New tests here:
+`test_open_items_ledger_ref_binding_rejects_rewritten_declaration`,
+`test_prior_round_output_ref_must_point_at_real_matching_bytes`,
+`test_prior_round_output_ref_fifo_is_rejected_instead_of_hanging`,
+`test_docmodel_approval_hard_link_and_fifo_rejected` (all in `tests/test_review_gate_v2.py`).
+
+**`docs/PORTS.md` provenance note — intentionally NOT updated yet for these 2 rows.**
+Because docauth PR #292 is still unmerged, docauth `main` does not yet contain this fix —
+`check_ports.py`'s "upstream main" resolution will keep showing
+`STALE-downstream: lib/review_gate/validate_review_result.py` and
+`...validate_docmodel_approvals.py` (edited without row update) until #292 merges. This is
+expected and intentional: updating `docs/PORTS.md`'s docauth-blob-hash column now would
+misrepresent provenance (claiming sync against content `main` doesn't have). **Once
+docauth#292 merges**, re-run `check_ports.py` and update both rows' docauth-blob-hash +
+docloop-blob-hash columns together in a small follow-up commit.
