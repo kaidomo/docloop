@@ -24,11 +24,14 @@ All notable changes to docloop are documented here. This project adheres to
   extending the existing `README.md`/`README.ko.md` pattern.
 
 ### Fixed
-- **Receipt-binding gaps (docauth#290).** `input_gate.open_items.ledger_ref` and
-  `input_gate.prior_round.output_ref` could be declared in a done receipt without
-  matching what the front-gate trace actually recorded, or without naming a real file
-  at all; both are now verified. The `output_ref` file read is fd-anchored for the same
-  FIFO-hang reason as the docmodel-approvals fix above.
+- **Receipt-binding gaps (docauth#290).** `input_gate.open_items.ledger_ref` could be
+  declared in a done receipt without matching what the front-gate trace actually
+  recorded; it is now checked against the trace, same as the other bound fields.
+  `input_gate.prior_round.output_ref` could name a file that did not exist or whose
+  bytes did not match its declared hash; it is now verified against the real file
+  (fd-anchored, for the same FIFO-hang reason as the docmodel-approvals fix above) —
+  but, unlike `ledger_ref`, `output_ref` itself is not yet trace-bound (see Known
+  limitations).
 
 ### Known limitations
 - `output_ref.path`/`.sha256` are verified to be real and self-consistent, but — unlike
