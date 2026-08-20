@@ -303,6 +303,24 @@ class MaterializerTests(ConventionFixture):
             self.assertEqual(draft["meta"]["approval_state"], "draft")
 
 
+def _archived_input_gate(run_root: Path, payload: bytes = b"target full text snapshot A\n") -> dict:
+    """A field-complete CONTRACT §1 input gate block, archived for real under run_root.
+
+    `record_input_gate` verifies the archived bytes unconditionally, so a usable
+    fixture has to actually write the file rather than declare a hash for one that
+    was never written (mirrors docauth's `archived_input_gate` test helper).
+    """
+    digest = hashlib.sha256(payload).hexdigest()
+    (run_root / "target.snapshot.md").write_bytes(payload)
+    return {
+        "schema_version": 1,
+        "editing_state": "frozen",
+        "target_maturity": "complete",
+        "source_copy": {"path": "target.snapshot.md", "sha256": digest},
+        "prior_round": {"exists": False},
+    }
+
+
 class FrontGateTests(ConventionFixture):
     def test_front_gate_imports_in_package_mode(self) -> None:
         result = subprocess.run(
@@ -332,8 +350,13 @@ class FrontGateTests(ConventionFixture):
         with self.assertRaisesRegex(RuntimeError, "only once"):
             trace.preflight(invalid, self.profile)
         self.assertEqual(trace.events, [])
-        for lens in LENSES:
-            trace.start_lens(lens)
+        with tempfile.TemporaryDirectory() as run_root:
+            run_root_path = Path(run_root)
+            with self.assertRaisesRegex(RuntimeError, "before the recorded CONTRACT"):
+                trace.start_lens("L1")
+            trace.record_input_gate(_archived_input_gate(run_root_path), run_root_path)
+            for lens in LENSES:
+                trace.start_lens(lens)
         self.assertEqual(
             [event["lens_id"] for event in trace.events if event["event"] == "lens_started"],
             list(LENSES),
@@ -342,10 +365,40 @@ class FrontGateTests(ConventionFixture):
     def test_candidate_inventory_is_rejected_until_all_lenses_start(self) -> None:
         trace = FrontGateTrace()
         trace.preflight(self.intake, self.profile)
-        trace.start_lens("L1")
-        trace.start_lens("L2")
-        with self.assertRaisesRegex(RuntimeError, "L1, L2, and L3"):
-            trace.record_candidate_questions({})
+        with tempfile.TemporaryDirectory() as run_root:
+            run_root_path = Path(run_root)
+            trace.record_input_gate(_archived_input_gate(run_root_path), run_root_path)
+            trace.start_lens("L1")
+            trace.start_lens("L2")
+            with self.assertRaisesRegex(RuntimeError, "L1, L2, and L3"):
+                trace.record_candidate_questions({})
+
+    def test_lens_start_requires_recorded_input_gate(self) -> None:
+        trace = FrontGateTrace()
+        trace.preflight(self.intake, self.profile)
+        with self.assertRaisesRegex(RuntimeError, "before the recorded CONTRACT"):
+            trace.start_lens("L1")
+
+    def test_input_gate_rejects_unarchived_source_copy(self) -> None:
+        trace = FrontGateTrace()
+        trace.preflight(self.intake, self.profile)
+        with tempfile.TemporaryDirectory() as run_root:
+            run_root_path = Path(run_root)
+            block = _archived_input_gate(run_root_path)
+            # Declare a hash but never write the file — the gate must verify bytes,
+            # not trust the declaration.
+            block["source_copy"] = {"path": "missing.md", "sha256": block["source_copy"]["sha256"]}
+            with self.assertRaisesRegex(ValueError, "not archived in the run folder"):
+                trace.record_input_gate(block, run_root_path)
+
+    def test_input_gate_may_be_recorded_only_once(self) -> None:
+        trace = FrontGateTrace()
+        trace.preflight(self.intake, self.profile)
+        with tempfile.TemporaryDirectory() as run_root:
+            run_root_path = Path(run_root)
+            trace.record_input_gate(_archived_input_gate(run_root_path), run_root_path)
+            with self.assertRaisesRegex(RuntimeError, "only once"):
+                trace.record_input_gate(_archived_input_gate(run_root_path), run_root_path)
 
     def test_invalid_intake_never_admits_lens_execution(self) -> None:
         invalid = deepcopy(self.intake)

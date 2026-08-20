@@ -1,5 +1,7 @@
 # Releasing docloop
 
+한국어: [releasing.ko.md](releasing.ko.md)
+
 `VERSION` is the single source of truth for the docloop product release version. The
 first release heading in `CHANGELOG.md` and a release tag are projections of that value.
 The `TOOL_VERSION` constants used by individual subsystems are protocol compatibility
@@ -68,16 +70,21 @@ deletion, and enable GitHub Release immutability where available. The Actions se
 must allow the repository `GITHUB_TOKEN` to create Releases; the workflow grants
 `contents: write` only to the publication job after verification succeeds.
 
-### 잔류 draft Release 복구 절차
+### Recovering from a leftover draft Release
 
-release 워크플로 실행 중 오류가 나면 draft Release가 남을 수 있습니다. 이후 재실행은 기존 Release가 draft가 아닌 published 상태와 일치하는지 검증하므로, 남은 draft는 내용이 의도한 값과 일치하더라도 fail-closed 됩니다. 복구 절차:
+If an error occurs while the release workflow is running, a draft Release can be left
+behind. A subsequent re-run verifies that the existing Release is in the published (not
+draft) state, so a leftover draft causes a fail-closed result even if its content
+matches the intended values. Recovery procedure:
 
-1. 해당 tag의 draft Release 존재 여부를 확인합니다.
-2. draft의 tag/name/body가 의도한 값과 일치하는지 확인합니다(기록용 — 삭제 여부를 바꾸지 않습니다).
-3. 기존 draft가 있으면 일치 여부와 무관하게 항상 삭제합니다.
-4. 삭제 후 workflow를 재dispatch합니다.
+1. Check whether a draft Release exists for the tag in question.
+2. Check whether the draft's tag/name/body match the intended values (for the record
+   only — this does not change whether it gets deleted).
+3. If an existing draft is present, always delete it regardless of whether it matches.
+4. After deleting it, re-dispatch the workflow.
 
-draft를 검증 없이 자동으로 publish하지 않는 것이 이 워크플로의 fail-closed 정책입니다.
+Not automatically publishing a draft without verification is this workflow's
+fail-closed policy.
 
 ## Trusted signer registration is a dispatch precondition
 

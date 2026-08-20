@@ -32,5 +32,8 @@ questions:
 # - A profile routes known questions; it is not itself convention authority.
 # - No option is selected by default. Missing intake answers create no declaration.
 # - A provisional profile does not claim universality; #162 owns transferability.
+# - A profile that is not for the target's template is declared non-applicable in the
+#   intake (`profile_applicability`), never by mislabeling the target's template_id.
+#   Non-applicability costs the structure axis; it does not waive the profile (#193).
 # - Only approved_to_draft intake records may be materialized, and the result remains
 #   a non-suppression-authoritative *.draft.yaml until separately human-approved.

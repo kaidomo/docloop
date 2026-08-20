@@ -15,6 +15,7 @@ literal 출현을 전수 열거한다(CONTRACT §3 — 골든 r1 개선 후보 1
 사용: python3 scan_terms.py <terms.yaml> <대상 전문 파일>
 """
 import argparse
+import datetime
 import hashlib
 import os
 import re
@@ -26,6 +27,9 @@ except ImportError:  # PyYAML은 하우스 표준 의존성
     print("PyYAML 필요: pip install pyyaml", file=sys.stderr)
     sys.exit(2)
 
+# fullmatch()로 검사한다 — `$`는 문자열 끝 개행 앞에서도 맞으므로 `.match()`와
+# 함께 쓰면 끝에 개행이 붙은 값(예: YAML block scalar)이 통과한다. 이 값들은
+# 신선도 비교(source_hash)·형식 검증에 쓰이는 식별자다(#231).
 RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -50,6 +54,20 @@ def _is_str_list(v):
     return isinstance(v, list) and all(_is_str(x) for x in v)
 
 
+def _quote_hint(key, value):
+    """따옴표 누락으로 날짜가 date 객체가 된 경우 해법을 덧붙인다 (#194·#226).
+
+    판정은 바꾸지 않는다 — 문자열 요구는 그대로고, 메시지만 고친 방법을 알려준다.
+    (datetime.datetime은 datetime.date의 하위 클래스라 함께 걸린다.)
+    """
+    if key == "updated_at" and isinstance(value, datetime.date):
+        return (
+            f' — 따옴표로 감싸라(예: {key}: "{value.isoformat()[:10]}"). '
+            "따옴표가 없으면 YAML이 date 객체로 파싱한다"
+        )
+    return ""
+
+
 def validate_terms(data):
     """스키마 검사 — 오류 문자열 리스트 반환(비면 통과)."""
     E = []
@@ -61,8 +79,10 @@ def validate_terms(data):
         meta = {}
     if not _is_str(meta.get("target")):
         E.append("meta.target 누락/비문자열")
-    if not _is_str(meta.get("updated_at")) or not RE_DATE.match(meta.get("updated_at", "")):
-        E.append("meta.updated_at: YYYY-MM-DD 필수")
+    if not _is_str(meta.get("updated_at")) or not RE_DATE.fullmatch(meta.get("updated_at", "")):
+        E.append(
+            "meta.updated_at: YYYY-MM-DD 필수" + _quote_hint("updated_at", meta.get("updated_at"))
+        )
     terms = data.get("terms")
     if not isinstance(terms, list) or not terms:
         E.append("terms가 비어있거나 리스트가 아님")
@@ -138,7 +158,7 @@ def check_provenance(data, base_path):
         return E
     if not _is_str(ref) or not _is_str(want):
         return ["meta.source_ref/source_hash는 쌍으로 있어야 함(하나만 있으면 provenance 검증 불가 — fail-closed)"]
-    if not RE_SHA256.match(want):
+    if not RE_SHA256.fullmatch(want):
         return ["meta.source_hash: sha256 hex(64자 소문자) 형식이 아님"]
     p = os.path.expanduser(ref)
     if not os.path.isabs(p):

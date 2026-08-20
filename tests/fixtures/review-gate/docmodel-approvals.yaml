@@ -1,0 +1,18 @@
+meta:
+  target: review-gate fixtures
+  updated_at: '2026-08-04'
+approvals:
+- id: APR-FIXTURE-APPROVED
+  docmodel_path: approved-docmodel.yaml
+  docmodel_sha256: f3a31cb49628d2ffcab04431b6a9d3c697f539f4d50b298d1f0b821a74c45d60
+  status: approved
+  approved_by: fixture-document-owner
+  approved_at: '2026-08-04'
+  evidence: 'fixture: review-gate test suite'
+- id: APR-FIXTURE-DRAFT
+  docmodel_path: docmodel.fixture-template-v1.draft.yaml
+  docmodel_sha256: 469fe8dead21115657da65597870741f7f2b60e4df9fa015532cc01ba6d3c3e6
+  status: approved
+  approved_by: fixture-document-owner
+  approved_at: '2026-08-04'
+  evidence: 'fixture: review-gate test suite'

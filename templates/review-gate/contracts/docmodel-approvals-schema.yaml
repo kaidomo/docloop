@@ -1,0 +1,44 @@
+# docmodel-approvals.yaml 스키마 정본 — review-gate 문서모델 승인 레지스트리
+# 위치: 대상 문서의 작업 폴더당 1개(decisions.yaml과 같은 배치 관례) 또는
+#   템플릿을 공유하는 여러 문서가 함께 쓰는 위치(예: playbooks/review-gate/contracts/).
+# 검증: skills/review-gate/scripts/validate_docmodel_approvals.py
+#   (fail-closed — 구조 통과 + 신선도 검증 통과분만 approved_docmodel authority로 사용 가능)
+#
+# 왜 필요한가(docauth#242): `_validate_authority_ref`가 예전에는 `kind: approved_docmodel`을
+#   그 docmodel 파일 **자신의** `meta.approval_state: approved` 같은 자기 선언 메타데이터로
+#   판정했다 — 미결 원장을 다른 파일로 복사하고 그 세 필드만 붙이면 승인을 위조할 수 있었다
+#   (파일 정체·해시는 진짜로 다르므로 §1 ⑦ 대조도 피해간다). `decision_registry`가 이미
+#   위조 안 되는 것으로 확인된 것과 같은 모델로 닫는다: **파일은 자기가 승인됐다고 말할 수
+#   없다** — 승인은 이 파일 밖의 독립 레지스트리 항목에만 있다.
+# 표기 규칙: 날짜(YYYY-MM-DD)는 **반드시 따옴표로 감싼 문자열**로 쓴다(#194와 동일 사유).
+
+meta:
+  target: <문자열, 필수>            # 이 레지스트리가 다루는 대상(문서군·템플릿) 식별
+  updated_at: "<YYYY-MM-DD, 필수 — 반드시 따옴표>"
+
+approvals:                          # 1개 이상, 각 항목:
+  - id: <문자열, 필수, 유일>        # 예: APR-submission-기획서-01
+    docmodel_path: <경로, 필수>     # **repo-root 상대 경로** — 승인 대상 docmodel 파일
+                                    #   (decisions.yaml의 source_ref는 그 파일 자신의 디렉터리
+                                    #   기준이지만, 이 필드는 이 스키마의 다른 모든 경로
+                                    #   (authority_ref.path 등)와 같은 관례를 따른다)
+    docmodel_sha256: <sha256, 필수> # 승인 시점 docmodel의 raw-byte content hash.
+                                    #   검증기가 **현재** 바이트와 매번 재대조한다 — 승인 후
+                                    #   docmodel이 편집되면 이 항목은 STALE로 fail-closed되고
+                                    #   그 즉시 억제/질문해소 authority 자격을 잃는다(재승인 필요)
+    status: <enum, 필수>            # approved | revoked
+    approved_by: <문자열, 필수>     # 승인자
+    approved_at: "<YYYY-MM-DD, 필수 — 반드시 따옴표>"
+    evidence: <문자열, 필수>        # 승인이 실제로 이뤄진 곳(리뷰 코멘트·회의록·이슈 등) —
+                                    #   사람이 원 승인 행위를 다시 찾을 수 있게
+    template: <문자열, 선택>        # 참고용 템플릿 식별자
+
+# 사용 규칙(CONTRACT §2):
+# - `authority_ref`/`question.source`의 `kind: approved_docmodel`은 이제 `path`/`sha256`으로
+#   **이 레지스트리 파일**을 hash-bound 참조하고, `approval_id`로 그 안의 항목 하나를 지목한다
+#   (path/sha256이 docmodel 자신을 가리키던 예전 스키마와 다르다 — docauth#242).
+# - status=revoked 항목·docmodel_sha256이 현재 바이트와 불일치(STALE)하는 항목은 authority로
+#   사용 금지. 레지스트리 안의 항목 **하나라도** 구조·신선도 오류가 있으면 그 레지스트리
+#   전체가 무효로 취급된다(decision_registry와 동일한 fail-closed 정책 — 부분 신뢰 없음).
+# - docmodel_path가 `.draft.`를 이름에 포함하는 파일을 가리키면 승인됐어도 authority로 쓸 수
+#   없다(초안 파일을 승인하는 것 자체가 절차 오류라는 신호).

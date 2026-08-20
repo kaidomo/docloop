@@ -16,13 +16,19 @@ finding에 나타나야 한다. 앵커가 기록 쪽에만 남고 승격분이 �
 다른 표현으로 승격하면 발화하지 않는다 — **무발화는 승계의 증명이 아니다**.
 
 사용:
-  audit_anchors.py SYNTH.md --lens L1.md L3.md [--l2 L2.md] [--scan SCAN.md] \
-      [--extra-re 'F-\\d{2}' ...]
+  audit_anchors.py SYNTH.md --lens L1.md L3.md [--l2 L2_r1.md L2_r2.md ...] \
+      [--scan SCAN.md] [--extra-re 'F-\\d{2}' ...]
+  SYNTH는 **옵션보다 앞**에 둔다 — `--lens`·`--l2`는 여러 파일을 받으므로 뒤따르는
+  positional을 인자로 삼킨다(그 호출은 원인을 밝히며 exit 2).
 
 앵커 수집 규칙:
   --lens : 파일 전체에서 앵커 토큰 전부 수집(콜드/축 렌즈 — 전부 후보 근거).
   --l2   : "신규 쟁점" 표제 이후 구간에서만 수집(위치 목록은 대조 자료 —
            CONTRACT §3: 후보가 아니므로 합성 출력 의무 없음).
+           **여러 회차를 받는다**(docauth#200) — 회차마다 '신규 쟁점' 구간이
+           다르므로 파일별 구간 앵커를 **합집합**으로 요구한다. 한 회차만
+           넘기면 나머지 회차 앵커는 검산되지 않는다(실측: r1은 ANCHOR-OK였으나
+           r2에 미검산 후보 L16이 남아 있었다).
   --scan : `HIT line <번호>` 패턴에서 수집(결정론 스캔 히트).
   --extra-re : 행 번호 외 문서 ID 앵커 패턴(반복 지정 가능, 예: 'F-\\d{2}').
            렌즈가 위치를 행 번호가 아니라 문서 ID(F-01 등)로 인용하는 경우를
@@ -31,7 +37,11 @@ finding에 나타나야 한다. 앵커가 기록 쪽에만 남고 승격분이 �
            쪽(오케스트레이터)이 패턴을 지정한다.
 
 앵커 토큰 = L<2~5자리 숫자>(하이픈·숫자 비후행 — 렌즈 후보 ID `L1-24`류 오인 방지;
-1자리 행 번호는 렌즈 이름 L1·L2·L3과 충돌해 미수집, 한계로 명시) + --extra-re 매치.
+1자리 행 번호는 렌즈 이름 L1·L2·L3과 충돌해 미수집, 한계로 명시) + `A<12자리 소문자
+16진수>`(docauth#207 2안 — 행 내용 안정 식별자, `audit_quotes.py`가 쓰는 것과 같은
+형식) + --extra-re 매치. 이 도구는 두 형식 모두 **불투명한 토큰 문자열**로만
+다룬다(원문에 대해 재계산·검증하지 않는다) — 내용 검증은 `audit_quotes.py`의 몫이고,
+여기서는 "같은 토큰이 후보·합성 양쪽에 나타나는가"만 본다.
 
 판정: v2 실행은 `--ledger`의 `classification_ledger[].evidence_anchors`를 terminal
 placement SSOT로 삼는다. SYNTH 본문이나 scratch prose에 앵커가 있어도 ledger에
@@ -68,7 +78,14 @@ except ImportError:  # pragma: no cover - exercised by CLI dispatch
 
 # 왼쪽 경계도 ASCII 기준(--extra-re와 동일 규칙). 현 골든 코퍼스에서는 no-op이나
 # 한글 바로 뒤 인용("행L129")에서 갈리므로 규칙을 통일해 둔다.
-ANCHOR_RE = re.compile(r"(?<![A-Za-z0-9_-])L(\d{2,5})(?![\d-])")
+# #207 2안: 레거시 행 번호(L\d{2,5})와 신규 안정 식별자(A<12hex>, audit_quotes.py의
+# 형식과 동일)를 하나의 정규식으로 함께 인식한다 — 그룹 1이 매치되면 레거시,
+# 그룹 2가 매치되면 신규다(아래 anchors_full 참고).
+# 해시 토큰의 오른쪽 경계는 16진수뿐 아니라 식별자 문자 전부를 막는다(Codex r2-01,
+# audit_quotes.py와 동일 이유) — 이 스크립트는 하이픈 범위 개념이 없으므로(앵커를
+# 그저 불투명 토큰으로 전부 긁을 뿐 범위로 전개하지 않는다) 왼쪽 경계와 대칭으로
+# 하이픈도 막는다.
+ANCHOR_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:L(\d{2,5})(?![\d-])|(A[0-9a-f]{12})(?![A-Za-z0-9_-]))")
 SCAN_HIT_RE = re.compile(r"\bHIT line (\d{1,5})\b")
 L2_SECTION_RE = re.compile(r"신규\s*쟁점")
 # finding_id 문법. CONTRACT §4는 id 문자열 형식을 규정하지 않으므로(Codex c1-05)
@@ -104,7 +121,9 @@ def read(path: Path) -> str:
 
 
 def anchors_full(text: str, extra_res: list[re.Pattern]) -> set[str]:
-    found = {f"L{m}" for m in ANCHOR_RE.findall(text)}
+    found: set[str] = set()
+    for m in ANCHOR_RE.finditer(text):
+        found.add(f"L{m.group(1)}" if m.group(1) else m.group(2))
     for rx in extra_res:
         found |= {m.group(0) for m in rx.finditer(text)}
     return found
@@ -201,8 +220,16 @@ def check_promotions(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="합성 앵커 계수 검산기")
-    ap.add_argument("synth", help="합성 산출물(SYNTH.md)")
+    ap = argparse.ArgumentParser(
+        description="합성 앵커 계수 검산기",
+        epilog="SYNTH는 옵션보다 **앞**에 둔다 — --lens/--l2는 nargs='*'라 뒤따르는 "
+               "positional을 인자로 삼킨다.",
+    )
+    # nargs='?'로 두고 부재를 직접 잡는다(Codex r1-01): --l2가 다중 인자가 되면서
+    # `--l2 a.md SYNTH.md` 같은 옵션 선행 호출은 SYNTH까지 삼켜 실패한다(--lens는
+    # 원래부터 같은 성질이라 문서화된 호출 순서는 SYNTH 선행이다). argparse 기본
+    # 오류문("required: synth")은 원인을 못 알려주므로 원인을 짚는 오류로 대체한다.
+    ap.add_argument("synth", nargs="?", help="합성 산출물(SYNTH.md) — 옵션보다 앞에 둘 것")
     ap.add_argument(
         "--ledger",
         help="v2 review_intermediate YAML; classification_ledger evidence anchors become the terminal SSOT",
@@ -212,7 +239,11 @@ def main() -> int:
         help="packet root for ledger and hash-bound authority references",
     )
     ap.add_argument("--lens", nargs="*", default=[], help="전체 수집 렌즈 파일(L1·L3)")
-    ap.add_argument("--l2", help="L2 파일(신규 쟁점 구간만 수집)")
+    ap.add_argument(
+        "--l2", nargs="*", default=[],
+        help="L2 파일(신규 쟁점 구간만 수집). 회차마다 하나씩 전부 넘긴다 — "
+             "파일별 구간 앵커를 합집합으로 요구한다",
+    )
     ap.add_argument("--scan", help="용어 스캔 파일(HIT line 패턴 수집)")
     ap.add_argument(
         "--extra-re", action="append", default=[],
@@ -223,6 +254,24 @@ def main() -> int:
         help=f"finding_id 문법 정규식(승계 검사용, 기본 {DEFAULT_ID_RE!r})",
     )
     args = ap.parse_args()
+
+    if args.synth is None:
+        # 삼킴 설명은 실제로 삼킬 수 있었을 때만 한다(Codex r2-01) — `--scan`만 준
+        # 호출이나 무인자 호출에서 가변 인자를 탓하면 틀린 진단이다.
+        if args.lens or args.l2:
+            print(
+                "ERROR: SYNTH 인자가 없음 — `--lens`/`--l2`는 여러 파일을 받으므로(nargs='*') "
+                "옵션 뒤에 둔 SYNTH가 그 인자로 삼켜진다. "
+                "호출 순서: audit_anchors.py SYNTH.md --lens L1.md L3.md --l2 L2_r1.md L2_r2.md",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: SYNTH 인자가 없음 — 첫 인자로 합성 산출물 경로를 준다. "
+                "호출 순서: audit_anchors.py SYNTH.md --lens L1.md L3.md --l2 L2_r1.md L2_r2.md",
+                file=sys.stderr,
+            )
+        return 2
 
     try:
         re.compile(args.id_re)
@@ -295,8 +344,11 @@ def main() -> int:
             print(f"ERROR: 렌즈 파일 없음: {p}", file=sys.stderr)
             return 2
         sources.append(("lens", p, anchors_full(read(p), extra_res)))
-    if args.l2:
-        p = Path(args.l2)
+    # 회차별 L2를 각각 하나의 소스로 등록한다 — required는 아래에서 전 소스의
+    # 합집합이므로 파일별 '신규 쟁점' 구간 앵커가 합쳐진다(docauth#200).
+    # 파일별로 sha256·앵커 계수를 따로 찍어 어느 회차가 무엇을 요구했는지 감사에 남긴다.
+    for f in args.l2:
+        p = Path(f)
         if not p.is_file():
             print(f"ERROR: L2 파일 없음: {p}", file=sys.stderr)
             return 2
@@ -320,6 +372,31 @@ def main() -> int:
     for kind, p, anc in sources:
         print(f"SRC[{kind}]: {p} sha256 {sha256_of(p)} (앵커 {len(anc)}종)")
         required |= anc
+
+    # 부분 검산 경고(docauth#200).
+    #
+    # 판정 근거: 이 도구에 '회차' 개념이 인자로 들어오지 않으므로 회차 수를 직접
+    # 알 방법은 없다. 쓸 수 있는 유일한 근거는 **호출 관례**다 — 골든
+    # MANIFEST(`golden/MANIFEST_streak_v09.md`)의 표준 호출은 한 회차당 콜드 렌즈
+    # 2종(L1·L3)을 --lens로, 그 회차의 L2 1종을 --l2로 넘긴다. 그래서
+    # `len(--lens) // 2`를 회차 수의 **관례 기반 어림**으로 쓴다 — 하한 보장이
+    # 아니다(Codex r1-02): 한 회차에서 렌즈를 4개 넘기는 정당한 호출이면 과대
+    # 추정이고, 렌즈는 2개인데 L2만 3회차면 과소 추정이라 무발화한다. 관례보다
+    # 렌즈를 적게 넘긴 호출에서는 어림이 1로 내려가 경고가 꺼진다 — 거짓 경고보다
+    # 무발화 쪽으로 보수적이다(경고는 어림일 뿐이라 exit code를 바꾸지 않는다).
+    # 무발화가 '전수 검산됨'의 증명이 아니라는 점은 ANCHOR-OK 문장에서 판정 범위를
+    # 넘긴 SRC 입력으로 한정해 함께 공시한다.
+    #
+    # --l2 0개는 경고 대상이 아니다: L2를 아예 넘기지 않는 것은 'L2 축을 검산하지
+    # 않는다'는 명시적 선택이고, 1개만 넘긴 부분 검산과 달리 전수 검산으로 오인될
+    # 위험이 없다. 경고는 "회차가 여럿인데 그보다 적은 L2만 넘겼다"일 때만 낸다.
+    rounds_hint = len(args.lens) // 2
+    if rounds_hint >= 2 and 1 <= len(args.l2) < rounds_hint:
+        print(
+            f"주의: --lens {len(args.lens)}개 — 관례(회차당 콜드 렌즈 L1·L3 2종)로 어림하면 회차 {rounds_hint} 규모인데 "
+            f"--l2 는 {len(args.l2)}개뿐 — 넘기지 않은 회차의 '신규 쟁점' 앵커는 검산되지 않는다. "
+            f"회차별 L2 산출물을 전부 --l2 에 넘겨라(#200: r1만 넘겨 ANCHOR-OK였으나 r2에 미검산 앵커가 남아 있었다)."
+        )
 
     def sort_key(a: str):
         m = re.fullmatch(r"L(\d+)", a)
@@ -360,7 +437,13 @@ def main() -> int:
     if failed:
         return 1
     sink = "atom-level terminal ledger" if ledger_path else "legacy 합성 산출물"
-    print(f"결과: ANCHOR-OK — 렌즈·스캔 후보 앵커 전부가 {sink}에 존재, 승격 앵커 중첩 위반 없음")
+    # 판정 범위를 명시한다(Codex r1-02): 이 도구는 넘겨받은 SRC 입력만 본다.
+    # 회차·렌즈를 덜 넘긴 실행에서도 ANCHOR-OK가 나오므로, OK를 '전수 검산됨'으로
+    # 읽지 않도록 통과 문장 자체에 범위를 붙인다.
+    print(
+        f"결과: ANCHOR-OK — 이 실행에 넘긴 SRC 입력({len(sources)}종)의 후보 앵커 전부가 {sink}에 존재, "
+        f"승격 앵커 중첩 위반 없음 (넘기지 않은 렌즈·회차는 판정 범위 밖)"
+    )
     return 0
 
 

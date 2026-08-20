@@ -26,8 +26,13 @@ from typing import Any, Callable
 
 import yaml
 
-import scan_terms
-import validate_decisions
+try:  # Package import in tests; sibling import when executed as a script.
+    from . import front_gate, scan_terms, validate_decisions, validate_input_gate
+except ImportError:  # pragma: no cover - exercised by CLI dispatch
+    import front_gate
+    import scan_terms
+    import validate_decisions
+    import validate_input_gate
 
 
 SCHEMA_VERSION = 1
@@ -47,6 +52,78 @@ FAIL_PHASES = {"reserve", "freeze", "validate", "prompts", "complete-write"}
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AXES = ROOT / "templates" / "review-gate" / "default-axes.md"
 TOOL_DIR = Path(__file__).resolve().parent
+
+# docauth#242/#196/#206/#202/#228: input-gate/front-gate wiring.
+OPEN_ITEMS_REQUIRED_MATURITIES = validate_input_gate.OPEN_ITEMS_REQUIRED_MATURITIES
+# Synthetic, always-inapplicable convention profile/intake pair (docloop-native).
+# `FrontGateTrace.preflight()` requires SOME convention intake+profile before it will
+# record anything -- upstream always supplies a real one. docloop's --convention-profile/
+# --convention-intake stay optional for callers who do not use the convention axis at
+# all; when omitted, this pair satisfies preflight's technical requirement by declaring
+# itself inapplicable to every real target (#193), so front-gate wiring works without
+# forcing every docloop packet to adopt convention checking.
+_SYNTHETIC_PROFILE_ID = "docloop-no-convention-v1"
+
+
+def _synthetic_convention_profile() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "profile_id": _SYNTHETIC_PROFILE_ID,
+        "template_id": _SYNTHETIC_PROFILE_ID,
+        "status": "provisional",
+        "transferability": {
+            "universal": False,
+            "deferred_to_issue": "docloop:no-real-convention-profile-supplied",
+            "note": (
+                "Synthetic placeholder profile used only when the caller supplies no "
+                "real --convention-profile/--convention-intake. Never a genuine "
+                "convention authority."
+            ),
+        },
+        "questions": [
+            {
+                "id": "placeholder",
+                "prompt": "placeholder — never asked; this profile is always declared inapplicable",
+                "applicability": {
+                    "all_sections_present": ["docloop:synthetic-placeholder-section"],
+                    "note": "synthetic; no real target ever observes this section",
+                },
+                "declaration_targets": ["sections[docloop-placeholder]"],
+                "allowed_scopes": ["template"],
+                "provenance_required": True,
+                "options": [
+                    {
+                        "id": "placeholder-option",
+                        "label": "placeholder",
+                        "declaration": {
+                            "sections": [
+                                {"id": "docloop-placeholder", "title": "placeholder", "role": "reference"}
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _synthetic_convention_intake(*, target_snapshot: str, recorded_at: str) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "phase": "pre_lens",
+        "profile_id": _SYNTHETIC_PROFILE_ID,
+        # Deliberately NOT the profile's own template_id -- #193 refuses a non-applicable
+        # declaration against the profile's own template.
+        "template_id": "docloop:no-real-convention-profile",
+        "profile_applicability": {
+            "result": "inapplicable",
+            "reason": "no real convention profile supplied for this docloop packet",
+            "observed_sections": ["docloop:no-real-target-sections-observed"],
+        },
+        "target_snapshot": target_snapshot,
+        "recorded_at": recorded_at,
+        "records": [],
+    }
 
 # Unit tests may replace this hook to mutate a source after its bytes were read but
 # before the descriptor fingerprint is checked.
@@ -714,6 +791,15 @@ def _prepare(args: argparse.Namespace) -> int:
         raise GateError("choose exactly one of --docmodel or --no-docmodel")
     if bool(args.convention_profile) != bool(args.convention_intake):
         raise GateError("--convention-profile and --convention-intake must be supplied together")
+    if bool(args.prior_round_output) != (args.prior_round_no is not None):
+        raise GateError("--prior-round-output and --prior-round-no must be supplied together")
+    if args.prior_round_no is not None and args.prior_round_no < 1:
+        raise GateError("--prior-round-no must be a positive integer")
+    if args.target_maturity in OPEN_ITEMS_REQUIRED_MATURITIES and not args.open_items_ledger:
+        raise GateError(
+            f"--open-items-ledger is required when --target-maturity is {args.target_maturity} "
+            "(§1 ⑦ — a draft or unknown-maturity target must supply its registered open items)"
+        )
 
     target_rel = _normalize_rel(args.target, "target")
     decisions_rel = _normalize_rel(args.decisions, "decisions") if args.decisions else None
@@ -722,6 +808,8 @@ def _prepare(args: argparse.Namespace) -> int:
     docmodel_rel = _normalize_rel(args.docmodel, "docmodel") if args.docmodel else None
     convention_profile_rel = _normalize_rel(args.convention_profile, "convention profile") if args.convention_profile else None
     convention_intake_rel = _normalize_rel(args.convention_intake, "convention intake") if args.convention_intake else None
+    open_items_ledger_rel = _normalize_rel(args.open_items_ledger, "open items ledger") if args.open_items_ledger else None
+    prior_round_output_rel = _normalize_rel(args.prior_round_output, "prior round output") if args.prior_round_output else None
     review_path = _directory_argument(args.review_folder, "review folder")
     review_fd = _open_directory(review_path, "review folder")
     try:
@@ -791,6 +879,15 @@ def _prepare(args: argparse.Namespace) -> int:
             docmodel_raw, rows, files = _freeze_docmodel(review_fd, docmodel_rel)
             provenance_rows.extend(rows); provenance.update(files)
 
+        open_items_raw = None
+        if open_items_ledger_rel:
+            open_items_raw = _read_relative(review_fd, open_items_ledger_rel, "open items ledger", MAX_SIDECAR_BYTES)
+        prior_round_output_raw = None
+        if prior_round_output_rel:
+            prior_round_output_raw = _read_relative(
+                review_fd, prior_round_output_rel, "prior round output", MAX_SIDECAR_BYTES
+            )
+
         if len(provenance) > MAX_PROVENANCE_FILES:
             raise GateError(f"provenance file cap exceeded ({len(provenance)} > {MAX_PROVENANCE_FILES})")
         captured_total = sum(len(x) for x in (
@@ -801,6 +898,8 @@ def _prepare(args: argparse.Namespace) -> int:
             docmodel_raw or b"",
             convention_profile_raw or b"",
             convention_intake_raw or b"",
+            open_items_raw or b"",
+            prior_round_output_raw or b"",
         )) + sum(map(len, provenance.values()))
         if captured_total > MAX_CAPTURE_BYTES:
             raise GateError(f"capture byte cap exceeded ({captured_total} > {MAX_CAPTURE_BYTES})")
@@ -828,6 +927,10 @@ def _prepare(args: argparse.Namespace) -> int:
             if convention_profile_raw is not None and convention_intake_raw is not None:
                 _write_relative(run_fd, PurePosixPath("frozen/convention-profile.yaml"), convention_profile_raw)
                 _write_relative(run_fd, PurePosixPath("frozen/convention-intake.yaml"), convention_intake_raw)
+            if open_items_raw is not None:
+                _write_relative(run_fd, PurePosixPath("frozen/open-items.yaml"), open_items_raw)
+            if prior_round_output_raw is not None:
+                _write_relative(run_fd, PurePosixPath("frozen/prior-round-output.md"), prior_round_output_raw)
             for name, raw in provenance.items():
                 _write_relative(run_fd, PurePosixPath(f"frozen/provenance/{name}"), raw)
             _phase("freeze")
@@ -849,6 +952,50 @@ def _prepare(args: argparse.Namespace) -> int:
                     PurePosixPath("deterministic/CONVENTION_PREFLIGHT.json"),
                     _json_bytes(convention_preflight),
                 )
+
+            # docauth#228②/#196/#206/#202④: record the CONTRACT §1 input gate and start
+            # every lens through FrontGateTrace, then freeze the resulting trace as a
+            # deterministic packet artifact. This is the ONLY place a front_gate_ref
+            # trace can be produced -- front_gate.py itself stays internal-only, no
+            # public execution trace (PORTS.md).
+            if convention_profile_raw is not None and convention_intake_raw is not None:
+                preflight_profile = _load_strict(convention_profile_raw, "convention profile")
+                preflight_intake = _load_strict(convention_intake_raw, "convention intake")
+            else:
+                preflight_intake = _synthetic_convention_intake(
+                    target_snapshot=f"sha256:{target_sha}", recorded_at=datetime.now(timezone.utc).date().isoformat()
+                )
+                preflight_profile = _synthetic_convention_profile()
+            prior_round: dict[str, Any] = {"exists": prior_round_output_raw is not None}
+            if prior_round_output_raw is not None:
+                prior_round["output_ref"] = {
+                    "path": "frozen/prior-round-output.md",
+                    "sha256": _sha(prior_round_output_raw),
+                    "round_no": args.prior_round_no,
+                }
+            input_gate: dict[str, Any] = {
+                "schema_version": 1,
+                "editing_state": args.editing_state,
+                "target_maturity": args.target_maturity,
+                "source_copy": {"path": "frozen/target.txt", "sha256": target_sha},
+                "prior_round": prior_round,
+            }
+            if open_items_raw is not None:
+                input_gate["open_items"] = {
+                    "ledger_ref": {"path": "frozen/open-items.yaml", "sha256": _sha(open_items_raw)},
+                }
+            try:
+                trace = front_gate.FrontGateTrace()
+                trace.preflight(preflight_intake, preflight_profile)
+                trace.record_input_gate(
+                    input_gate, run_path, target_snapshot=f"sha256:{target_sha}"
+                )
+                for lens_id in front_gate.LENSES:
+                    trace.start_lens(lens_id)
+            except (RuntimeError, ValueError) as exc:
+                raise GateError(f"input gate: {exc}") from exc
+            front_gate_trace_raw = _json_bytes({"review_front_gate_trace": trace.events})
+            _write_relative(run_fd, PurePosixPath("deterministic/FRONT_GATE_TRACE.json"), front_gate_trace_raw)
             _phase("validate")
 
             _write_relative(run_fd, PurePosixPath("lens/L1/PROMPT.md"), _prompt_l1(target_sha))
@@ -884,7 +1031,42 @@ def _prepare(args: argparse.Namespace) -> int:
                     "phase": "pre_lens",
                     "validation": "pass",
                 },
+                "open_items": None if open_items_ledger_rel is None else {
+                    "source": open_items_ledger_rel.as_posix(), "frozen_sha256": _sha(open_items_raw or b""),
+                },
+                "prior_round_output": None if prior_round_output_rel is None else {
+                    "source": prior_round_output_rel.as_posix(), "frozen_sha256": _sha(prior_round_output_raw or b""),
+                    "round_no": args.prior_round_no,
+                },
             }
+            # Copy-ready for whoever writes the final DONE.md receipt (§9): the input
+            # gate this run actually recorded, the digest-bound trace that proves it,
+            # and the round_context the CONTRACT §1 ⑨ declaration implies.
+            front_gate_ref = {"path": "deterministic/FRONT_GATE_TRACE.json", "sha256": _sha(front_gate_trace_raw)}
+            round_context = (
+                {"round_label": "r1"}
+                if not prior_round["exists"]
+                else {"round_label": f"r{prior_round['output_ref']['round_no'] + 1}"}
+                # comparison_ref (§13 match_review_rounds.py output) is not produced by
+                # `prepare` -- supply it when writing the receipt, once that round-
+                # comparison table exists.
+            )
+            # The pre-lens front gate reads input_gate WITH schema_version and WITHOUT
+            # run_root (it receives the run folder out of band, before any receipt
+            # exists to point back at it); the done receipt embeds it WITHOUT
+            # schema_version and WITH run_root (#228③, so validate-result can re-hash
+            # the archived source_copy independently of the receipt's own claim). For
+            # docloop, run_root is always the packet root itself, hence ".".
+            receipt_input_gate = {k: v for k, v in input_gate.items() if k != "schema_version"}
+            receipt_input_gate["run_root"] = "."
+            receipt_scaffold = {
+                "input_gate": receipt_input_gate,
+                "front_gate_ref": front_gate_ref,
+                "round_context": round_context,
+            }
+            _write_relative(
+                run_fd, PurePosixPath("deterministic/RECEIPT_SCAFFOLD.json"), _json_bytes(receipt_scaffold)
+            )
             run_manifest = {
                 "schema_version": SCHEMA_VERSION,
                 "state": "prepared",
@@ -948,6 +1130,20 @@ def _prepare_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-docmodel", action="store_true")
     ap.add_argument("--convention-profile")
     ap.add_argument("--convention-intake")
+    ap.add_argument(
+        "--editing-state", required=True, choices=sorted(validate_input_gate.EDITING_STATES),
+        help="CONTRACT §1 ⑥ — is the target being edited right now (#196)?",
+    )
+    ap.add_argument(
+        "--target-maturity", required=True, choices=sorted(validate_input_gate.TARGET_MATURITIES),
+        help="CONTRACT §1 ⑦ — is the target a finished document or a working draft (#206)?",
+    )
+    ap.add_argument(
+        "--open-items-ledger",
+        help="document's registered open-item ledger; required when --target-maturity is draft or unknown",
+    )
+    ap.add_argument("--prior-round-output", help="prior round's output file, if one exists (§1 ⑨)")
+    ap.add_argument("--prior-round-no", type=int, help="prior round's round number; required with --prior-round-output")
     return ap
 
 
@@ -957,6 +1153,10 @@ def usage() -> str:
   docloop review-gate prepare <review-folder> <run-id> <target-relative-path>
       (--decisions FILE | --unassured) [--axes FILE]
       (--terms FILE | --no-terms) (--docmodel FILE | --no-docmodel)
+      --editing-state {frozen,in_progress,unknown}
+      --target-maturity {complete,draft,unknown}
+      [--open-items-ledger FILE]   # required when --target-maturity is draft or unknown
+      [--prior-round-output FILE --prior-round-no N]
       [--convention-profile FILE --convention-intake FILE]
   docloop review-gate check <review-gate-run-folder>
   docloop review-gate validate-decisions <decisions.yaml> [--skip-hash]
@@ -968,7 +1168,12 @@ def usage() -> str:
   docloop review-gate scan-terms <terms.yaml> <target>
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
 
-prepare creates a packet only. It does not run models or declare pass/done.
+prepare creates a packet only. It does not run models or declare pass/done. It also
+records the CONTRACT §1 input gate (editing_state/target_maturity/source_copy/prior_round)
+and starts every lens through FrontGateTrace, freezing the result as
+deterministic/FRONT_GATE_TRACE.json -- the digest-bound trace a done receipt's
+front_gate_ref must reference (#228②). deterministic/RECEIPT_SCAFFOLD.json has the
+input_gate/front_gate_ref/round_context fields ready to copy into DONE.md.
 """
 
 

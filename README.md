@@ -100,7 +100,8 @@ and the selected review inputs into a three-lens packet:
 
 ```bash
 docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PRD.md \
-  --decisions decisions.yaml --terms terms.yaml --no-docmodel
+  --decisions decisions.yaml --terms terms.yaml --no-docmodel \
+  --editing-state frozen --target-maturity complete
 docloop review-gate check \
   ~/.docloop/reviews/case-submission/review-gate/rg-20260803-01
 docloop review-gate validate-result \
@@ -128,16 +129,25 @@ The v2 receipt's `packet_binding` has exactly five fields: `run_id`, `target_sou
 `validate-result` checks prepared-packet integrity before parsing the receipt and rejects
 mismatched or cross-run bindings, changed ledger bytes, public receipt records that
 diverge from the closed ledger, and unsafe receipt or ledger paths. It does not hash-bind
-arbitrary receipt body prose. Legacy v1 done receipts remain valid.
+arbitrary receipt body prose. A `schema_version: 1` receipt can never validate as done
+any more — it predates the input gate entirely; inspect an already-closed one with
+`--legacy` (field-completeness only, never a verdict).
 
-An optional `--convention-profile FILE --convention-intake FILE` pair validates the
-profile and pre-lens answers before reserving a run directory. That record means
-readiness only: it does not record `lens_started` or run a lens. `materialize-docmodel`
-uses only `approved_to_draft` answers to create a new draft with
+`prepare` also requires `--editing-state`/`--target-maturity` (and, for a draft or
+unknown-maturity target, `--open-items-ledger`) and records that CONTRACT §1 input gate
+by running every lens through an internal ordering guard, freezing the result to
+`deterministic/FRONT_GATE_TRACE.json` — hash-bound, and required by a done receipt's
+`front_gate_ref`. There is still no separate public command for it; only `prepare`
+produces the trace. An optional `--convention-profile FILE --convention-intake FILE`
+pair validates the profile and pre-lens answers before reserving a run directory.
+`materialize-docmodel` uses only `approved_to_draft` answers to create a new draft with
 `approval_state: draft`, `approved_by: null`, and `suppression_eligible: false`. The draft
 is not automatically L3 input or suppression authority for the current run; a person
-must approve and explicitly select it in a later run. The internal front gate is
-an implementation ordering guard, not a public command or execution trace.
+must approve and explicitly select it in a later run — and, since docauth#242, an
+`approved_docmodel` authority reference binds to an independent
+`docmodel-approvals.yaml` registry entry, never to the docmodel file's own claims about
+itself. See [the review-gate guide](docs/review-gate.md) for the full input-gate,
+front-gate-trace, and docmodel-approvals contracts.
 
 `review-gate check` and receipt validation prove only mechanical invariants such as path
 containment, file type, hashes, and run binding; they do not declare review pass, prove

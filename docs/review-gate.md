@@ -1,5 +1,7 @@
 # Review-gate packet workflow
 
+한국어: [review-gate.ko.md](review-gate.ko.md)
+
 `docloop review-gate` is an explicitly invoked packet-preparation workflow for a
 document already staged by `docloop review`. It freezes exactly one target and its
 selected inputs, runs the deterministic preflight checks, and writes prompts for
@@ -44,10 +46,28 @@ Choose each input explicitly:
   duplicate-key, stale, or mismatched input fails before a run directory is reserved.
   Approved answers may later be materialized
   only as a non-authoritative draft; they are not suppression authority.
+- Input gate (CONTRACT §1, required): pass `--editing-state {frozen,in_progress,unknown}`
+  and `--target-maturity {complete,draft,unknown}`. `frozen`/`complete` is the common
+  "reading a finished, unchanging document" case. `in_progress` or `unknown` editing
+  state defers the final done verification (§7) — the review can still run, but a
+  receipt built from it can only reach a `DEFERRED` intermediate result, never `done`.
+  `draft` or `unknown` target maturity requires `--open-items-ledger FILE` — the
+  document's own registered open-item ledger, frozen alongside the other sidecars. A
+  registered open item can later mark ("classify") a finding in the receipt; it can
+  never suppress one.
+- Prior round (CONTRACT §1 ⑨, optional): if this run follows an earlier round on the
+  same target, pass `--prior-round-output FILE --prior-round-no N` naming that round's
+  output and number. Omit both for a first round. See "Multi-round reviews" below for
+  what a second round still needs manually.
 
-Every provenance reference used by decisions, terms, or a docmodel is frozen before
-validation. Validation and term scanning run only against the frozen files, never
-against inputs that can drift during packet construction.
+Every provenance reference used by decisions, terms, a docmodel, or the open-items
+ledger is frozen before validation. Validation and term scanning run only against the
+frozen files, never against inputs that can drift during packet construction.
+
+Preparation also records the input gate above and starts all three lenses through an
+internal `FrontGateTrace`, freezing the result to
+`deterministic/FRONT_GATE_TRACE.json` — see "The front-gate trace" below. This is the
+only place that trace can be produced; there is no separate public command for it.
 
 ## Prepare a packet
 
@@ -55,7 +75,8 @@ against inputs that can drift during packet construction.
 docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-01 PRD.md \
   --decisions decisions.yaml \
   --terms terms.yaml \
-  --no-docmodel
+  --no-docmodel \
+  --editing-state frozen --target-maturity complete
 ```
 
 For an explicit unassured run without optional sidecars:
@@ -64,7 +85,17 @@ For an explicit unassured run without optional sidecars:
 docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-02 PRD.md \
   --unassured \
   --no-terms \
-  --no-docmodel
+  --no-docmodel \
+  --editing-state frozen --target-maturity complete
+```
+
+For a target that is still being drafted, with its open-item ledger:
+
+```bash
+docloop review-gate prepare ~/.docloop/reviews/case-submission rg-20260803-03 PRD.md \
+  --unassured --no-terms --no-docmodel \
+  --editing-state in_progress --target-maturity draft \
+  --open-items-ledger open-items.yaml
 ```
 
 To enable convention preflight, add both convention options. Preparation freezes both
@@ -105,6 +136,8 @@ done.
     docmodel.yaml                  # when selected
     convention-profile.yaml       # when selected as a pair
     convention-intake.yaml        # when selected as a pair
+    open-items.yaml                # when --open-items-ledger is given
+    prior-round-output.md          # when --prior-round-output is given
     provenance/<typed-id>
   lens/L1/{PROMPT.md,TARGET.md}
   lens/L2/{PROMPT.md,TARGET.md,DECISIONS.yaml|UNASSURED.md}
@@ -113,6 +146,8 @@ done.
   deterministic/TERM_SCAN_RAW.md   # exact upstream scanner output, when selected
   deterministic/TERM_SCAN.md       # two-digit-minimum anchor adapter used by audit
   deterministic/CONVENTION_PREFLIGHT.json  # readiness only; no lens execution
+  deterministic/FRONT_GATE_TRACE.json  # digest-bound input-gate + lens-start trace
+  deterministic/RECEIPT_SCAFFOLD.json  # copy-ready input_gate/front_gate_ref/round_context
   handoff/{SYNTHESIS.md,ANCHOR_AUDIT.md,VERIFICATION.md,HUMAN_DECISION.md}
   results/README.md
 ```
@@ -151,6 +186,74 @@ anchor auditor deliberately ignores one-digit `L1`/`L2`/`L3` tokens because they
 mean lens names, so the packet keeps the exact scanner output in `TERM_SCAN_RAW.md` and
 uses the equivalent two-digit-minimum anchors in `TERM_SCAN.md` for synthesis/auditing.
 
+## The front-gate trace
+
+`prepare` records the CONTRACT §1 input gate and starts every lens through an internal
+`FrontGateTrace` object — the same ordering guard upstream calls `review_front_gate.py`,
+except docloop never exposes it as a separate command; it only runs inside `prepare`.
+The resulting event sequence (`convention_intake_validated` or
+`convention_profile_not_applicable`, then `input_gate_recorded`, then three
+`lens_started` events) is frozen to `deterministic/FRONT_GATE_TRACE.json` and hash-bound.
+A done receipt's `front_gate_ref` must name this exact file by path and sha256 — a
+receipt cannot independently redeclare `editing_state`/`target_maturity` as something
+more convenient than what the gate actually recorded before any lens ran.
+
+If you didn't pass `--convention-profile`/`--convention-intake`, `prepare` uses an
+internal, always-inapplicable placeholder profile to satisfy the trace's technical
+requirement — you don't need to know it exists. The trace correctly emits
+`convention_profile_not_applicable`, and the receipt's `structure_axis` must then be
+`undetermined` with a `structure_axis_reason` (see `deterministic/RECEIPT_SCAFFOLD.json`,
+which already has this filled in).
+
+`deterministic/RECEIPT_SCAFFOLD.json` has the exact `input_gate`, `front_gate_ref`, and
+`round_context` fields the final `DONE.md` receipt needs — copy them in verbatim rather
+than retyping the hashes by hand.
+
+## The docmodel-approvals registry
+
+An `approved_docmodel` authority reference (in a decision's `source`, or a suppressed
+finding's `authority_ref`) no longer points at the docmodel file's own self-declared
+`meta.approval_state: approved`. It instead points — by path and sha256 — at an
+independent **docmodel-approvals registry** file, and names one `approval_id` entry
+inside it:
+
+```yaml
+meta:
+  target: <what this registry approves docmodels for>
+  updated_at: "2026-08-20"
+approvals:
+  - id: APR-example-01
+    docmodel_path: frozen/docmodel.yaml   # packet-relative
+    docmodel_sha256: <sha256 of that file's current bytes>
+    status: approved                       # approved | revoked
+    approved_by: <approver>
+    approved_at: "2026-08-20"
+    evidence: <where the approval actually happened — a review comment, a meeting note>
+```
+
+```yaml
+authority_ref:
+  kind: approved_docmodel
+  path: frozen/docmodel-approvals.yaml
+  sha256: <sha256 of the registry file's bytes>
+  approval_id: APR-example-01
+```
+
+Validation re-hashes `docmodel_path` against `docmodel_sha256` every time — if the
+docmodel changes after approval, that entry goes stale and the authority reference
+fails closed until it is re-approved. A docmodel file can no longer claim its own
+approval; the registry is the only source of truth.
+
+## Multi-round reviews
+
+A second round on the same target (`--prior-round-output`/`--prior-round-no` at
+`prepare` time) is structurally supported end-to-end, but the tool that generates the
+round-comparison table (`match_review_rounds.py`) is not yet ported to docloop. The
+receipt's `round_context.comparison_ref` must point at a file that starts with
+`# 라운드 대조 —` and hashes to what it claims; for now, that file has to be produced by
+hand or with an external tool in that exact format. First rounds (the common case —
+`prior_round.exists: false`, `round_context.round_label: r1`) need none of this.
+
 ## Complete the review manually
 
 The packet is provider-neutral. Follow the generated handoff files rather than
@@ -180,10 +283,16 @@ treating preparation as the review:
    `unresolved`; there is no majority vote. The final done-preflight also requires
    three, and any kill or unresolved result there returns to synthesis.
 6. Follow `handoff/HUMAN_DECISION.md`, append the human record, and create the v2
-   `results/DONE.md` receipt. Validate it against the prepared packet. The review is
+   `results/DONE.md` receipt. Copy `input_gate`, `front_gate_ref`, and `round_context`
+   from `deterministic/RECEIPT_SCAFFOLD.json`, and add `structure_axis` (+
+   `structure_axis_reason` if undetermined), `execution` (confirmed lens-round count
+   and why), and `scale_disclosure` (the pre-execution scale you disclosed, itemized).
+   Validate it against the prepared packet. The review is
    not done while any finding is outside
-   `verified|rejected`, verification is absent or unresolved, or an unassured run
-   lacks explicit human acceptance of the missing decision history.
+   `verified|rejected`, verification is absent or unresolved, an unassured run lacks
+   explicit human acceptance of the missing decision history, or `editing_state` was
+   `in_progress`/`unknown` at prepare time (that receipt can only reach `DEFERRED`,
+   never `done` — re-run `prepare` once the target is frozen).
 
 Severity is a review claim, not an ordering guarantee. Read every finding, including
 P3 and findings seen by only one run. The protocol prescribes three done verifiers
@@ -216,9 +325,14 @@ questions block closure until authority and reverse lineage resolve them.
 
 `validate-result` first validates the real prepared packet, then validates a v1 or v2
 receipt. V2 binds the exact run ID, target source and snapshot, prepared payload digest,
-receipt path, ledger bytes, immutable records, and public record set. Packet-relative
+receipt path, ledger bytes, immutable records, and public record set — plus the input
+gate, the digest-bound front-gate trace, structure axis, execution disclosure, scale
+disclosure, and round context described above. Packet-relative
 paths must be normalized POSIX regular files below the non-Git packet root. This proves
 internal consistency, not authorship or resistance to a coordinated same-UID rewrite.
+A `schema_version: 1` receipt can never validate as done any more — it predates the
+input gate entirely; inspect an already-closed one with `--legacy` (field-completeness
+only, never a done verdict) instead.
 
 Convention validation is data-driven and document-type neutral. Materialization consumes
 only `approved_to_draft` answers, refuses identity conflicts, and creates a no-clobber
@@ -246,6 +360,9 @@ justified number of repeated runs, or a correct final document. The term scan is
 deterministic only for relationships encoded in the supplied dictionary. Human
 review, disposition, and verification remain mandatory.
 
-The deterministic ledger/receipt and generic convention-preflight contracts are
-supported. Second-document/docmodel generalization remains deferred. No transferability,
+The deterministic ledger/receipt, generic convention-preflight, input-gate/front-gate
+trace, and docmodel-approvals registry contracts are supported. Per-template docmodel
+generalization (a template-specific structure-declaration package, beyond the generic
+schema) and the §13 round-comparison generator (`match_review_rounds.py`) remain
+deferred — see `docs/PORTS-gaps-2026-08-20.md`. No transferability,
 completeness, or model-independence guarantee is implied.
