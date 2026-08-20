@@ -47,7 +47,10 @@ def write(path, data):
 
 
 def command(*args, env=None):
-    return subprocess.run([str(BIN), "review-gate", *map(str, args)], capture_output=True, text=True, env=env)
+    args = list(map(str, args))
+    if args and args[0] == "prepare" and "--editing-state" not in args:
+        args += ["--editing-state", "frozen", "--target-maturity", "complete"]
+    return subprocess.run([str(BIN), "review-gate", *args], capture_output=True, text=True, env=env)
 
 
 def fixture(root):
@@ -304,6 +307,79 @@ with tempfile.TemporaryDirectory() as td:
     r = command("audit-anchors", anchors / "S-10.md", "--scan", anchors / "scan10.md")
     check("anchors/numbered target and term scan agree on L10",
           "L10 | 리시버" in numbered and r.returncode == 0 and "ANCHOR-OK" in r.stdout)
+
+    # front-gate/input-gate wiring (docauth#196/#206/#202④/#228②) -----------------
+    fg = Path(td) / "front-gate"
+    write(fg / "draft.md", "# Demo\n\nBody.\n")
+    r = subprocess.run(
+        [str(BIN), "review-gate", "prepare", str(fg), "no-flags", "draft.md",
+         "--unassured", "--no-terms", "--no-docmodel"],
+        capture_output=True, text=True,
+    )
+    check(
+        "front-gate/editing-state and target-maturity are required",
+        r.returncode != 0 and "--editing-state" in (r.stdout + r.stderr),
+    )
+    r = command(
+        "prepare", fg, "draft-no-ledger", "draft.md", "--unassured", "--no-terms", "--no-docmodel",
+        "--editing-state", "frozen", "--target-maturity", "draft",
+    )
+    check(
+        "front-gate/draft maturity requires an open-items ledger",
+        r.returncode != 0 and "open-items-ledger" in (r.stdout + r.stderr)
+        and not (fg / "review-gate" / "draft-no-ledger").exists(),
+    )
+    r = command(
+        "prepare", fg, "no-pair-round", "draft.md", "--unassured", "--no-terms", "--no-docmodel",
+        "--editing-state", "frozen", "--target-maturity", "complete",
+        "--prior-round-output", "draft.md",
+    )
+    check(
+        "front-gate/prior-round-output requires prior-round-no",
+        r.returncode != 0 and "--prior-round-no" in (r.stdout + r.stderr),
+    )
+    r = command(
+        "prepare", fg, "happy", "draft.md", "--unassured", "--no-terms", "--no-docmodel",
+        "--editing-state", "frozen", "--target-maturity", "complete",
+    )
+    happy_run = fg / "review-gate" / "happy"
+    trace_path = happy_run / "deterministic" / "FRONT_GATE_TRACE.json"
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))["review_front_gate_trace"] if trace_path.is_file() else []
+    events = [e.get("event") for e in trace]
+    input_gate_event = next((e for e in trace if e.get("event") == "input_gate_recorded"), None)
+    check(
+        "front-gate/happy path records input gate then starts all three lenses",
+        r.returncode == 0
+        and events == ["convention_profile_not_applicable", "input_gate_recorded", "lens_started", "lens_started", "lens_started"]
+        and input_gate_event is not None
+        and input_gate_event.get("editing_state") == "frozen"
+        and input_gate_event.get("source_copy_verified") is True
+        and input_gate_event.get("prior_round_exists") is False,
+    )
+    scaffold_path = happy_run / "deterministic" / "RECEIPT_SCAFFOLD.json"
+    scaffold = json.loads(scaffold_path.read_text(encoding="utf-8")) if scaffold_path.is_file() else {}
+    check(
+        "front-gate/receipt scaffold names the frozen trace and round r1",
+        scaffold.get("front_gate_ref", {}).get("path") == "deterministic/FRONT_GATE_TRACE.json"
+        and scaffold.get("front_gate_ref", {}).get("sha256") == hashlib.sha256(trace_path.read_bytes()).hexdigest()
+        and scaffold.get("round_context") == {"round_label": "r1"},
+    )
+    write(fg / "open-items.yaml", "meta:\n  target: demo\nitems: []\n")
+    r = command(
+        "prepare", fg, "draft-ok", "draft.md", "--unassured", "--no-terms", "--no-docmodel",
+        "--editing-state", "in_progress", "--target-maturity", "draft",
+        "--open-items-ledger", "open-items.yaml",
+    )
+    draft_run = fg / "review-gate" / "draft-ok"
+    draft_scaffold = json.loads(
+        (draft_run / "deterministic" / "RECEIPT_SCAFFOLD.json").read_text(encoding="utf-8")
+    ) if r.returncode == 0 else {}
+    check(
+        "front-gate/in-progress editing state with an open-items ledger succeeds",
+        r.returncode == 0
+        and draft_scaffold.get("input_gate", {}).get("open_items", {}).get("ledger_ref", {}).get("path")
+        == "frozen/open-items.yaml",
+    )
 
 print(f"\n=== review-gate: {PASSED} passed, {FAILED} failed ===")
 sys.exit(1 if FAILED else 0)

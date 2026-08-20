@@ -154,6 +154,7 @@ def _prepare_fixture(
     args = [
         str(BIN), "review-gate", "prepare", str(root), run_id, "draft.md",
         "--unassured", "--no-terms", "--no-docmodel",
+        "--editing-state", "frozen", "--target-maturity", "complete",
         "--convention-profile", "profile.yaml",
         "--convention-intake", "intake.yaml",
     ]
@@ -177,12 +178,18 @@ with tempfile.TemporaryDirectory() as td:
         == (review / "intake.yaml").read_bytes()
         and manifest["sidecars"]["convention"]["profile_source"] == "profile.yaml",
     )
+    front_gate_trace_path = run / "deterministic" / "FRONT_GATE_TRACE.json"
     check(
         "prepared convention evidence is readiness-only",
         preflight["phase"] == "pre_lens"
         and "lens_started" not in json.dumps(preflight)
+        # deterministic/FRONT_GATE_TRACE.json is the one intentional exception: its
+        # `lens_started` events (#228②) mean "the input gate opened this lens for
+        # dispatch," never "this lens ran and produced findings" -- the same readiness
+        # meaning this test already checks for CONVENTION_PREFLIGHT.json. Every OTHER
+        # packet file (prompts, results) must still never claim lens execution.
         and all("lens_started" not in path.read_text(encoding="utf-8")
-                for path in run.rglob("*") if path.is_file()),
+                for path in run.rglob("*") if path.is_file() and path != front_gate_trace_path),
     )
     try:
         RG._validate_prepared_packet(run)
@@ -249,6 +256,7 @@ with tempfile.TemporaryDirectory() as td:
         [
             str(BIN), "review-gate", "prepare", str(review), "half-pair", "draft.md",
             "--unassured", "--no-terms", "--no-docmodel",
+            "--editing-state", "frozen", "--target-maturity", "complete",
             "--convention-profile", "profile.yaml",
         ],
         capture_output=True,

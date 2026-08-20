@@ -16,6 +16,51 @@ from lib.review_gate.validate_review_intermediate import PUBLIC_COLLECTIONS, rec
 SNAPSHOT = "sha256:target-snapshot"
 ROOT = Path(__file__).resolve().parent / "fixtures" / "review-gate"
 AUTHORITY_RELPATH = "approved-docmodel.yaml"
+DRAFT_DOCMODEL_RELPATH = "docmodel.fixture-template-v1.draft.yaml"
+DOCMODEL_APPROVALS_RELPATH = "docmodel-approvals.yaml"
+
+
+def _write_docmodel_approvals_fixture() -> None:
+    """(Re)write the fixture docmodel-approvals registry (docauth#242).
+
+    `approved_docmodel` authority now binds to an independent registry entry instead
+    of the docmodel's own self-declared meta -- see `_validate_authority_ref` and
+    `validate_docmodel_approvals.py`. Written once at import time from the CURRENT
+    bytes of the fixture docmodels it approves, so it never goes stale on its own and
+    every ref built from it in this process sees the same file (a ref's `sha256`
+    captures the registry's bytes at build time; rewriting it after refs exist would
+    invalidate them).
+    """
+    entries = [
+        (AUTHORITY_RELPATH, "APR-FIXTURE-APPROVED"),
+        (DRAFT_DOCMODEL_RELPATH, "APR-FIXTURE-DRAFT"),
+    ]
+    approvals = [
+        {
+            "id": approval_id,
+            "docmodel_path": relative_path,
+            "docmodel_sha256": hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest(),
+            "status": "approved",
+            "approved_by": "fixture-document-owner",
+            "approved_at": "2026-08-04",
+            "evidence": "fixture: review-gate test suite",
+        }
+        for relative_path, approval_id in entries
+    ]
+    registry = {
+        "meta": {"target": "review-gate fixtures", "updated_at": "2026-08-04"},
+        "approvals": approvals,
+    }
+    path = ROOT / DOCMODEL_APPROVALS_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(registry, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+_write_docmodel_approvals_fixture()
+_DOCMODEL_APPROVAL_IDS = {
+    AUTHORITY_RELPATH: "APR-FIXTURE-APPROVED",
+    DRAFT_DOCMODEL_RELPATH: "APR-FIXTURE-DRAFT",
+}
 
 
 def approved_docmodel_ref() -> dict:
@@ -23,11 +68,55 @@ def approved_docmodel_ref() -> dict:
 
 
 def docmodel_ref(relative_path: str) -> dict:
-    authority_path = ROOT / relative_path
+    """An `approved_docmodel` authority_ref naming the fixture registry's entry for
+    `relative_path` (docauth#242 -- `path`/`sha256` bind to the registry file itself,
+    not to `relative_path`; `approval_id` picks the entry that approves it). The draft
+    fixture's entry exists too (status: approved) so callers exercising "draft docmodel
+    rejected" still hit the real `.draft.` filename guard rather than a missing-entry
+    error.
+    """
+    approval_id = _DOCMODEL_APPROVAL_IDS[relative_path]
+    registry_path = ROOT / DOCMODEL_APPROVALS_RELPATH
     return {
         "kind": "approved_docmodel",
-        "path": relative_path,
-        "sha256": hashlib.sha256(authority_path.read_bytes()).hexdigest(),
+        "path": DOCMODEL_APPROVALS_RELPATH,
+        "sha256": hashlib.sha256(registry_path.read_bytes()).hexdigest(),
+        "approval_id": approval_id,
+    }
+
+
+def write_docmodel_approval(
+    packet_root: Path,
+    docmodel_relpath: str,
+    *,
+    registry_relpath: str = "frozen/docmodel-approvals.yaml",
+    approval_id: str = "APR-TEST-01",
+) -> dict:
+    """Write a one-entry docmodel-approvals registry under an ad-hoc `packet_root`
+    (e.g. a test's own tempdir, distinct from the shared `ROOT` fixtures directory)
+    and return the matching `approved_docmodel` authority_ref (docauth#242).
+    """
+    docmodel_path = packet_root / docmodel_relpath
+    registry = {
+        "meta": {"target": "test packet", "updated_at": "2026-08-04"},
+        "approvals": [{
+            "id": approval_id,
+            "docmodel_path": docmodel_relpath,
+            "docmodel_sha256": hashlib.sha256(docmodel_path.read_bytes()).hexdigest(),
+            "status": "approved",
+            "approved_by": "test-owner",
+            "approved_at": "2026-08-04",
+            "evidence": "test fixture",
+        }],
+    }
+    registry_path = packet_root / registry_relpath
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {
+        "kind": "approved_docmodel",
+        "path": registry_relpath,
+        "sha256": hashlib.sha256(registry_path.read_bytes()).hexdigest(),
+        "approval_id": approval_id,
     }
 
 
@@ -68,12 +157,12 @@ def base_ledger() -> dict:
             {
                 "candidate_atom_id": "ATOM-D", "source_candidate_refs": ["SC-D"],
                 "statement": "비결함 표기 차이", "evidence_anchors": ["L20", "L30"],
-                "classification_basis": basis("proven", "equal", "not_violated", "declared mirror values normalize equally"),
+                "classification_basis": basis("proven", "equal", "not_violated", "declared mirror values normalize equally (L20/L30)"),
             },
             {
                 "candidate_atom_id": "ATOM-N", "source_candidate_refs": ["SC-N"],
                 "statement": "비교 대상 아님", "evidence_anchors": ["L40"],
-                "classification_basis": basis("not_coreferential", "not_applicable", "not_applicable", "contexts identify different facts"),
+                "classification_basis": basis("not_coreferential", "not_applicable", "not_applicable", "contexts identify different facts (L40)"),
             },
         ],
         "findings": [

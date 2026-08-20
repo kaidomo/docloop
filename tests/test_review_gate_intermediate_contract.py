@@ -236,7 +236,7 @@ parallel["candidate_atoms"].extend([
         "source_candidate_refs": ["SC-Q"],
         "statement": "답 후 drift",
         "evidence_anchors": ["L10"],
-        "classification_basis": basis("proven", "equal", "not_violated", "answer proves equal values"),
+        "classification_basis": basis("proven", "equal", "not_violated", "answer proves equal values (L10)"),
         "derived_from_question_atom_refs": ["ATOM-Q"],
     },
     {
@@ -244,7 +244,7 @@ parallel["candidate_atoms"].extend([
         "source_candidate_refs": ["SC-Q"],
         "statement": "답 후 nonissue",
         "evidence_anchors": ["L10"],
-        "classification_basis": basis("proven", "equal", "intentional_variant", "answer approves intentional notation"),
+        "classification_basis": basis("proven", "equal", "intentional_variant", "answer approves intentional notation (L10)"),
         "derived_from_question_atom_refs": ["ATOM-Q"],
     },
 ])

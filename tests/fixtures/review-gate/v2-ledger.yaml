@@ -56,7 +56,7 @@ review_intermediate:
       co_reference: proven
       semantic_values: equal
       presentation_rule: not_violated
-      evidence: declared mirror values normalize equally
+      evidence: declared mirror values normalize equally (L20/L30)
   - candidate_atom_id: ATOM-N
     source_candidate_refs:
     - SC-N
@@ -67,7 +67,7 @@ review_intermediate:
       co_reference: not_coreferential
       semantic_values: not_applicable
       presentation_rule: not_applicable
-      evidence: contexts identify different facts
+      evidence: contexts identify different facts (L40)
   findings:
   - record_id: REC-F
     finding_id: F-01
@@ -94,8 +94,9 @@ review_intermediate:
     scope: document
     source:
       kind: approved_docmodel
-      path: frozen/approved-docmodel.yaml
-      sha256: f3a31cb49628d2ffcab04431b6a9d3c697f539f4d50b298d1f0b821a74c45d60
+      path: docmodel-approvals.yaml
+      sha256: e22dacff5cb946124c34952962719e51c3138c469511fe76a221d4e52455f0da
+      approval_id: APR-FIXTURE-APPROVED
     snapshot_id: sha256:target-snapshot
     evidence_anchors:
     - L10
@@ -103,7 +104,7 @@ review_intermediate:
       result: pass
       verifier_id: V-Q
       evidence: approved docmodel
-    public_record_digest: sha256:d280b03bf5d452816a969956aba6954b13c48881bf7d5f9d61ec9830dc77563d
+    public_record_digest: sha256:6369661a9c8cff4cbd9d6a56c37c4e432939e35a90a8f78fd1201c1dd2fe228a
   drifts:
   - record_id: REC-D
     candidate_atom_refs:

@@ -20,8 +20,59 @@ BIN = ROOT / "bin" / "docloop"
 FIXTURES = ROOT / "tests" / "fixtures" / "review-gate"
 sys.path.insert(0, str(ROOT))
 
+from lib.review_gate import front_gate  # noqa: E402
+from lib.review_gate import runner as RG  # noqa: E402
 from lib.review_gate import validate_review_intermediate as intermediate  # noqa: E402
 from lib.review_gate import validate_review_result as result  # noqa: E402
+
+TESTS_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(TESTS_ROOT))
+from review_gate_output_helpers import write_docmodel_approval  # noqa: E402
+
+
+def _write_front_gate_trace(root: Path, target_path: Path, target_snapshot: str) -> dict:
+    """Record a real input gate + all three lenses, mirroring what `docloop
+    review-gate prepare` does internally, and return the receipt fields a done
+    receipt must carry to bind to it (front_gate_ref/input_gate/structure_axis/
+    execution/scale_disclosure/round_context)."""
+    trace = front_gate.FrontGateTrace()
+    trace.preflight(
+        RG._synthetic_convention_intake(target_snapshot=target_snapshot, recorded_at="2026-08-20"),
+        RG._synthetic_convention_profile(),
+    )
+    input_gate = {
+        "schema_version": 1,
+        "editing_state": "frozen",
+        "target_maturity": "complete",
+        "source_copy": {"path": "frozen/target.txt", "sha256": hashlib.sha256(target_path.read_bytes()).hexdigest()},
+        "prior_round": {"exists": False},
+        "run_root": ".",
+    }
+    trace.record_input_gate(input_gate, root, target_snapshot=target_snapshot)
+    for lens_id in front_gate.LENSES:
+        trace.start_lens(lens_id)
+    trace_bytes = json.dumps({"review_front_gate_trace": trace.events}, ensure_ascii=False).encode("utf-8")
+    trace_path = root / "deterministic" / "FRONT_GATE_TRACE.json"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    trace_path.write_bytes(trace_bytes)
+    # The pre-lens front gate reads input_gate WITH schema_version; the done receipt
+    # embeds it WITHOUT (validate_review_result.py's _validate_v2 call omits
+    # with_schema_version, matching front_gate.py's own module contract).
+    receipt_input_gate = {k: v for k, v in input_gate.items() if k != "schema_version"}
+    return {
+        "input_gate": receipt_input_gate,
+        "front_gate_ref": {"path": "deterministic/FRONT_GATE_TRACE.json", "sha256": hashlib.sha256(trace_bytes).hexdigest()},
+        "structure_axis": "undetermined",
+        "structure_axis_reason": "no real convention profile supplied for this fixture packet",
+        "execution": {"run_ids": [], "lens_rounds": 1, "lens_rounds_reason": "single-round fixture run"},
+        "scale_disclosure": {
+            "target_volume": {"lines": 1, "snapshot_id": target_snapshot},
+            "planned_lens_rounds": 1,
+            "configuration": [{"name": "fixture", "count": 1}],
+            "derived_total_agents": 1,
+        },
+        "round_context": {"round_label": "r1"},
+    }
 
 
 def _write_assured_inputs(review: Path) -> None:
@@ -84,6 +135,7 @@ def _prepare_assured(root: Path) -> Path:
         [
             str(BIN), "review-gate", "prepare", str(review), "assured-registry", "draft.md",
             "--decisions", "decisions.yaml", "--terms", "terms.yaml", "--docmodel", "docmodel.yaml",
+            "--editing-state", "frozen", "--target-maturity", "complete",
         ],
         capture_output=True,
         text=True,
@@ -121,17 +173,16 @@ def _packet(root: Path) -> tuple[dict, dict, Path, Path]:
     target_sha = hashlib.sha256(target).hexdigest()
     snapshot = f"sha256:{target_sha}"
     target_source = "docs/target.md"
+    target_path = root / "frozen" / "target.txt"
+    target_path.write_bytes(target)
+    front_gate_fields = _write_front_gate_trace(root, target_path, snapshot)
 
     envelope = yaml.safe_load(
         (FIXTURES / "v2-ledger.yaml").read_text(encoding="utf-8")
     )[intermediate.ROOT_KEY]
     envelope["snapshot_id"] = snapshot
     envelope["target"] = target_source
-    envelope["questions"][0]["source"] = {
-        "kind": "approved_docmodel",
-        "path": "frozen/approved-docmodel.yaml",
-        "sha256": hashlib.sha256(authority.read_bytes()).hexdigest(),
-    }
+    envelope["questions"][0]["source"] = write_docmodel_approval(root, "frozen/approved-docmodel.yaml")
     for category, collection in intermediate.PUBLIC_COLLECTIONS.items():
         for record in envelope[collection]:
             record["snapshot_id"] = snapshot
@@ -165,6 +216,7 @@ def _packet(root: Path) -> tuple[dict, dict, Path, Path]:
     receipt["questions"] = copy.deepcopy(envelope["questions"])
     receipt["drifts"] = copy.deepcopy(envelope["drifts"])
     receipt["packet_binding"] = copy.deepcopy(binding)
+    receipt.update(copy.deepcopy(front_gate_fields))
     receipt_path = root / "results" / "DONE.md"
     _write_receipt(receipt_path, receipt)
     (root / "RUN.yaml").write_text(
@@ -256,6 +308,21 @@ class ReviewGateV2Tests(unittest.TestCase):
             receipt["findings"] = copy.deepcopy(envelope["findings"])
             receipt["questions"] = copy.deepcopy(envelope["questions"])
             receipt["drifts"] = copy.deepcopy(envelope["drifts"])
+            # `prepare` already recorded the real input gate/front-gate trace for this
+            # packet; its receipt scaffold is copy-ready (docs/review-gate.md).
+            scaffold = json.loads(
+                (run / "deterministic" / "RECEIPT_SCAFFOLD.json").read_text(encoding="utf-8")
+            )
+            receipt.update(scaffold)
+            receipt["structure_axis"] = "undetermined"
+            receipt["structure_axis_reason"] = "no real convention profile supplied for this fixture packet"
+            receipt["execution"] = {"run_ids": [], "lens_rounds": 1, "lens_rounds_reason": "single-round fixture run"}
+            receipt["scale_disclosure"] = {
+                "target_volume": {"lines": 1, "snapshot_id": snapshot},
+                "planned_lens_rounds": 1,
+                "configuration": [{"name": "fixture", "count": 1}],
+                "derived_total_agents": 1,
+            }
             binding, binding_errors = result.packet_binding_from_prepared(run, "results/DONE.md")
             self.assertEqual(binding_errors, [])
             receipt["packet_binding"] = binding
@@ -287,7 +354,7 @@ class ReviewGateV2Tests(unittest.TestCase):
                     "date": "2026-08-03", "evidence": "D-01",
                 }],
             }, allow_unicode=True, sort_keys=False), encoding="utf-8")
-            envelope["schema_version"] = 2
+            envelope["schema_version"] = 3
             envelope["questions"][0]["source"] = {
                 "kind": "decision_registry", "path": "frozen/decisions.yaml",
                 "sha256": hashlib.sha256(registry.read_bytes()).hexdigest(), "decision_id": "missing",
@@ -296,7 +363,7 @@ class ReviewGateV2Tests(unittest.TestCase):
                 "question", envelope["questions"][0]
             )
             errors = intermediate.validate_data(envelope, packet_root=root)
-            self.assertIn("schema_version must be 1", errors)
+            self.assertIn("schema_version must be 1 or 2", errors)
             self.assertTrue(any("current confirmed decision" in error for error in errors), errors)
 
             registry_data = yaml.safe_load(registry.read_text(encoding="utf-8"))
@@ -333,7 +400,7 @@ class ReviewGateV2Tests(unittest.TestCase):
             self.assertEqual(result.validate(root, "results/DONE.md", binding or {}), [])
 
     def test_legacy_v1_receipt_remains_valid(self) -> None:
-        self.assertEqual(result.validate_legacy(FIXTURES / "v1-done.md"), [])
+        self.assertEqual(result.legacy_field_errors(FIXTURES / "v1-done.md").field_errors, [])
 
     def test_open_question_blocks_closed_validation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -362,7 +429,7 @@ class ReviewGateV2Tests(unittest.TestCase):
             self.assertTrue(intermediate.validate(duplicate, packet_root=root))
             envelope, _, _, _ = _packet(root)
             envelope["schema_version"] = True
-            self.assertIn("schema_version must be 1", intermediate.validate_data(envelope, packet_root=root))
+            self.assertIn("schema_version must be 1 or 2", intermediate.validate_data(envelope, packet_root=root))
 
     def test_drift_is_nonblocking_but_rejects_finding_fields(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -403,6 +470,112 @@ class ReviewGateV2Tests(unittest.TestCase):
                     any(f"packet_binding.{field}" in error for error in errors),
                     (field, errors),
                 )
+
+    def test_front_gate_trace_binding_rejects_rewritten_input_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, _, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            # Declaring in_progress after the digest-verified pre-lens trace recorded
+            # frozen -- the trace, not this rewritten claim, must win (docauth#228②).
+            receipt["input_gate"]["editing_state"] = "in_progress"
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any("editing_state" in error and "does not match receipt" in error for error in errors),
+                errors,
+            )
+
+    def test_front_gate_ref_hash_tamper_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, _, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            receipt["front_gate_ref"]["sha256"] = "0" * 64
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(any("front_gate_ref.sha256 does not match" in error for error in errors), errors)
+
+    def test_structure_axis_must_match_trace_non_applicability(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, _, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            # _packet()'s trace declares the synthetic convention profile
+            # not-applicable -- structure_axis must stay undetermined (#233).
+            receipt["structure_axis"] = "judged"
+            del receipt["structure_axis_reason"]
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any("structure_axis must be undetermined" in error for error in errors), errors
+            )
+
+    def test_deferred_verification_when_target_still_being_edited(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, receipt, _, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            trace = json.loads(
+                (root / "deterministic" / "FRONT_GATE_TRACE.json").read_text(encoding="utf-8")
+            )
+            for event in trace["review_front_gate_trace"]:
+                if event.get("event") == "input_gate_recorded":
+                    event["editing_state"] = "in_progress"
+                    event["verification_deferred"] = True
+            trace_bytes = json.dumps(trace, ensure_ascii=False).encode("utf-8")
+            (root / "deterministic" / "FRONT_GATE_TRACE.json").write_bytes(trace_bytes)
+            receipt["input_gate"]["editing_state"] = "in_progress"
+            receipt["front_gate_ref"]["sha256"] = hashlib.sha256(trace_bytes).hexdigest()
+            receipt["verifiers"] = []
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertEqual(errors, [result.DEFERRED_MESSAGE], errors)
+
+    def test_open_items_ledger_cannot_be_cited_as_suppression_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            envelope, receipt, ledger_path, receipt_path = _packet(root)
+            expected = copy.deepcopy(receipt["packet_binding"])
+            open_items = root / "frozen" / "open-items.yaml"
+            open_items.write_text("meta:\n  target: demo\nitems: []\n", encoding="utf-8")
+            open_items_sha = hashlib.sha256(open_items.read_bytes()).hexdigest()
+            receipt["input_gate"]["open_items"] = {
+                "ledger_ref": {"path": "frozen/open-items.yaml", "sha256": open_items_sha},
+            }
+            drift = envelope["drifts"][0]
+            suppressed_record = {
+                "record_id": "REC-OI-SUPPRESS",
+                "candidate_atom_refs": drift["candidate_atom_refs"],
+                "source_candidate_refs": drift["source_candidate_refs"],
+                "snapshot_id": drift["snapshot_id"],
+                "evidence_anchors": drift["evidence_anchors"],
+                "rationale": "already tracked as an open item",
+                "authority_ref": {"path": "frozen/open-items.yaml", "sha256": open_items_sha},
+            }
+            suppressed_record["public_record_digest"] = intermediate.record_digest("suppressed", suppressed_record)
+            envelope["suppressed"] = [suppressed_record]
+            envelope["classification_ledger"] = [
+                row for row in envelope["classification_ledger"]
+                if row["candidate_atom_id"] != drift["candidate_atom_refs"][0]
+            ]
+            envelope["classification_ledger"].append({
+                "candidate_atom_id": drift["candidate_atom_refs"][0], "outcome": "suppressed",
+                "target_record_id": "REC-OI-SUPPRESS", "evidence_anchors": drift["evidence_anchors"],
+            })
+            envelope["drifts"] = []
+            ledger_path.write_text(
+                yaml.safe_dump({intermediate.ROOT_KEY: envelope}, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            receipt["classification_ledger_ref"]["sha256"] = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
+            receipt["drifts"] = []
+            _write_receipt(receipt_path, receipt)
+            errors = result.validate(root, "results/DONE.md", expected)
+            self.assertTrue(
+                any("registered open items classify findings, they never" in error for error in errors),
+                errors,
+            )
 
     def test_receipt_and_ledger_bind_to_packet_target(self) -> None:
         with tempfile.TemporaryDirectory() as td:
