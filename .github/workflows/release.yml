@@ -109,6 +109,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          read_release_with_retry() {
+            local release_id="$1" out="$2" want_draft="$3" attempt
+            for attempt in 1 2 3 4 5; do
+              if gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > "$out" 2>/dev/null \
+                && jq -e --argjson id "$release_id" --argjson draft "$want_draft" \
+                  '.id == $id and .draft == $draft' "$out" >/dev/null 2>&1; then
+                return 0
+              fi
+              test "$attempt" = 5 && return 1
+              sleep 2
+            done
+          }
           release_list="$RUNNER_TEMP/release-list.json"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$release_list"
           existing_release="$(jq -c --arg tag "$RELEASE_TAG" 'add | map(select(.tag_name == $tag)) | .[0] // empty' "$release_list")"
@@ -194,9 +206,9 @@ jobs:
               --expect-draft \
               --github-release-json "$RUNNER_TEMP/created-release.json"
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
-            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-              --jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
-              >"$RUNNER_TEMP/published-release.json"
+            read_release_with_retry "$release_id" "$RUNNER_TEMP/published-release-raw.json" false
+            jq '{tagName: .tag_name, name: .name, isDraft: .draft, isPrerelease: .prerelease, body: .body}' \
+              "$RUNNER_TEMP/published-release-raw.json" >"$RUNNER_TEMP/published-release.json"
             python3 tools/check_release.py \
               --tag "$RELEASE_TAG" \
               --github-release-json "$RUNNER_TEMP/published-release.json"
