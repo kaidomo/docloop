@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -181,6 +182,116 @@ class UpstreamEquivalence(unittest.TestCase):
         # same shape: same ids, same row count
         self.assertEqual([l.split("|")[1] for l in ko.splitlines() if l.startswith("| `")],
                          [l.split("|")[1] for l in en.splitlines() if l.startswith("| `")])
+
+
+class Vocabulary(unittest.TestCase):
+    """Every dictionary entry is pinned, and every entry has to actually classify.
+
+    The fixture covers the five verdict *kinds*; it says nothing about the *words* that
+    produce them. Removing `fixed` from CLOSED_WORDS left the whole suite green while
+    `- r1-01 fixed` silently changed from carried(closed) to unknown -- a port that
+    quietly loses a vocabulary entry is exactly the drift this file exists to catch.
+    """
+
+    CLOSED = ("CLOSED", "closed", "닫힘", "해소", "종결", "반영", "resolved", "fixed",
+              "없음", "없으며", "없습니다", "없다", "찾지 못했다", "발견하지 못했")
+    OPEN = ("OPEN", "open", "remains", "잔여", "미종결", "여전히", "그대로", "부분",
+            "partial", "still", "재발", "reopen")
+    NEGATION = ("미", "비", "무", "불", "안 ",
+                "not", "never", "cannot", "can't", "won't", "wasn't", "isn't", "aren't",
+                "doesn't", "didn't", "no longer", "non", "un")
+
+    def test_word_lists_match_their_goldens(self):
+        self.assertEqual(self.CLOSED, mrr.CLOSED_WORDS)
+        self.assertEqual(self.OPEN, mrr.OPEN_WORDS)
+        self.assertEqual(self.NEGATION, mrr.NEGATION_TRIGGERS)
+        self.assertEqual(30, mrr.NEGATION_LOOKBACK)
+
+    def test_every_closed_word_classifies_as_closed(self):
+        for word in mrr.CLOSED_WORDS:
+            with self.subTest(word=word):
+                verdict = mrr._classify_mention(f"r1-01 {word}")
+                self.assertEqual("closed_self_report", verdict)
+
+    def test_every_open_word_classifies_as_open(self):
+        for word in mrr.OPEN_WORDS:
+            with self.subTest(word=word):
+                self.assertEqual("open", mrr._classify_mention(f"r1-01 {word}"))
+
+    def test_every_negation_trigger_flips_a_closed_word(self):
+        for trigger in mrr.NEGATION_TRIGGERS:
+            with self.subTest(trigger=trigger):
+                self.assertEqual("open", mrr._classify_mention(f"r1-01 {trigger}resolved"))
+
+    def test_a_window_with_no_vocabulary_is_unknown(self):
+        self.assertEqual("unknown", mrr._classify_mention("r1-01 was mentioned here"))
+
+
+class WindowRadii(unittest.TestCase):
+    """The two search radii are tuned constants, so they are pinned by behaviour.
+
+    Upstream narrowed the new-candidate window from 300 to 120 because a wide one drags
+    an unrelated previous id from a distant paragraph into an independent finding. Both
+    radii survived every other test here -- changing either one silently changes what the
+    table says, which is the same class of drift as losing a vocabulary entry.
+    """
+
+    def test_verdict_word_is_found_within_the_verdict_window(self):
+        """~150 chars away: inside 200, outside a narrowed window."""
+        curr = "- r1-01 " + ("x" * 150) + " remains a problem"
+        self.assertEqual("open", mrr._classify_mention(mrr._window_around(curr, "r1-01")))
+
+    def test_verdict_word_beyond_the_verdict_window_is_not_seen(self):
+        """~250 chars away: outside 200, inside a widened window."""
+        curr = "- r1-01 " + ("x" * 250) + " remains a problem"
+        self.assertEqual("unknown", mrr._classify_mention(mrr._window_around(curr, "r1-01")))
+
+    def test_previous_id_just_outside_the_new_candidate_window_stays_new(self):
+        """~200 chars away: outside 120, inside the 300 upstream rejected."""
+        curr = "- r1-01 remains open " + ("x" * 200) + " and separately r2-07 something else"
+        _, new_ids = mrr._new_ids_in_current(curr, 2, ["r1-01"])
+        self.assertIn("r2-07", new_ids)
+
+    def test_previous_id_inside_the_new_candidate_window_is_adjacent(self):
+        curr = "- r2-07 supersedes r1-01 directly"
+        _, new_ids = mrr._new_ids_in_current(curr, 2, ["r1-01"])
+        self.assertNotIn("r2-07", new_ids)
+
+    def test_previous_id_well_inside_the_window_is_still_adjacent(self):
+        """~90 chars away: inside 120, outside a narrowed window. Pins the radius from
+        below, so shrinking it is caught as well as widening it."""
+        curr = "- r1-01 was raised earlier " + ("x" * 90) + " and r2-07 follows from it"
+        _, new_ids = mrr._new_ids_in_current(curr, 2, ["r1-01"])
+        self.assertNotIn("r2-07", new_ids)
+
+
+class VocabularyCurrency(unittest.TestCase):
+    """Are the pinned word lists still upstream's? Skips without a checkout, like the
+    fixture-currency test above -- the goldens themselves never skip."""
+
+    UPSTREAM = Path(
+        os.environ.get("DOCUAUTHRING_ROOT", str(Path.home() / "GitHub" / "docauth"))
+    ) / "skills" / "review-gate" / "scripts" / "match_review_rounds.py"
+
+    def test_word_lists_still_match_upstream(self):
+        if not self.UPSTREAM.is_file():
+            self.skipTest(f"upstream checkout not found at {self.UPSTREAM}")
+        probe = (
+            "import importlib.util, json, sys\n"
+            "spec = importlib.util.spec_from_file_location('up', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "print(json.dumps({'closed': list(m.CLOSED_WORDS), 'open': list(m.OPEN_WORDS),\n"
+            "                  'negation': list(m.NEGATION_TRIGGERS),\n"
+            "                  'lookback': m.NEGATION_LOOKBACK}))\n"
+        )
+        out = subprocess.run([sys.executable, "-c", probe, str(self.UPSTREAM)],
+                             capture_output=True, text=True)
+        self.assertEqual(0, out.returncode, out.stderr)
+        up = json.loads(out.stdout)
+        self.assertEqual(list(mrr.CLOSED_WORDS), up["closed"])
+        self.assertEqual(list(mrr.OPEN_WORDS), up["open"])
+        self.assertEqual(list(mrr.NEGATION_TRIGGERS), up["negation"])
+        self.assertEqual(mrr.NEGATION_LOOKBACK, up["lookback"])
 
 
 class FixtureCurrency(unittest.TestCase):
