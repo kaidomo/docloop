@@ -36,6 +36,19 @@ overwrite an existing brief — rounds accumulate.
 self-contained and reproducible — the reviewer sees only what you stage, so a silent gap can make
 the review incomplete, unsupported, or wrong. This is an input-hygiene check on what you stage, a
 completeness guard, not a review rubric or lens. Check:
+- **you ran it yourself, inside the packet, before handing it over**: staging a dependency is not
+  the check — *executing* is. Put an entry point in the packet (`RUNME.sh` or equivalent) that
+  reproduces every number the brief asserts, run it from the packet, and keep its log and each
+  command's exit code. **The entry point has to fail when a check fails** — that is the whole check,
+  and it is easy to get wrong: `set -e` does not cover a pipeline, and `python … | tail -1` reports
+  `tail`'s success while swallowing the failure (`false | tail -1` exits 0). Use `set -uo pipefail`,
+  preserve each command's own exit code, and exit non-zero if any of them did. An entry point that
+  cannot go red proves nothing. Whatever you cannot run, name in the brief — *what* and *why* — and
+  **strike those numbers from what the review is asked to verify**; a reviewer who cannot execute
+  falls back to reading, says so in its own output, and the author moves on regardless.
+  **The reviewer's sandbox counts as "cannot run"**: a restricted sandbox blocks temp dirs, worktrees
+  and writes outside the packet, so either grant the access or move what needs writing into the packet.
+  A packet flattened out of its repository shape breaks tests that resolve paths from the repo root.
 - **claim → source inventory**: every key claim the review must judge has its source-of-truth
   excerpt actually staged, not merely referenced by path.
 - **oral-decision provenance**: decisions made in conversation are captured with their source, not
@@ -46,11 +59,22 @@ completeness guard, not a review rubric or lens. Check:
   assumptions so the reviewer can reproduce it.
 
 If an essential check fails, stop with `blocked_missing_input` (§6) or narrow the review scope —
-do not hand off a packet known to be missing evidence the review depends on. Disclosure-and-proceed
+do not hand off a packet known to be missing evidence the review depends on. A packet you could not
+run is such a packet: fix it, or state in the brief what stays unverified. Disclosure-and-proceed
 (noting the gap in the brief) is only for explicitly nonessential gaps. This guard covers packet
 *completeness* only — it does not catch a citation that misquotes its source (that is the
 source-collation axis above) or a discarded option still lingering in a change log (an
 authoring-side propagation issue, upstream of review).
+
+**Declare the round's kind before you choose it.** Three kinds: `first audit`, `confirmation`,
+`structural verdict`. The brief declares one in its first section, and two rules bite here, at
+packet-building time, not later. **A first audit is scoped to the whole surface** — "whole surface"
+is not "everything": the brief still states what it is trying to judge and which context it stages
+for that, because excess context degrades detection. A confirmation round's default scope is
+narrower: the changed area plus the surfaces that change had to reach. And **a confirmation round's
+write-up of what it reflected is a claim under test, never a "do not relitigate" item** — a round
+that treats its own reflection as settled does not check it. Scope is not a convergence handle:
+switching it changes the count, not the convergence.
 
 ### 2) Invoke — run the reviewer command (you or the launcher run it)
 From the review folder:
@@ -78,6 +102,9 @@ PEER_REVIEW_PROMPT
 - **Read-only:** pass `--sandbox read-only` explicitly and say "don't modify files".
 - If you can't/won't call the model, a human can run it and paste the result into
   `REVIEW_r<N>.md` — the loop continues unchanged (file handoff).
+
+**When the reviewer's output lands, the next step is triage — before touching source.** Not after
+reading it, not after starting the obvious fix: the triage draft and the human gate (§4) come first.
 
 ### 3) Triage — classify each finding on four axes
 Read `REVIEW_r<N>.md` (single pass) or all `REVIEW_r<N>_*.md` (multi-lens) and,
@@ -169,6 +196,22 @@ Inherit the reviewer's `nature`; adjust only a clear misclassification. `validit
 `lifecycle` and the disposition are always triage's own judgement — never inherited.
 Cross-lens agreement can raise confidence, but a single-lens finding is never
 automatically downgraded for standing alone.
+
+**If rounds keep breaking the same contract in new places, change the question, not the scope.**
+Two guards keep that from becoming a slogan.
+
+- **It is a conditional trigger, not a count.** The same root reproducing *in a new place after the
+  fix* for two consecutive rounds is only half of it. It does not fire unless the brief has also
+  **recorded the competing explanations it rules out**: scope held constant across the compared
+  rounds, an origin classification per finding (inside the previous fix vs. an existing site, and
+  whether the root is the same class), and the exclusion that differing roots mean sample
+  non-saturation rather than a structural cause. Without that record it is an ordinary round.
+- **The prescription splits by what the tool does.** Rewriting the structure applies when the output
+  is a **fail-closed verdict**, its residual failures are **unsafe** (false OK, false span,
+  declaration bypass), and the artifact has a grammar that is defined or definable — there a
+  regression fixture catches the grammar violation itself rather than the individual case. When the
+  tool is declared human-assistive or its residual failures fail safe, the prescription is instead
+  **disclose the limit and stop widening**. Either way, one more local patch is not on the menu.
 
 ### 4) ⛔ Human approval gate (the core of "semi-automatic")
 Present the classification and ask the human what to apply. Apply only the approved

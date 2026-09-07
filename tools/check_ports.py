@@ -9,6 +9,13 @@ $DOCUAUTHRING_ROOT, default ~/docuauthring) and fails when:
   at seed time is intentional — downstream drift is reported for re-port review)
 - a lib/ file has no PORTS.md row at all (coverage)
 
+semantic-port rows are prose re-writes, so their downstream file can never be blob-compared.
+What is recorded instead is the upstream blob the row was last reviewed against; when that
+source moves, this gate emits a WARNING, not a failure. Whether the change has to reach the
+downstream prose is a human call — the machine only guarantees you are told the source moved.
+A semantic row whose source is a skill rather than a single file records `-` and is
+undetectable by design (each such row says so in its notes).
+
 Self-test: `python3 tools/check_ports.py --selftest` proves the failure modes.
 """
 import os
@@ -46,10 +53,22 @@ def blob_of(path):
 
 
 def compare(rows, upstream_blob_fn, downstream_blob_fn, tracked_files):
-    """비교 코어(주입식 — selftest가 실제 로직을 실행할 수 있게 분리)."""
-    errors, covered = [], set()
+    """비교 코어(주입식 — selftest가 실제 로직을 실행할 수 있게 분리).
+
+    반환: (errors, warnings). semantic-port 드리프트는 경고이지 실패가 아니다 —
+    downstream 산문에 반영해야 하는지는 사람이 판단한다."""
+    errors, warnings, covered = [], [], set()
     for downstream, cls, src, blob, down_blob in rows:
         covered.add(downstream)
+        if cls == "semantic-port" and blob != "-":
+            up = upstream_blob_fn(src)
+            if up is None:
+                errors.append(f"missing upstream source: {src}")
+            elif up != blob:
+                warnings.append(f"semantic-port source moved: {downstream} ← {src} "
+                                f"({blob[:9]}→{up[:9]}) — review whether the prose must follow, "
+                                f"then update the row (reflected or deliberately not)")
+            continue
         if cls != "blob":
             continue
         if down_blob in ("-", "(auto)") or len(down_blob) != 40:   # blob 행은 다운스트림 해시 필수
@@ -67,7 +86,7 @@ def compare(rows, upstream_blob_fn, downstream_blob_fn, tracked_files):
     for f in tracked_files:                       # 커버리지: lib/ + prompts/ 전 파일
         if f not in covered:
             errors.append(f"coverage: {f} has no PORTS.md row")
-    return errors
+    return errors, warnings
 
 
 def main(argv=None):
@@ -99,22 +118,26 @@ def main(argv=None):
 
     tracked = [f"lib/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "lib")))]
     tracked += [f"prompts/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "prompts")))]
-    errors = compare(rows, up_blob, blob_of, tracked)
+    errors, warnings = compare(rows, up_blob, blob_of, tracked)
+    for w in warnings:
+        print(f"WARN {w}")
     for e in errors:
         print(f"FAIL {e}")
-    print(f"=== {len(errors)} failures ===")
+    suffix = f", {len(warnings)} warnings" if warnings else ""
+    print(f"=== {len(errors)} failures{suffix} ===")
     return 1 if errors else 0
 
 
 def selftest():
-    """실제 비교 로직에 주입 픽스처로 5개 실패 모드를 각각 발화시켜 증명(r1-03)."""
+    """실제 비교 로직에 주입 픽스처로 각 실패·경고 모드를 발화시켜 증명(r1-03)."""
     H = lambda c: c * 40
     up = {"src/a": H("a"), "src/guards": H("b")}
     down = {"lib/x.py": H("c")}
     ok_rows = [("lib/x.py", "blob", "src/a", H("a"), H("c")),
                ("lib/x.py", "blob", "src/guards", H("b"), H("c"))]
-    base = compare(ok_rows, up.get, down.get, ["lib/x.py"])
+    base, base_warn = compare(ok_rows, up.get, down.get, ["lib/x.py"])
     assert base == [], f"기준 픽스처가 실패함: {base}"
+    assert base_warn == [], f"기준 픽스처가 경고를 냄: {base_warn}"
     cases = {
         "changed-upstream": ([("lib/x.py", "blob", "src/a", H("0"), H("c"))], up.get, down.get, ["lib/x.py"]),
         "changed-downstream": ([("lib/x.py", "blob", "src/a", H("a"), H("9"))], up.get, down.get, ["lib/x.py"]),
@@ -127,9 +150,31 @@ def selftest():
                                        up.get, down.get, ["lib/x.py"]),
     }
     for name, (rows, u, d, tr) in cases.items():
-        errs = compare(rows, u, d, tr)
+        errs, _ = compare(rows, u, d, tr)
         assert errs, f"실패 모드 미발화: {name}"
         print(f"selftest: {name} → FAIL 발화 ok ({errs[0][:60]}…)")
+
+    # semantic-port 드리프트: 경고로 발화하되 게이트를 실패시키지 않는다
+    sem_moved = [("prompts/p.md", "semantic-port", "src/a", H("0"), "-")]
+    errs, warns = compare(sem_moved, up.get, down.get, [])
+    assert not errs, f"semantic 드리프트가 FAIL 로 샜다: {errs}"
+    assert any("semantic-port source moved" in w for w in warns), f"semantic 드리프트 미발화: {warns}"
+    print(f"selftest: semantic-drift → WARN 발화 ok, FAIL 0 ({warns[0][:60]}…)")
+
+    # 같은 값이면 조용하다(경고 오탐 차단)
+    errs, warns = compare([("prompts/p.md", "semantic-port", "src/a", H("a"), "-")], up.get, down.get, [])
+    assert not errs and not warns, f"동일 baseline 에서 오탐: {errs} {warns}"
+    print("selftest: semantic-unchanged → 무발화 ok")
+
+    # baseline 이 '-' 인 semantic 행(원천이 파일이 아님)은 검사 대상이 아니다
+    errs, warns = compare([("lib/b.py", "semantic-port", "some-skill", "-", "-")], up.get, down.get, [])
+    assert not errs and not warns, f"baseline 없는 semantic 행에서 발화: {errs} {warns}"
+    print("selftest: semantic-no-baseline → 무발화 ok(검출 불가 공시 행)")
+
+    # semantic 행의 upstream 경로가 사라지면 그건 경고가 아니라 실패다
+    errs, warns = compare([("prompts/p.md", "semantic-port", "src/none", H("a"), "-")], up.get, down.get, [])
+    assert any("missing upstream source" in e for e in errs), f"semantic missing-source 미발화: {errs}"
+    print("selftest: semantic-missing-source → FAIL 발화 ok")
     # r2-02: 기형 secondary 행이 파서에서 조용히 탈락하지 않고 lint로 실패
     raw = ("| lib/split.py | blob | src/a | " + H("a") + " | " + H("c") + " |\n"
            "| lib/split.py | blob | src/guards | " + H("b") + " | (AUTO) |\n")
@@ -146,7 +191,7 @@ def selftest():
     assert lint_rows(raw2) == [], "들여쓴 유효 행이 lint에서 오탐"
     rows2 = parse_rows(raw2)
     assert len(rows2) == 2, f"들여쓴 유효 행이 파싱에서 탈락: {len(rows2)}행"
-    errs2 = compare(rows2, up.get, down.get, ["lib/x.py"])
+    errs2, _ = compare(rows2, up.get, down.get, ["lib/x.py"])
     assert any("STALE-upstream" in e and "src/guards" in e for e in errs2), \
         f"들여쓴 stale secondary 미발화: {errs2}"
     print("selftest: indented-valid-stale-secondary → end-to-end STALE 발화 ok")
