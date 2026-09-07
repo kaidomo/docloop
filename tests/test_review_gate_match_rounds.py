@@ -153,36 +153,67 @@ class VerdictVocabulary(unittest.TestCase):
             mrr.render_table([], [], [], 1, 2, lang="fr")
 
 
-class UpstreamEquivalence(unittest.TestCase):
-    """The default output is upstream's, byte for byte.
+FIXTURES = ROOT / "tests" / "fixtures" / "review-gate" / "round-comparison"
 
-    This is the whole reason `ko` is the default: a docloop table and a docauth table of
-    the same two rounds must be directly comparable. Skipped, not failed, when the
-    upstream checkout is absent -- contributors without it still get a green suite.
+
+class UpstreamEquivalence(unittest.TestCase):
+    """The default output is upstream's, byte for byte -- checked everywhere.
+
+    This is why `ko` is the default: a docloop table and a docauth table of the same two
+    rounds must be directly comparable. docauth is private, so the check cannot depend on
+    having it; the frozen fixture carries it instead, and the live comparison below only
+    answers whether that fixture is still current.
+    """
+
+    def test_default_output_matches_the_frozen_upstream_output(self):
+        """Runs unconditionally -- a public contributor gets this check too."""
+        prev = (FIXTURES / "prev-round.md").read_text(encoding="utf-8")
+        curr = (FIXTURES / "curr-round.md").read_text(encoding="utf-8")
+        expected = (FIXTURES / "upstream-output.md").read_text(encoding="utf-8")
+        self.assertEqual(expected.rstrip("\n"), render(prev, curr).rstrip("\n"))
+
+    def test_english_output_differs_only_in_wording(self):
+        prev = (FIXTURES / "prev-round.md").read_text(encoding="utf-8")
+        curr = (FIXTURES / "curr-round.md").read_text(encoding="utf-8")
+        ko, en = render(prev, curr), render(prev, curr, lang="en")
+        self.assertNotEqual(ko, en)
+        self.assertEqual(ko.splitlines()[0], en.splitlines()[0], "the signature is not wording")
+        # same shape: same ids, same row count
+        self.assertEqual([l.split("|")[1] for l in ko.splitlines() if l.startswith("| `")],
+                         [l.split("|")[1] for l in en.splitlines() if l.startswith("| `")])
+
+
+class FixtureCurrency(unittest.TestCase):
+    """Is the frozen fixture still what upstream produces?
+
+    This is the one test allowed to skip. It does not check docloop against upstream --
+    the fixture test above does that unconditionally -- it checks whether the fixture has
+    gone stale, which only a machine holding the private upstream can answer.
     """
 
     UPSTREAM = Path(
         os.environ.get("DOCUAUTHRING_ROOT", str(Path.home() / "GitHub" / "docauth"))
     ) / "skills" / "review-gate" / "scripts" / "match_review_rounds.py"
 
-    def test_default_output_matches_the_upstream_generator(self):
+    def test_fixture_still_matches_the_live_upstream_generator(self):
         if not self.UPSTREAM.is_file():
-            self.skipTest(f"upstream checkout not found at {self.UPSTREAM}")
-        prev = "- r1-01 first\n- r1-02 second\n- r1-03 third\n"
-        curr = ("- r1-01 remains open\n- r1-02 resolved in the patch\n"
-                "- r1-04 was discussed\n- r2-01 brand new far away " + "filler " * 40 + "\n")
-        with tempfile.TemporaryDirectory() as tmp:
-            p, c = Path(tmp) / "p.md", Path(tmp) / "c.md"
-            p.write_text(prev, encoding="utf-8")
-            c.write_text(curr, encoding="utf-8")
-            upstream = subprocess.run(
-                [sys.executable, str(self.UPSTREAM), str(p), str(c),
-                 "--prev-round", "1", "--curr-round", "2"],
-                capture_output=True, text=True,
+            self.skipTest(
+                f"upstream checkout not found at {self.UPSTREAM} -- fixture currency "
+                "unchecked; the equivalence check itself still ran against the fixture"
             )
-            self.assertEqual(0, upstream.returncode, upstream.stderr)
-            ours = render(prev, curr)
-        self.assertEqual(upstream.stdout.rstrip("\n"), ours.rstrip("\n"))
+        upstream = subprocess.run(
+            [sys.executable, str(self.UPSTREAM),
+             str(FIXTURES / "prev-round.md"), str(FIXTURES / "curr-round.md"),
+             "--prev-round", "1", "--curr-round", "2"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, upstream.returncode, upstream.stderr)
+        expected = (FIXTURES / "upstream-output.md").read_text(encoding="utf-8")
+        self.assertEqual(
+            expected.rstrip("\n"), upstream.stdout.rstrip("\n"),
+            "the frozen fixture no longer matches upstream -- re-capture it and re-check "
+            "the port rather than editing this test",
+        )
 
 
 class TokenBoundaries(unittest.TestCase):
