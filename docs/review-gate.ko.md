@@ -253,6 +253,18 @@ docloop review-gate render-summary results/DONE.md \
 `judgment_provenance`에서 그대로 뽑은 인용 · 역참조) 세 필드로만 렌더되고, 자유서술
 필드는 없다. 인용이 receipt에 그대로 없으면 조용히 강등되는 것이 아니라 **렌더가 멈춘다**.
 
+어떤 도구도 스스로를 감사하지 않는다. `audit-summary`가 2차 방어선이고, 1차를 믿지 않는다 —
+렌더러가 쓴 manifest가 아니라 **눈에 보이는 렌더 본문**을 다시 읽어 receipt·대상 문서와 대조한다.
+
+```
+docloop review-gate audit-summary results/SUMMARY.md \
+    --source results/DONE.md --target-doc docs/target.md
+```
+
+이 구분이 이 도구의 존재 이유다. 예전 설계는 manifest만 감사해서, 사람이 실제로 읽는 본문만
+손으로 고치면 그대로 통과했다. **entailment**(태그가 그 인용에서 실제로 따라 나오는가)는 검증하지
+않으며, 실행할 때마다 그 사실을 출력한다. 그 공백은 이 도구가 아니라 사람 표본 감사로 메운다.
+
 태그는 `--tags`로 받는다(그 태그를 만드는 단계는 아직 이 저장소에 없다). 없으면 전부
 `미분류`로 렌더된다 — 분류하지 못한 에이전트가 내는 결과가 틀린 분류가 아니라
 "분류 안 됨"이 되는, 안전한 기본값이다.

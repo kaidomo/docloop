@@ -1173,6 +1173,10 @@ def usage() -> str:
       --output <summary.md> [--tags <tags.yaml>] [--force]
       (opt-in: renders a human-readable summary from a done receipt. review.md stays
        canonical -- the summary is derived and never hand-edited)
+  docloop review-gate audit-summary <summary.md> --source <done review.md>
+      --target-doc <target document>
+      (second line of defence: re-reads the rendered body itself, not the manifest
+       the renderer wrote, and checks it back against receipt and target)
       (produces the CONTRACT §13 comparison table that round_context.comparison_ref
        must point at once input_gate.prior_round.exists is true)
 
@@ -1208,6 +1212,7 @@ def main(argv: list[str] | None = None) -> int:
         "audit-anchors": TOOL_DIR / "audit_anchors.py",
         "match-rounds": TOOL_DIR / "match_review_rounds.py",
         "render-summary": TOOL_DIR / "render_human_summary.py",
+        "audit-summary": TOOL_DIR / "audit_summary_traceability.py",
     }
     if command in scripts:
         os.execv(sys.executable, [sys.executable, str(scripts[command]), *rest])
