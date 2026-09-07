@@ -240,11 +240,20 @@ fail-closed 상태가 된다. docmodel 파일은 더 이상 스스로 승인을 
 ## 다회차 리뷰
 
 같은 대상에 대한 두 번째 라운드(`prepare` 시점의 `--prior-round-output`/
-`--prior-round-no`)는 end-to-end로 구조적으로 지원되지만, 라운드 비교표를 생성하는
-도구(`match_review_rounds.py`)는 아직 docloop으로 포팅되지 않았다. receipt의
-`round_context.comparison_ref`는 `# 라운드 대조 —`로 시작하고 스스로 주장하는 해시와
-일치하는 파일을 가리켜야 한다. 지금은 그 형식 그대로의 파일을 손으로 만들거나 외부
-도구로 만들어야 한다. 첫 라운드(흔한 경우 — `prior_round.exists: false`,
+`--prior-round-no`)는 end-to-end로 지원된다. receipt의 `round_context.comparison_ref`는
+`# 라운드 대조 —`로 시작하고 스스로 주장하는 해시와 일치하는 파일을 가리켜야 하며,
+`docloop review-gate match-rounds`가 바로 그 파일을 만든다.
+
+```
+docloop review-gate match-rounds results/r1/DONE.md results/r2/DONE.md \
+    --prev-round 1 --curr-round 2 --out results/r2/ROUND_COMPARISON.md
+```
+
+이 표는 **자동 판정이 아니다**. 이전 라운드 id가 다시 등장하는지, 그 주변에 열림/닫힘
+어휘가 있는지만 본다. `unknown`은 그 어휘를 찾지 못했다는 뜻이고, `resolved`는 이번
+라운드 원문에 그 id가 없다는 사실만 의미한다(고쳐졌다는 뜻이 아니다). 부정 판정은 절
+경계를 모르는 부분 문자열 탐색이라 양쪽으로 틀릴 수 있고, 모든 판정 행에 "휴리스틱 —
+확정 아님"이 붙는다. 첫 라운드(흔한 경우 — `prior_round.exists: false`,
 `round_context.round_label: r1`)는 이 중 아무것도 필요하지 않다.
 
 ## 리뷰를 수동으로 완료하기
@@ -350,6 +359,6 @@ severity, 신뢰할 수 있는 confidence 순서, 반복 실행 횟수의 정당
 
 결정론적 ledger/receipt, 범용 convention-preflight, input-gate/front-gate trace,
 docmodel-approvals 레지스트리 계약은 지원된다. 템플릿별 docmodel 일반화(범용 스키마를
-넘어서는 템플릿 전용 구조 선언 패키지)와 §13 round-comparison 생성기
-(`match_review_rounds.py`)는 여전히 유보 상태다 — `docs/PORTS-gaps-2026-08-20.md`를
-참고. 이식 가능성, 완전성, 모델 독립성에 대한 어떤 보장도 함의되지 않는다.
+넘어서는 템플릿 전용 구조 선언 패키지)는 여전히 유보 상태다 —
+`docs/PORTS-gaps-2026-08-20.md`를 참고. §13 round-comparison 생성기는 2026-09-07에
+포팅돼 유보가 아니다. 이식 가능성, 완전성, 모델 독립성에 대한 어떤 보장도 함의되지 않는다.

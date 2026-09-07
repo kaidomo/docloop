@@ -247,12 +247,22 @@ approval; the registry is the only source of truth.
 ## Multi-round reviews
 
 A second round on the same target (`--prior-round-output`/`--prior-round-no` at
-`prepare` time) is structurally supported end-to-end, but the tool that generates the
-round-comparison table (`match_review_rounds.py`) is not yet ported to docloop. The
-receipt's `round_context.comparison_ref` must point at a file that starts with
-`# 라운드 대조 —` and hashes to what it claims; for now, that file has to be produced by
-hand or with an external tool in that exact format. First rounds (the common case —
-`prior_round.exists: false`, `round_context.round_label: r1`) need none of this.
+`prepare` time) is supported end-to-end. The receipt's `round_context.comparison_ref`
+must point at a file that starts with `# 라운드 대조 —` and hashes to what it claims,
+and `docloop review-gate match-rounds` produces exactly that file:
+
+```
+docloop review-gate match-rounds results/r1/DONE.md results/r2/DONE.md \
+    --prev-round 1 --curr-round 2 --out results/r2/ROUND_COMPARISON.md
+```
+
+The table is **not an automatic verdict**. It reports whether the previous round's ids
+reappear and whether open/closed words sit near them; `unknown` means it found no such
+words, and `resolved` means only that the id is absent from this round's text — not that
+anything was fixed. Negation detection is a substring search with no clause boundaries,
+so it can read either way; every verdict row says heuristic, not final. First rounds (the
+common case — `prior_round.exists: false`, `round_context.round_label: r1`) need none of
+this.
 
 ## Complete the review manually
 
@@ -363,6 +373,6 @@ review, disposition, and verification remain mandatory.
 The deterministic ledger/receipt, generic convention-preflight, input-gate/front-gate
 trace, and docmodel-approvals registry contracts are supported. Per-template docmodel
 generalization (a template-specific structure-declaration package, beyond the generic
-schema) and the §13 round-comparison generator (`match_review_rounds.py`) remain
-deferred — see `docs/PORTS-gaps-2026-08-20.md`. No transferability,
+schema) remains deferred — see `docs/PORTS-gaps-2026-08-20.md`. The §13 round-comparison
+generator was ported on 2026-09-07 and is no longer deferred. No transferability,
 completeness, or model-independence guarantee is implied.
