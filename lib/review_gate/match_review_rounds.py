@@ -24,14 +24,21 @@ consecutive rounds upstream, which is exactly the case CONTRACT §12.6 ⓔ answe
 "disclose the limit and stop widening" -- every verdict row already says heuristic, not
 final, so this limit explains why that wording is there rather than opening new risk.
 
-**The header line is deliberately Korean.** `# 라운드 대조 —` is not prose here: it is the
-byte signature `validate_review_result.py` matches to accept a comparison_ref, and docloop
-ported that validator as-is. Changing it would silently break every receipt this generator
-is meant to feed. The rest of the table is docloop's English.
+**The header line is deliberately Korean, and it is not a language choice.**
+`# 라운드 대조 —` is the byte signature `validate_review_result.py` matches to accept a
+comparison_ref, and docloop ported that validator as-is. Translating it would silently
+break every receipt this generator exists to feed, so it is identical under every `--lang`.
+
+**The verdict column has both of this repo's languages** (`--lang ko|en`, default `ko`),
+the way the docs are paired as `<name>.md` / `<name>.ko.md`. The default is upstream's own
+wording byte for byte, so a docloop table and a docauth table of the same rounds compare
+directly; `--lang en` is docloop's translation for readers who want it. Nothing
+machine-reads either set -- the validator matches the header and the file hash, never the
+body -- so the test suite pins both as goldens.
 
 Usage:
   match_review_rounds.py PREV_ROUND.md CURR_ROUND.md \\
-      --prev-round N-1 --curr-round N [--out TABLE.md]
+      --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md]
 
 Exit codes: 0 = table produced (regardless of how many rows carried/resolved/new).
 1 = input error.
@@ -142,11 +149,11 @@ def _classify_mention(window):
             else:
                 has_closed = True
     if has_open and not has_closed:
-        return "carried(open)"
+        return "open"
     if has_closed and not has_open:
-        return "carried(closed by self-report -- confirm the close by the id being absent next round)"
+        return "closed_self_report"
     if has_open and has_closed:
-        return "carried(open) -- open and closed words both present; a human should re-check"
+        return "mixed"
     return "unknown"
 
 
@@ -174,7 +181,7 @@ def build_table(prev_text, curr_text, prev_round, curr_round):
     rows = []
     for prev_id in prev_ids:
         if not _id_present(curr_text, prev_id):
-            rows.append((prev_id, "resolved(not mentioned -- needs human confirmation)"))
+            rows.append((prev_id, "absent"))
             continue
         window = _window_around(curr_text, prev_id)
         rows.append((prev_id, _classify_mention(window)))
@@ -182,32 +189,91 @@ def build_table(prev_text, curr_text, prev_round, curr_round):
     return rows, curr_ids, new_ids
 
 
-def render_table(rows, curr_ids, new_ids, prev_round, curr_round):
+# The verdicts and labels a human reads, in both of this repo's languages. `ko` is
+# upstream's wording byte for byte, so a docloop table and a docauth table of the same
+# rounds are directly comparable; `en` is docloop's translation. Nothing machine-reads
+# these -- validate_review_result.py matches the header signature and the file hash,
+# never the body -- so the goldens in the test suite are what keeps them from drifting.
+VERDICTS = {
+    "ko": {
+        "open": "carried(open)",
+        "closed_self_report": "carried(closed 자기언급 — 실제 종결은 신규 id 부재로 재확인)",
+        "mixed": "carried(open) — 열림·닫힘 어휘 동시 등장, 사람 재확인 권장",
+        "unknown": "불명",
+        "absent": "resolved(미언급 — 사람 확인 필요)",
+        "new_candidate": "신규 후보(근접 창 안에 이전 id 언급 없음)",
+        "adjacent": "이전 id 인접 언급 있음(사람이 재확인)",
+    },
+    "en": {
+        "open": "carried(open)",
+        "closed_self_report": "carried(closed by self-report -- confirm the close by the id "
+                              "being absent next round)",
+        "mixed": "carried(open) -- open and closed words both present; a human should re-check",
+        "unknown": "unknown",
+        "absent": "resolved(not mentioned -- needs human confirmation)",
+        "new_candidate": "new candidate (no previous-round id inside the nearby window)",
+        "adjacent": "a previous id is mentioned nearby (human re-check)",
+    },
+}
+
+LABELS = {
+    "ko": {
+        "preamble": [
+            "**자동 판정 아님 — 사람이 볼 대조표.** `불명`은 스크립트가 열림/닫힘 어휘를",
+            "찾지 못했다는 뜻이며, `resolved`는 이전 라운드 id가 이번 라운드 원문에",
+            "없다는 사실만 의미한다(수정 확인이 아니라 미언급 확인).",
+        ],
+        "prev_heading": "## r{prev} 의 id {n}건 대조",
+        "prev_header": "| id | 판정 |",
+        "curr_heading": "## r{curr} 자체 id {total}건 중 신규 후보 {new}건",
+        "curr_header": "| id | 판정(휴리스틱 — 확정 아님) |",
+    },
+    "en": {
+        "preamble": [
+            "**Not an automatic verdict -- a table for a human to read.** `unknown` means the",
+            "script found no open/closed vocabulary near the id. `resolved` means only that the",
+            "previous round's id is absent from this round's text: not-mentioned, not fixed.",
+        ],
+        "prev_heading": "## {n} ids from r{prev}",
+        "prev_header": "| id | verdict |",
+        "curr_heading": "## {new} new candidates among r{curr}'s own {total} ids",
+        "curr_header": "| id | verdict (heuristic -- not final) |",
+    },
+}
+
+LANGUAGES = tuple(VERDICTS)
+
+
+def render_table(rows, curr_ids, new_ids, prev_round, curr_round, lang="ko"):
+    """Render the table. `lang` selects the human-readable wording only.
+
+    The header line is identical in every language on purpose: it is the byte signature
+    `validate_review_result.py` matches to accept a `round_context.comparison_ref`, not
+    prose. Translating it would break every receipt this generator exists to feed.
+    """
+    if lang not in VERDICTS:
+        raise ValueError(f"unknown lang {lang!r} (expected one of {', '.join(LANGUAGES)})")
+    verdicts, labels = VERDICTS[lang], LABELS[lang]
     lines = [
         f"# 라운드 대조 — r{prev_round} → r{curr_round}",
         "",
-        "**Not an automatic verdict -- a table for a human to read.** `unknown` means the",
-        "script found no open/closed vocabulary near the id. `resolved` means only that the",
-        "previous round's id is absent from this round's text: not-mentioned, not fixed.",
+        *labels["preamble"],
         "",
-        f"## {len(rows)} ids from r{prev_round}",
+        labels["prev_heading"].format(prev=prev_round, n=len(rows)),
         "",
-        "| id | verdict |",
+        labels["prev_header"],
         "|---|---|",
     ]
-    for prev_id, verdict in rows:
-        lines.append(f"| `{prev_id}` | {verdict} |")
+    for prev_id, verdict_key in rows:
+        lines.append(f"| `{prev_id}` | {verdicts[verdict_key]} |")
     lines.append("")
-    lines.append(f"## {len(new_ids)} new candidates among r{curr_round}'s own {len(curr_ids)} ids")
+    lines.append(labels["curr_heading"].format(
+        curr=curr_round, total=len(curr_ids), new=len(new_ids)))
     lines.append("")
-    lines.append("| id | verdict (heuristic -- not final) |")
+    lines.append(labels["curr_header"])
     lines.append("|---|---|")
     for curr_id in curr_ids:
-        mark = (
-            "new candidate (no previous-round id inside the nearby window)"
-            if curr_id in new_ids
-            else "a previous id is mentioned nearby (human re-check)"
-        )
+        mark = verdicts["new_candidate"] if curr_id in new_ids else verdicts["adjacent"]
         lines.append(f"| `{curr_id}` | {mark} |")
     lines.append("")
     return "\n".join(lines)
@@ -221,6 +287,11 @@ def main(argv=None):
     parser.add_argument("--prev-round", required=True, type=int)
     parser.add_argument("--curr-round", required=True, type=int)
     parser.add_argument("--out", default=None, help="output path (stdout when omitted)")
+    parser.add_argument(
+        "--lang", choices=sorted(LANGUAGES), default="ko",
+        help="wording of the verdict column (default: ko, upstream's own wording -- "
+             "the header signature is identical either way)",
+    )
     parser.add_argument(
         "--allow-non-adjacent",
         action="store_true",
@@ -254,7 +325,7 @@ def main(argv=None):
         return 1
 
     rows, curr_ids, new_ids = build_table(prev_text, curr_text, args.prev_round, args.curr_round)
-    table = render_table(rows, curr_ids, new_ids, args.prev_round, args.curr_round)
+    table = render_table(rows, curr_ids, new_ids, args.prev_round, args.curr_round, args.lang)
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

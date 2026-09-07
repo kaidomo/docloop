@@ -1168,7 +1168,7 @@ def usage() -> str:
   docloop review-gate scan-terms <terms.yaml> <target>
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
   docloop review-gate match-rounds <prev-round-output> <curr-round-output>
-      --prev-round N-1 --curr-round N [--out TABLE.md]
+      --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md]
       (produces the CONTRACT §13 comparison table that round_context.comparison_ref
        must point at once input_gate.prior_round.exists is true)
 

@@ -256,6 +256,11 @@ docloop review-gate match-rounds results/r1/DONE.md results/r2/DONE.md \
     --prev-round 1 --curr-round 2 --out results/r2/ROUND_COMPARISON.md
 ```
 
+`--lang ko|en` picks the wording of the verdict column, the way the docs here are paired
+as `<name>.md` / `<name>.ko.md`. The default `ko` is upstream's own wording byte for byte,
+so a docloop table and a docauth table of the same rounds compare directly. The header
+line never changes: it is the signature the validator matches, not prose.
+
 The table is **not an automatic verdict**. It reports whether the previous round's ids
 reappear and whether open/closed words sit near them; `unknown` means it found no such
 words, and `resolved` means only that the id is absent from this round's text — not that

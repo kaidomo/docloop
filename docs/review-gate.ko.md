@@ -249,6 +249,11 @@ docloop review-gate match-rounds results/r1/DONE.md results/r2/DONE.md \
     --prev-round 1 --curr-round 2 --out results/r2/ROUND_COMPARISON.md
 ```
 
+`--lang ko|en`으로 판정 열의 어휘를 고른다 — 이 저장소 문서가 `<name>.md` / `<name>.ko.md`
+짝으로 있는 것과 같은 모양이다. 기본값 `ko`는 upstream 어휘 그대로라, 같은 두 라운드에 대한
+docloop 표와 docauth 표가 바로 비교된다. 헤더 줄은 어느 쪽이든 바뀌지 않는다 — 산문이 아니라
+검증기가 맞추는 서명이다.
+
 이 표는 **자동 판정이 아니다**. 이전 라운드 id가 다시 등장하는지, 그 주변에 열림/닫힘
 어휘가 있는지만 본다. `unknown`은 그 어휘를 찾지 못했다는 뜻이고, `resolved`는 이번
 라운드 원문에 그 id가 없다는 사실만 의미한다(고쳐졌다는 뜻이 아니다). 부정 판정은 절
