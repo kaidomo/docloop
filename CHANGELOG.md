@@ -4,6 +4,76 @@ All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
 `vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
+## [0.15.0] — 2026-09-07
+### Added
+- **Round comparison table generator / §13 라운드 대조표 생성기.** The receipt validator has
+  required `round_context.comparison_ref` since 0.13 whenever a prior round exists, and
+  nothing here could produce that file — a second round meant hand-authoring a table to
+  match a byte signature. `docloop review-gate match-rounds` now produces it. The table is
+  **not an automatic verdict**: it reports whether previous-round ids reappear and whether
+  open/closed vocabulary sits near them, `unknown` means no such vocabulary was found, and
+  `resolved` means only that the id is absent from this round's text. `--lang ko|en`
+  selects the wording of the verdict column (default `ko`, matching the upstream table byte
+  for byte so the two compare directly); the header is a byte signature the validator
+  matches and never follows the language choice.
+- **Human-readable summary / 사람이 읽는 요약.** `docloop review-gate render-summary` derives
+  a readable summary from a done receipt. `review.md` stays the only record; the summary is
+  derived, never hand-edited, and re-rendered instead. It is refused unless `--target-doc`
+  binds to the receipt by hash, because an unbound target document is what lets an invented
+  quotation pass. A verified finding renders as a controlled tag, a verbatim quotation from
+  the receipt's own `judgment_provenance`, and a back-reference — there is no free-prose
+  field, a quotation that is not verbatim stops the render, and a low-confidence match is
+  forced back to `미분류`.
+- **Independent summary auditor / 독립 감사기.** `docloop review-gate audit-summary` is the
+  second line of defence and does not trust the first: it re-reads the **rendered body**,
+  not the manifest the renderer wrote, and checks it back against receipt and target. That
+  distinction is the point — an earlier design audited the trailer alone, so editing the
+  text a human reads passed inspection.
+- **`lib/review_gate/anchor_semantics.py`** — the stable line anchor (`A<12 hex>` over
+  whitespace-normalized content) as one shared definition, so the summary axis and the
+  quote tooling cannot read the same anchor differently.
+
+### Changed
+- **The port gate now detects semantic-port drift.** `semantic-port` rows are prose
+  rewrites, so their downstream file can never be blob-compared — and until now nothing
+  else was compared either, so an upstream contract could be rewritten with no signal at
+  all. Two sources had in fact moved since the last sync. Each row now records the upstream
+  object it was last reviewed against, keyed by (downstream, source) rather than by row, and
+  the gate emits **WARN**, never FAIL: whether prose must follow is a human call, and the
+  row is updated either way, reflected or deliberately not.
+- **Coverage went recursive.** `tools/check_ports.py` walked only the top level of `lib/`
+  and `prompts/` and never looked at `templates/`, so a row could be deleted or malformed
+  without notice. It now walks all three recursively and lints `templates/` rows too. That
+  surfaced eight files shipping untracked, each of which got a real provenance row rather
+  than a blanket label.
+- **`prompts/review.md`** carries the current review-loop rules: a packet entry point must
+  be executable and able to go red (a reviewer's restricted sandbox counts as "cannot run",
+  and unreproducible numbers are struck from what the review is asked to verify); the round
+  kind is declared before it is chosen, and a confirmation round's account of what it
+  reflected is a claim under test; triage comes before touching source; a recurring root
+  changes the question, not the scope.
+- **Provenance rows re-pointed** after upstream renamed its skill ids. Five upstream blobs
+  moved, four by identifier strings alone that this repo's adaptations never carried, and
+  one carries an upstream-only execution contract recorded as a reviewed intentional
+  divergence rather than a hash refresh.
+
+### Known limitations
+- The summary auditor is stated to check three things it does not, all of them upstream
+  behaviour and none of them patched downstream — a local fix would fork the port rather
+  than improve it. `match_strength` has no source binding (the auditor never receives the
+  tags file and the manifest does not carry the value); ordering inside a severity or tag
+  group is not compared with the receipt's order; paths are compared by basename, so a
+  different directory with the same filename is not contradicted (content hashes bind
+  either way, so this cannot smuggle different content). Only the fourth limit —
+  **entailment**, whether a tag follows from the quotation it cites — is announced at
+  runtime. All four are documented in `docs/review-gate.md` and pinned by tests, so an
+  upstream change surfaces here.
+- The round comparison table's negation detection is a substring search that does not know
+  clause boundaries, so it can read either way. Every verdict row says heuristic, not final.
+- The tagging step that produces `--tags` is not in this repo. Without it every finding
+  renders as `미분류`, which is the safe default.
+- Four `STALE-upstream` rows remain, tracked at #57 and #58.
+
 ## [0.14.2] — 2026-08-20
 ### Fixed
 - **`front_gate_ref` is now pinned to a fixed filename / 고정 파일명 강제.** 0.14.1
