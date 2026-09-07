@@ -237,6 +237,26 @@ docmodel이 바뀌면 그 항목은 오래된 것이 되고, authority 참조는
 fail-closed 상태가 된다. docmodel 파일은 더 이상 스스로 승인을 주장할 수 없다 —
 레지스트리만이 유일한 진실 소스다.
 
+## 사람이 읽는 요약 (opt-in)
+
+정본은 `review.md`다. 검증이 아니라 **읽어야** 할 때, `render-summary`가 done receipt에서
+요약을 파생한다.
+
+```
+docloop review-gate render-summary results/DONE.md \
+    --target-doc docs/target.md --output results/SUMMARY.md
+```
+
+요약은 파생물이고 정본이 아니며 손으로 고치지 않는다 — 고치고 싶으면 다시 렌더한다.
+`--target-doc`이 receipt에 해시로 결속되지 않으면 거부한다. 결속 없는 대상 문서가 바로
+창작된 인용이 통과하는 경로이기 때문이다. verified finding은 (통제 태그 · receipt의
+`judgment_provenance`에서 그대로 뽑은 인용 · 역참조) 세 필드로만 렌더되고, 자유서술
+필드는 없다. 인용이 receipt에 그대로 없으면 조용히 강등되는 것이 아니라 **렌더가 멈춘다**.
+
+태그는 `--tags`로 받는다(그 태그를 만드는 단계는 아직 이 저장소에 없다). 없으면 전부
+`미분류`로 렌더된다 — 분류하지 못한 에이전트가 내는 결과가 틀린 분류가 아니라
+"분류 안 됨"이 되는, 안전한 기본값이다.
+
 ## 다회차 리뷰
 
 같은 대상에 대한 두 번째 라운드(`prepare` 시점의 `--prior-round-output`/
