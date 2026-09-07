@@ -1169,6 +1169,10 @@ def usage() -> str:
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
   docloop review-gate match-rounds <prev-round-output> <curr-round-output>
       --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md]
+  docloop review-gate render-summary <done review.md> --target-doc <target document>
+      --output <summary.md> [--tags <tags.yaml>] [--force]
+      (opt-in: renders a human-readable summary from a done receipt. review.md stays
+       canonical -- the summary is derived and never hand-edited)
       (produces the CONTRACT §13 comparison table that round_context.comparison_ref
        must point at once input_gate.prior_round.exists is true)
 
@@ -1203,6 +1207,7 @@ def main(argv: list[str] | None = None) -> int:
         "scan-terms": TOOL_DIR / "scan_terms.py",
         "audit-anchors": TOOL_DIR / "audit_anchors.py",
         "match-rounds": TOOL_DIR / "match_review_rounds.py",
+        "render-summary": TOOL_DIR / "render_human_summary.py",
     }
     if command in scripts:
         os.execv(sys.executable, [sys.executable, str(scripts[command]), *rest])

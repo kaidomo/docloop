@@ -244,6 +244,27 @@ docmodel changes after approval, that entry goes stale and the authority referen
 fails closed until it is re-approved. A docmodel file can no longer claim its own
 approval; the registry is the only source of truth.
 
+## Human-readable summary (opt-in)
+
+`review.md` is the record. When someone has to read a review rather than validate it,
+`render-summary` derives a summary from a done receipt:
+
+```
+docloop review-gate render-summary results/DONE.md \
+    --target-doc docs/target.md --output results/SUMMARY.md
+```
+
+The summary is derived, never authoritative, and never hand-edited -- re-render instead.
+It is refused unless `--target-doc` binds to the receipt by hash, because an unbound
+target document is what lets an invented quotation pass. A verified finding renders as a
+controlled tag, a verbatim quotation from the receipt's own `judgment_provenance`, and a
+back-reference; there is no free-prose field, and a quotation that is not verbatim in the
+receipt stops the render rather than degrading quietly.
+
+Tags come from `--tags` (produced by a separate tagging step that is not part of this
+repo yet). Without it everything renders as `미분류`, which is the safe default: an agent
+that cannot classify produces "unclassified", never a wrong classification.
+
 ## Multi-round reviews
 
 A second round on the same target (`--prior-round-output`/`--prior-round-no` at

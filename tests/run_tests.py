@@ -2843,7 +2843,8 @@ for suite_name, suite_file in (
         ("review-gate intermediate contract suite", "test_review_gate_intermediate_contract.py"),
         ("review-gate v2 receipt suite", "test_review_gate_v2.py"),
         ("review-gate v0.13 runner integration suite", "test_review_gate_runner_v013.py"),
-        ("review-gate round comparison suite", "test_review_gate_match_rounds.py")):
+        ("review-gate round comparison suite", "test_review_gate_match_rounds.py"),
+        ("review-gate human summary suite", "test_review_gate_human_summary.py")):
     suite = subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), suite_file)],
         capture_output=True, text=True,
