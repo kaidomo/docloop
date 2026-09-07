@@ -271,9 +271,22 @@ docloop review-gate audit-summary results/SUMMARY.md \
 ```
 
 That distinction is why it exists: an earlier design audited the trailer alone, so editing
-the text a human actually reads passed inspection. It does not check **entailment** --
-whether a tag really follows from the quotation it cites -- and it says so on every run.
-That gap is covered by human sampling, not by this tool.
+the text a human actually reads passed inspection.
+
+What it does not establish, all of it upstream behaviour and none of it fixed downstream
+(a local fix would fork the port rather than improve it):
+
+- **entailment** -- whether a tag really follows from the quotation it cites. The tool
+  prints this limit on every run; it is covered by human sampling, not by machine.
+- **`match_strength`** has no source binding: the auditor never receives the tags file and
+  the manifest does not carry the value.
+- **ordering within a severity or tag group** is not compared against the receipt's order.
+- **paths are compared by basename**, so a different directory with the same filename is
+  not contradicted. Content hashes are bound either way, so this cannot smuggle different
+  content -- the path is display information, not a guarantee.
+
+Only the first of those is announced at runtime. The other three are pinned by tests here,
+so if upstream changes any of them this port notices.
 
 Tags come from `--tags` (produced by a separate tagging step that is not part of this
 repo yet). Without it everything renders as `미분류`, which is the safe default: an agent

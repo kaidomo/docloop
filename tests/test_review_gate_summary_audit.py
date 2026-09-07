@@ -9,10 +9,26 @@ Fidelity to upstream is a check: the frozen fixture is what upstream's auditor p
 and it never skips, because docauth is private and a check that only runs where upstream
 exists is absent exactly where nobody notices.
 
-What this suite does NOT check (disclosed rather than chased):
-- entailment -- whether a tag follows from the quotation it cites. Upstream states this as
-  outside machine verification and covers it by human sampling
-- the tagging step and the policy-table harness, which are separate slices
+Known gaps in the auditor itself, all present upstream and therefore not fixed here (a
+downstream fix would fork the port rather than improve it). Reproduced against upstream
+at e59c32f, each pinned below so the port cannot drift away from the upstream behaviour
+without a test saying so:
+
+- **entailment** -- whether a tag follows from the quotation it cites. Upstream states
+  this as outside machine verification, covers it by human sampling, and the tool prints
+  the limit on every run.
+- **`match_strength` has no source binding.** The policy table declares it an EXACT match
+  against the tags file, but the auditor never receives that file and the manifest does
+  not carry the value, so a `match_strength` added to the body alone is not contradicted.
+- **Ordering inside a severity/tag group is not compared** with the receipt's order, and
+  drift rows are compared by membership and multiplicity rather than sequence.
+- **Paths are compared by basename only.** The policy table calls this EXACT while the
+  implementation comment calls it a weak check; the runtime NOTE discloses only
+  entailment. Content hashes are bound, so a wrong path cannot smuggle wrong content --
+  but the path itself is display information, not a guarantee.
+
+What this suite does not attempt: the tagging step and the policy-table harness, which
+are separate slices.
 """
 
 from __future__ import annotations
@@ -55,12 +71,18 @@ def run_audit(summary: str = REL_SUMMARY) -> tuple[int, str]:
     return rc, out.getvalue()
 
 
-def tampered(tmp: str, old: str, new: str) -> str:
-    """A copy of the good summary with one substitution -- the attack this tool answers."""
+def tampered(tmp: str, old: str, new: str, count: int = 1) -> str:
+    """A copy of the good summary with a substitution -- the edit this tool answers.
+
+    `count` matters: replacing one occurrence of something the summary states twice (the
+    preamble and the manifest) leaves the two disagreeing, and the auditor catches that
+    disagreement rather than the edit itself. Passing -1 changes both, which is what a
+    real edit would do.
+    """
     text = (FIXTURES / "upstream-summary.md").read_text(encoding="utf-8")
     assert old in text, f"fixture no longer contains {old!r}"
     path = Path(tmp) / "tampered.md"
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    path.write_text(text.replace(old, new, count), encoding="utf-8")
     return str(path)
 
 
@@ -135,6 +157,43 @@ class Independence(unittest.TestCase):
                 rc = audit.main([REL_SUMMARY, "--source", REL_RECEIPT,
                                  "--target-doc", str(decoy)])
         self.assertNotEqual(0, rc, f"a decoy target document passed:\n{out.getvalue()}")
+
+
+class KnownGapsPinned(unittest.TestCase):
+    """The gaps above are pinned as behaviour, so a silent change is caught either way.
+
+    These assert what the tool does *not* catch. That reads strange until you consider the
+    alternative: an undocumented gap that quietly closes or widens with the next re-port,
+    with nothing to say which. If one of these starts failing, upstream changed and this
+    port needs re-checking -- that is the signal, not a defect in the test.
+    """
+
+    def test_a_match_strength_in_the_body_alone_is_not_contradicted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _ = run_audit(tampered(tmp, "- **F-01**", "- **F-01** · 매칭 강"))
+        self.assertEqual(0, rc, "upstream tolerates this; a downstream fix would fork the port")
+
+    def test_a_fabricated_directory_with_the_same_basename_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _ = run_audit(tampered(
+                tmp, "tests/fixtures/review-gate/human-summary/receipt.md",
+                "/fabricated/location/receipt.md", count=-1))
+        self.assertEqual(0, rc, "paths are compared by basename upstream; content hashes still bind")
+
+    def test_changing_only_one_of_the_two_stated_paths_is_caught(self):
+        """The counterpart: preamble and manifest must agree, and that much is checked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _ = run_audit(tampered(
+                tmp, "tests/fixtures/review-gate/human-summary/receipt.md",
+                "/fabricated/location/receipt.md", count=1))
+        self.assertNotEqual(0, rc)
+
+    def test_the_runtime_note_discloses_entailment_only(self):
+        """Pins the disclosure gap itself: the other three limits are not printed."""
+        _, out = run_audit()
+        self.assertIn("entailment", out)
+        self.assertNotIn("match_strength", out)
+        self.assertNotIn("basename", out)
 
 
 class UpstreamEquivalence(unittest.TestCase):
