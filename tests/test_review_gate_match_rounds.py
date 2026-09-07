@@ -4,11 +4,35 @@
 The point of this suite is the binding at the top: the file this generator writes is
 the file `validate_review_result.py` will later refuse or accept, so the signature is
 tested against the validator's own constant rather than a copy of the string.
+
+What this suite does NOT check
+------------------------------
+Four review rounds each found the same shape of gap -- a check that passed without
+checking -- so the remaining surfaces are listed here rather than chased one at a time.
+CONTRACT §12.6 ⓔ is the reason: when residual failures fail safe and the tool is
+declared human-assistive, the prescription is to disclose the limit and stop widening.
+Every verdict this tool renders already says heuristic, not final.
+
+- Id recognition inside non-standard strings: a leading character is not a boundary
+  (`xr1-01` counts as a mention). Pinned as upstream parity, not fixed -- see
+  `UpstreamParityQuirks`.
+- Repeated ids: only the first occurrence is judged. Same -- pinned, not fixed.
+- Exact radius boundaries. The radii are pinned from both sides at ~90/150/200/250
+  characters, not at exactly 120 and 200.
+- Empty documents, documents with no ids, duplicate ids and their ordering.
+- CLI failure contracts: a bad `--lang`, an unwritable `--out`, malformed round numbers,
+  and their exit codes and stderr. Only the success paths and round adjacency are covered.
+- Upstream equivalence beyond the one frozen fixture: the fixture pins one input pair
+  that exercises all five verdicts, not the logic on arbitrary inputs.
+
+Anything here that turns out to matter belongs upstream first (this is a port), and the
+two parity quirks are the standing example of why.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -23,6 +47,7 @@ LIB = ROOT / "lib" / "review_gate"
 sys.path.insert(0, str(LIB))
 
 import match_review_rounds as mrr  # noqa: E402
+import validate_review_result as vrr  # noqa: E402
 from validate_review_result import COMPARISON_TABLE_SIGNATURE  # noqa: E402
 
 
@@ -292,6 +317,104 @@ class VocabularyCurrency(unittest.TestCase):
         self.assertEqual(list(mrr.OPEN_WORDS), up["open"])
         self.assertEqual(list(mrr.NEGATION_TRIGGERS), up["negation"])
         self.assertEqual(mrr.NEGATION_LOOKBACK, up["lookback"])
+
+
+class ValidatorIntegration(unittest.TestCase):
+    """Generate a table, bind it into a receipt, and run the real validator over it.
+
+    Every other test here checks the header against a constant. That proves the two
+    strings agree; it does not prove the file this tool writes survives the path a
+    receipt actually takes -- packet-relative resolution, the sha256 binding, the
+    signature check. This is the purpose the port exists for, so it is exercised end
+    to end rather than approximated.
+    """
+
+    def _packet(self, tmp):
+        prev, curr = Path(tmp) / "r1.md", Path(tmp) / "r2.md"
+        prev.write_text("- r1-01 first\n- r1-02 second\n", encoding="utf-8")
+        curr.write_text("- r1-01 remains open\n- r1-02 resolved\n", encoding="utf-8")
+        out = Path(tmp) / "ROUND_COMPARISON.md"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = mrr.main([str(prev), str(curr), "--prev-round", "1", "--curr-round", "2",
+                           "--out", str(out)])
+        self.assertEqual(0, rc)
+        return out
+
+    def _receipt(self, out: Path, digest: str | None = None):
+        payload = out.read_bytes()
+        return {
+            "round_context": {
+                "round_label": "r2",
+                "comparison_ref": {
+                    "path": out.name,
+                    "sha256": digest or hashlib.sha256(payload).hexdigest(),
+                },
+            },
+            "input_gate": {"prior_round": {"exists": True, "output_ref": {"round_no": 1}}},
+        }
+
+    def test_generated_table_passes_the_real_validator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._packet(tmp)
+            errors: list[str] = []
+            vrr._validate_round_context(self._receipt(out), Path(tmp), errors)
+        self.assertEqual([], errors)
+
+    def test_generated_table_in_english_passes_too(self):
+        """The language must not change whether a receipt validates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            prev, curr = Path(tmp) / "r1.md", Path(tmp) / "r2.md"
+            prev.write_text("- r1-01 first\n", encoding="utf-8")
+            curr.write_text("- r1-01 remains open\n", encoding="utf-8")
+            out = Path(tmp) / "T.md"
+            with contextlib.redirect_stdout(io.StringIO()):
+                mrr.main([str(prev), str(curr), "--prev-round", "1", "--curr-round", "2",
+                          "--lang", "en", "--out", str(out)])
+            errors: list[str] = []
+            vrr._validate_round_context(self._receipt(out), Path(tmp), errors)
+        self.assertEqual([], errors)
+
+    def test_edited_table_fails_the_hash_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._packet(tmp)
+            receipt = self._receipt(out)
+            out.write_text(out.read_text(encoding="utf-8") + "\n- tampered\n", encoding="utf-8")
+            errors: list[str] = []
+            vrr._validate_round_context(receipt, Path(tmp), errors)
+        self.assertTrue(any("sha256 does not match" in e for e in errors), errors)
+
+    def test_a_file_without_the_signature_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "NOT_A_TABLE.md"
+            out.write_text("# some other document\n", encoding="utf-8")
+            errors: list[str] = []
+            vrr._validate_round_context(self._receipt(out), Path(tmp), errors)
+        self.assertTrue(any("match_review_rounds.py output" in e for e in errors), errors)
+
+
+class UpstreamParityQuirks(unittest.TestCase):
+    """Two upstream behaviours that look like bugs and are pinned as parity, not fixed.
+
+    Both were raised in review. Both reproduce identically in upstream at e59c32f, so
+    changing either here would make this a fork rather than a port -- upstream is the
+    canon, and a downstream 'improvement' would silently diverge the two tables. They
+    are pinned so that if a future edit changes them, it is a decision and not an
+    accident; the place to actually change them is upstream.
+    """
+
+    def test_an_id_with_a_leading_character_still_counts_as_a_mention(self):
+        """`xr1-01` reads as a re-mention of `r1-01`: no left boundary is checked.
+
+        Upstream's reasoning was that an id starts with `r` and so cannot land mid-number;
+        a letter immediately before it was not considered. Verified against upstream.
+        """
+        table = render("- r1-01 x", "xr1-01 remains open")
+        self.assertIn("carried(open)", verdict_for(table, "r1-01"))
+
+    def test_only_the_first_occurrence_of_an_id_is_judged(self):
+        """A verdict word near a later occurrence is not seen. Verified against upstream."""
+        curr = "- r1-01 discussed " + ("x" * 300) + "\n- r1-01 remains open"
+        self.assertEqual("불명", verdict_for(render("- r1-01 x", curr), "r1-01"))
 
 
 class FixtureCurrency(unittest.TestCase):
