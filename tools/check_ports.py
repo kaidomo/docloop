@@ -47,13 +47,31 @@ def parse_rows(text):
 
 
 def lint_rows(text):
-    """기형 행 fail-closed(impl r2-02): lib/·prompts/로 시작하는 표 행은 반드시
-    유효한 ROW여야 한다 — 조용한 탈락(secondary 소스 무오류 소실) 차단."""
+    """기형 행 fail-closed(impl r2-02): lib/·prompts/·templates/로 시작하는 표 행은
+    반드시 유효한 ROW여야 한다 — 조용한 탈락(secondary 소스 무오류 소실) 차단."""
     errors = []
     for line in text.splitlines():
-        if re.match(r"^\s*\|\s*(lib/|prompts/)", line) and not ROW.match(line.lstrip()):
+        if re.match(r"^\s*\|\s*(lib/|prompts/|templates/)", line) and not ROW.match(line.lstrip()):
             errors.append(f"malformed PORTS row (fail-closed): {line.strip()[:80]}")
     return errors
+
+
+def tracked_files(root):
+    """커버리지 대상 = lib/·prompts/·templates/ 아래 전 파일(재귀).
+
+    비재귀 listdir 이던 때는 하위 디렉터리(lib/review_gate/·templates/review-gate/)에
+    파일을 넣으면 행 없이도 통과했고, templates/ 는 아예 보지 않았다 — 행을 지우거나
+    기형으로 만드는 우회가 거기서 열려 있었다."""
+    out = []
+    for top in ("lib", "prompts", "templates"):
+        base = os.path.join(root, top)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for f in filenames:
+                if f.endswith((".pyc", ".pyo")) or f == ".DS_Store":
+                    continue
+                out.append(os.path.relpath(os.path.join(dirpath, f), root))
+    return out
 
 
 def blob_of(path):
@@ -134,8 +152,7 @@ def main(argv=None):
                            capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else None
 
-    tracked = [f"lib/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "lib")))]
-    tracked += [f"prompts/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "prompts")))]
+    tracked = sorted(tracked_files(ROOT))
     errors, warnings = compare(rows, up_blob, blob_of, tracked)
     for w in warnings:
         print(f"WARN {w}")
@@ -197,6 +214,24 @@ def selftest():
     errs, warns = compare([("prompts/p.md", "semantic-port", "src/none", H("a"), "-")], up.get, down.get, [])
     assert any("missing upstream source" in e for e in errs), f"semantic missing-source 미발화: {errs}"
     print("selftest: semantic-missing-source → FAIL 발화 ok")
+    # 커버리지: 중첩 경로와 templates/ 도 행이 없으면 실패한다(행 삭제 우회 차단)
+    for name, path in (("nested-lib-file", "lib/review_gate/new.py"),
+                       ("nested-template-file", "templates/review-gate/new.yaml")):
+        errs, _ = compare(ok_rows, up.get, down.get, ["lib/x.py", path])
+        assert any("coverage" in e and path in e for e in errs), f"{name} 커버리지 미발화: {errs}"
+        print(f"selftest: {name} → coverage FAIL 발화 ok")
+
+    # 실제 트리에서 커버리지 대상이 재귀로 모이는지(비재귀 회귀 차단)
+    real = tracked_files(ROOT)
+    assert any(f.startswith("lib/review_gate/") for f in real), "중첩 lib 파일이 수집되지 않음"
+    assert any(f.startswith("templates/") for f in real), "templates 가 수집되지 않음"
+    print(f"selftest: tracked_files → 재귀 수집 ok ({len(real)}개)")
+
+    # templates/ 행이 기형이면 lint 로 잡힌다
+    bad_tpl = "| templates/review-gate/default-axes.md | semantic-port | src/a | (AUTO) | - |\n"
+    assert lint_rows(bad_tpl), "기형 templates 행이 lint 를 통과함(fail-open)"
+    print("selftest: malformed-template-row → lint FAIL 발화 ok")
+
     # r2-02: 기형 secondary 행이 파서에서 조용히 탈락하지 않고 lint로 실패
     raw = ("| lib/split.py | blob | src/a | " + H("a") + " | " + H("c") + " |\n"
            "| lib/split.py | blob | src/guards | " + H("b") + " | (AUTO) |\n")
