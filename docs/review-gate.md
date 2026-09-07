@@ -261,6 +261,33 @@ controlled tag, a verbatim quotation from the receipt's own `judgment_provenance
 back-reference; there is no free-prose field, and a quotation that is not verbatim in the
 receipt stops the render rather than degrading quietly.
 
+Nothing here audits itself. `audit-summary` is the second line of defence and does not
+trust the first: it re-reads the **rendered body** -- not the manifest the renderer wrote --
+and checks it back against the receipt and the target document.
+
+```
+docloop review-gate audit-summary results/SUMMARY.md \
+    --source results/DONE.md --target-doc docs/target.md
+```
+
+That distinction is why it exists: an earlier design audited the trailer alone, so editing
+the text a human actually reads passed inspection.
+
+What it does not establish, all of it upstream behaviour and none of it fixed downstream
+(a local fix would fork the port rather than improve it):
+
+- **entailment** -- whether a tag really follows from the quotation it cites. The tool
+  prints this limit on every run; it is covered by human sampling, not by machine.
+- **`match_strength`** has no source binding: the auditor never receives the tags file and
+  the manifest does not carry the value.
+- **ordering within a severity or tag group** is not compared against the receipt's order.
+- **paths are compared by basename**, so a different directory with the same filename is
+  not contradicted. Content hashes are bound either way, so this cannot smuggle different
+  content -- the path is display information, not a guarantee.
+
+Only the first of those is announced at runtime. The other three are pinned by tests here,
+so if upstream changes any of them this port notices.
+
 Tags come from `--tags` (produced by a separate tagging step that is not part of this
 repo yet). Without it everything renders as `미분류`, which is the safe default: an agent
 that cannot classify produces "unclassified", never a wrong classification.
