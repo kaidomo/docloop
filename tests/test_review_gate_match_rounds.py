@@ -84,9 +84,46 @@ class Classification(unittest.TestCase):
         table = render("- r1-01 x", "- r1-01 was never resolved")
         self.assertIn("carried(open)", verdict_for(table, "r1-01"))
 
+    def test_open_and_closed_words_together_stay_open_and_ask_for_a_human(self):
+        """The mixed branch is the one that must not quietly resolve either way."""
+        table = render("- r1-01 x", "- r1-01 remains open but was resolved elsewhere")
+        verdict = verdict_for(table, "r1-01")
+        self.assertIn("carried(open)", verdict)
+        self.assertIn("human should re-check", verdict)
+
     def test_negation_with_words_between_trigger_and_stem(self):
         table = render("- r1-01 x", "- r1-01 cannot be resolved yet")
         self.assertIn("carried(open)", verdict_for(table, "r1-01"))
+
+
+class VerdictVocabulary(unittest.TestCase):
+    """The verdict strings are what a human reads, so they are pinned.
+
+    Nothing machine-checks them -- `validate_review_result.py` matches the header
+    signature and the file hash, never the table body -- which is exactly why they can
+    drift without anyone noticing. These goldens make a change to them deliberate.
+    """
+
+    GOLDEN = {
+        "open_only": "carried(open)",
+        "closed_only": "carried(closed by self-report -- confirm the close by the id being "
+                       "absent next round)",
+        "mixed": "carried(open) -- open and closed words both present; a human should re-check",
+        "silent": "unknown",
+        "absent": "resolved(not mentioned -- needs human confirmation)",
+    }
+
+    def test_each_verdict_renders_its_exact_string(self):
+        cases = {
+            "open_only": "- r1-01 remains a problem",
+            "closed_only": "- r1-01 resolved in this patch",
+            "mixed": "- r1-01 remains open but was resolved elsewhere",
+            "silent": "- r1-01 was discussed at length",
+            "absent": "- nothing about the first one",
+        }
+        for key, curr in cases.items():
+            with self.subTest(verdict=key):
+                self.assertEqual(self.GOLDEN[key], verdict_for(render("- r1-01 x", curr), "r1-01"))
 
 
 class TokenBoundaries(unittest.TestCase):
