@@ -38,8 +38,8 @@ the review incomplete, unsupported, or wrong. This is an input-hygiene check on 
 completeness guard, not a review rubric or lens. Check:
 - **you ran it yourself, inside the packet, before handing it over**: staging a dependency is not
   the check — *executing* is. Put an entry point in the packet (`RUNME.sh` or equivalent) that
-  reproduces every number the brief asserts, run it from the packet, and keep its log and each
-  command's exit code. **The entry point has to fail when a check fails** — that is the whole check,
+  reproduces every number the brief asserts, run it from the packet, and keep its log, **the
+  exact commands**, and each command's exit code. **The entry point has to fail when a check fails** — that is the whole check,
   and it is easy to get wrong: `set -e` does not cover a pipeline, and `python … | tail -1` reports
   `tail`'s success while swallowing the failure (`false | tail -1` exits 0). Use `set -uo pipefail`,
   preserve each command's own exit code, and exit non-zero if any of them did. An entry point that
@@ -48,7 +48,8 @@ completeness guard, not a review rubric or lens. Check:
   falls back to reading, says so in its own output, and the author moves on regardless.
   **The reviewer's sandbox counts as "cannot run"**: a restricted sandbox blocks temp dirs, worktrees
   and writes outside the packet, so either grant the access or move what needs writing into the packet.
-  A packet flattened out of its repository shape breaks tests that resolve paths from the repo root.
+  Layout counts too: a packet flattened out of its repository shape breaks tests that resolve paths
+  from the repository root, and one stripped of `.git` breaks anything that locates the repository.
 - **claim → source inventory**: every key claim the review must judge has its source-of-truth
   excerpt actually staged, not merely referenced by path.
 - **oral-decision provenance**: decisions made in conversation are captured with their source, not

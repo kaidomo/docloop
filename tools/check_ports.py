@@ -13,8 +13,17 @@ semantic-port rows are prose re-writes, so their downstream file can never be bl
 What is recorded instead is the upstream blob the row was last reviewed against; when that
 source moves, this gate emits a WARNING, not a failure. Whether the change has to reach the
 downstream prose is a human call — the machine only guarantees you are told the source moved.
-A semantic row whose source is a skill rather than a single file records `-` and is
-undetectable by design (each such row says so in its notes).
+A row whose source resolves to a file may not record `-`: that would switch detection off
+silently, so it fails. `-` is reserved for a source that is not a file at all (a skill name,
+say), and such a row must disclose in its notes that drift is undetectable there. As of
+2026-09-07 no row needs it -- the two that once did were re-pointed at the real files.
+
+What this gate does not guarantee: bumping a baseline is an unverifiable human act. Anyone
+can silence a warning by writing the current upstream SHA into the row without reading a
+line of the source. No machine check can close that -- the gate is human-assistive here, so
+the limit is disclosed rather than papered over with ceremony that would be just as easy to
+fake. What the gate does guarantee is that the drift is never invisible: the warning appears
+until someone acts on it, and the row's notes are where that act is recorded for review.
 
 Self-test: `python3 tools/check_ports.py --selftest` proves the failure modes.
 """
@@ -60,8 +69,16 @@ def compare(rows, upstream_blob_fn, downstream_blob_fn, tracked_files):
     errors, warnings, covered = [], [], set()
     for downstream, cls, src, blob, down_blob in rows:
         covered.add(downstream)
-        if cls == "semantic-port" and blob != "-":
+        if cls == "semantic-port":
             up = upstream_blob_fn(src)
+            if blob == "-":
+                # 원천이 실제 파일로 풀리는데 baseline 이 없으면 검출이 조용히 꺼진다(fail-open).
+                # 파일이 아닌 원천(스킬 이름 등)만 baseline 없이 허용한다.
+                if up is not None:
+                    errors.append(f"semantic-port row without a baseline: {downstream} ← {src} "
+                                  f"(the source resolves to a file, so drift is detectable and a "
+                                  f"baseline is required; only non-file sources may record `-`)")
+                continue
             if up is None:
                 errors.append(f"missing upstream source: {src}")
             elif up != blob:
@@ -170,6 +187,12 @@ def selftest():
     errs, warns = compare([("lib/b.py", "semantic-port", "some-skill", "-", "-")], up.get, down.get, [])
     assert not errs and not warns, f"baseline 없는 semantic 행에서 발화: {errs} {warns}"
     print("selftest: semantic-no-baseline → 무발화 ok(검출 불가 공시 행)")
+
+    # 원천이 파일로 풀리는데 baseline 이 '-' 이면 검출이 꺼지므로 실패다(fail-open 차단)
+    errs, warns = compare([("prompts/p.md", "semantic-port", "src/a", "-", "-")], up.get, down.get, [])
+    assert any("semantic-port row without a baseline" in e for e in errs), \
+        f"파일 원천 + baseline 없음이 조용히 통과함(fail-open): {errs} {warns}"
+    print("selftest: semantic-file-source-without-baseline → FAIL 발화 ok")
 
     # semantic 행의 upstream 경로가 사라지면 그건 경고가 아니라 실패다
     errs, warns = compare([("prompts/p.md", "semantic-port", "src/none", H("a"), "-")], up.get, down.get, [])
