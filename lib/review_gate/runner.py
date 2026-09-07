@@ -1167,6 +1167,10 @@ def usage() -> str:
   docloop review-gate materialize-docmodel <intake.yaml> --profile <profile.yaml> [--output FILE]
   docloop review-gate scan-terms <terms.yaml> <target>
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
+  docloop review-gate match-rounds <prev-round-output> <curr-round-output>
+      --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md]
+      (produces the CONTRACT §13 comparison table that round_context.comparison_ref
+       must point at once input_gate.prior_round.exists is true)
 
 prepare creates a packet only. It does not run models or declare pass/done. It also
 records the CONTRACT §1 input gate (editing_state/target_maturity/source_copy/prior_round)
@@ -1198,6 +1202,7 @@ def main(argv: list[str] | None = None) -> int:
         "materialize-docmodel": TOOL_DIR / "materialize_docmodel.py",
         "scan-terms": TOOL_DIR / "scan_terms.py",
         "audit-anchors": TOOL_DIR / "audit_anchors.py",
+        "match-rounds": TOOL_DIR / "match_review_rounds.py",
     }
     if command in scripts:
         os.execv(sys.executable, [sys.executable, str(scripts[command]), *rest])

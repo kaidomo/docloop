@@ -44,7 +44,7 @@ fully re-ported and tested (152 review-gate tests + full 362-test canonical suit
 
 ## Still open
 
-### `match_review_rounds.py` (§13 round-comparison generator) — not ported
+### `match_review_rounds.py` (§13 round-comparison generator) — CLOSED 2026-09-07
 
 `_validate_round_context` (ported, active) correctly REQUIRES `round_context.comparison_ref`
 to point at a file starting with `# 라운드 대조 —` whenever `input_gate.prior_round.exists`
@@ -56,6 +56,13 @@ r1`) end-to-end — this is what `runner.py prepare` and every current test exer
 `--prior-round-no` flow through correctly) but the comparison-table file itself has to be
 hand-authored to match the expected signature/format until `match_review_rounds.py` is
 ported. Not silently dropped: the validator enforces the requirement either way.
+
+**Resolved 2026-09-07** (upstream main `e59c32f`): the generator is ported as
+`lib/review_gate/match_review_rounds.py` and reachable as `docloop review-gate match-rounds`.
+A second round no longer requires hand-authoring the table. The generator's header is bound to
+`validate_review_result.COMPARISON_TABLE_SIGNATURE` by a regression test, so the two cannot
+drift apart silently. Upstream's disclosed heuristic limits (substring negation detection that
+knows no clause boundaries) came across unchanged -- every verdict row says heuristic, not final.
 
 ### `#162` (기획서-v1 template docmodel) — deliberately not ported
 
