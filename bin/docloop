@@ -68,6 +68,8 @@ docloop — a verification-first document kernel (wraps codex / claude -p)
   docloop version                    print the product release version
   docloop init <folder> [inputs...]   scaffold a work folder (inputs/ work/ outputs/ reports/)
   docloop plan   [request...]         vague ask -> structured manifest (intake interview)
+  docloop human-edit [request...]     edit an explicit local document copy, preserving requirements
+  docloop light-review ...            staged lightweight review; external model calls required
   docloop draft  [notes...]           write sections from evidence (reconcile)
   docloop contribute <run-id> <perspectives...>   generate separate, labeled perspective contributions (opt-in)
   docloop curate <source-run-id> <curation-id> <response.yaml>   deterministically curate an attested response
@@ -82,6 +84,7 @@ docloop — a verification-first document kernel (wraps codex / claude -p)
   docloop gate   [manifest.yaml] [--strict-cross-audit]   release gate (gap_audit.py --strict)
 
 Change-plan mode (as-is/to-be) — plan fixes to an existing system, for a human to apply:
+  docloop atb-import-review <packet> <receipt> --manifest FILE (--live FILE|--no-live)
   docloop atb-capture [sources...]    read the system -> capture observations (issues)
   docloop atb-chunk                   group observations into chunks + sequence (handoff)
   docloop atb-author                  write the as-is/to-be body per chunk into the SSOT
@@ -101,6 +104,8 @@ case "$cmd" in
     [ "$#" -ge 1 ] || die "usage: docloop init <folder> [inputs...]"
     python3 "$LIB/init_workspace.py" "$@" ;;
   plan)   run_model "$(stage_prompt plan.md "$@")"  rw ;;
+  human-edit) run_model "$(stage_prompt human-edit.md "$@")" rw ;;
+  light-review) exec python3 "$LIB/light_review.py" "$@" ;;
   draft)  run_model "$(stage_prompt draft.md "$@")" rw ;;
   contribute|curate|draft-curated)
     exec python3 "$LIB/contribution_flow.py" "$cmd" "$@" ;;
@@ -128,6 +133,7 @@ case "$cmd" in
     if [ "${1:-}" ] && [ "${1#-}" = "$1" ]; then mf="$1"; shift; fi
     python3 "$LIB/gap_audit.py" "$mf" --strict "$@" ;;
   # ── change-plan mode (as-is/to-be) ──
+  atb-import-review) exec python3 "$LIB/import_review_receipt.py" "$@" ;;
   atb-capture) run_model "$(stage_prompt atb-capture.md "$@")" rw ;;
   atb-chunk)   run_model "$(stage_prompt atb-chunk.md "$@")"   rw ;;
   atb-author)  run_model "$(stage_prompt atb-author.md "$@")"  rw ;;

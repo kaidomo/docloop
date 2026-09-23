@@ -11,7 +11,7 @@ families exists — matched by name prefix (PROMPT_*_r<N>* · *REVIEW_r<N>* · T
 deliberately over-conservative: sidecar artifacts (e.g. REVIEW_r<N>_*.md.log/.err from a
 failed lens run) also hold the round — skipping a number is safe, clobbering evidence is not.
 next_round() is the single implementation of this rule."""
-import sys, os, re, shutil, argparse, stat, subprocess
+import sys, os, re, shutil, argparse, stat, subprocess, shlex
 
 DEFAULT_DEST = os.path.expanduser(os.environ.get("DOCLOOP_REVIEW_DIR", "~/.docloop/reviews"))
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -178,9 +178,10 @@ def main():
     n = next_round(review_real)
     print("\nNext (see prompts/review.md for the full loop):")
     print("  1) Fill REVIEW_BRIEF.md (what it is, decisions already made, what to look at).")
-    print(f"  2) cd '{review_dir}' && codex exec --skip-git-repo-check --sandbox read-only - > REVIEW_r{n}.md")
+    print(f"  2) cd {shlex.quote(review_dir)} && codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=\"high\" - > REVIEW_r{n}.md")
     print("     ('-' is stdin — feed the review prompt from prompts/review.md step 2. No empty input.)")
     print(f"     (r{n} = next unused round — any PROMPT_*_r<K>*, *REVIEW_r<K>*, or TRIAGE_r<K>* artifact occupies round K.)")
+    print("     Record requested high and observed_reasoning_effort from actual invocation evidence; use unknown if unavailable. Existing briefs stay unchanged.")
     print("  3) Triage findings -> ⛔ human approval -> apply+test -> record 'Applied (vN)' -> repeat if needed.")
 
 

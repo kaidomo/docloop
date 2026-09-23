@@ -33,26 +33,45 @@ from typing import Any
 
 import yaml
 
-# Anchor semantics come from one place (docauth#207 option 2: the `A<hash>` stable id
-# plus legacy `L<n>`). Re-implementing them here is how a human summary and a quote
-# checker end up pointing at different source lines while both look correct.
-#
-# The loader is the strict one that rejects duplicate keys. `yaml.safe_load` silently
-# lets the last duplicate win, so appending `findings: []` to a receipt was enough to
-# render it as zero findings. The oracle already reads receipts with this loader; a
-# different loader here means two tools reading one file differently.
-#
-# `status` and `classification_verification.result` are enums the schema already owns.
-# Re-listing them here would let the renderer show a human a value the schema forbids
-# the moment the two copies drift (docauth#324 r4-06), so they are imported, not restated.
-try:  # Package import in tests; sibling import when executed as a script.
-    from .anchor_semantics import anchor_hash, norm as _norm_line
-    from .validate_convention_profile import DuplicateKeyError, StrictLoader
-    from .validate_review_intermediate import QUESTION_STATUSES, VERIFY_RESULTS
-except ImportError:  # pragma: no cover - exercised by CLI dispatch
-    from anchor_semantics import anchor_hash, norm as _norm_line
-    from validate_convention_profile import DuplicateKeyError, StrictLoader
-    from validate_review_intermediate import QUESTION_STATUSES, VERIFY_RESULTS
+# 앵커 해석은 audit_quotes.py가 이미 정의한 의미론을 그대로 쓴다(#207 2안: `A<hash>`
+# 안정 식별자 + 레거시 `L<n>`). 여기서 다시 구현하면 두 도구가 같은 앵커를 다르게
+# 읽는 순간 사람 요약과 인용 검산기가 서로 다른 원문을 가리키게 된다.
+try:
+    from .anchor_semantics import (anchor_hash, norm as _norm_line)
+except ImportError:
+    from anchor_semantics import (anchor_hash, norm as _norm_line)
+
+# 중복 키를 거부하는 정본 로더를 그대로 쓴다(재설계 S2). `yaml.safe_load`는 중복 키를
+# **마지막 값이 이기게** 조용히 허용해서, 뒤에 `findings: []`를 덧붙이는 것만으로
+# 산출물이 0건이 되는 우회가 있었다(설계 §2 ⑥). 오라클(review_front_gate 계열)이 이미
+# 이 로더를 쓰므로, 여기서 다른 로더를 쓰면 같은 파일을 두 도구가 다르게 읽는다.
+try:
+    from .validate_convention_profile import (DuplicateKeyError, StrictLoader)
+except ImportError:
+    from validate_convention_profile import (DuplicateKeyError, StrictLoader)
+
+# question의 `status`·`classification_verification.result`는 **스키마가 이미 정의한
+# enum**이다(설계 8절 공유 조건 (a) — done 오라클이 덮는 정의는 데이터로 공유한다).
+# 여기서 다시 나열하면 두 벌이 갈리는 순간 렌더러가 스키마 밖 값을 사람에게 그대로
+# 보여준다(docauth#324 r4-06) — 그래서 재선언하지 않고 정본을 그대로 가져온다.
+try:
+    from .validate_review_intermediate import (ABSENCE_CLASSES, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, QUESTION_STATUSES, VERIFY_RESULTS)
+except ImportError:
+    from validate_review_intermediate import (ABSENCE_CLASSES, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, QUESTION_STATUSES, VERIFY_RESULTS)
+
+#: docauth#369 — 판단 불가 절의 result 분포는 attempts에서 **재계산**해 이 고정 순서로 렌더한다.
+JU_RESULT_ORDER = ("pass", "kill", "unresolved")
+#: docauth#351 — 부재 계열 question의 처분 질문지 고정 문구. 저자가 ○/×만 찍는다; ×만 남은 것이 결함이다.
+ABSENCE_PROMPT = "정해짐 · 개념 없음 · 상위 문서 · 인접 근거 · 실제 결함 — 어딘가에 정해져 있나요? (×만 남은 것이 결함)"
+#: docauth#352 — 결정 레지스트리 3상태의 사람용 표식(머리 한 줄). receipt `decision_registry_state`에서
+#: 파생되며 감사기가 receipt와 대조한다. `present_unchecked`는 "있는데 안 봄" — 무보증과 같은 의무
+#: (억제 없음·공시·사람 수용)에 이 표식이 더해진다. 0.32 이전 receipt(필드 없음)는 `미기재`로 렌더한다.
+REGISTRY_STATE_TOKENS = {
+    "checked": "대조함",
+    "absent_unassured": "없음 — 무보증(억제 없음)",
+    "present_unchecked": "있으나 미대조 — 무보증(억제 없음)",
+    None: "미기재(0.32 이전 receipt)",
+}
 
 
 CONTROLLED_VOCAB: tuple[str, ...] = (
@@ -270,6 +289,31 @@ POLICY: tuple[FieldPolicy, ...] = (
        "receipt", Strength.EXACT,
        "스키마 enum(VERIFY_RESULTS). status와 같은 이유로 감싸지 않고 문법으로 제한한다",
        covers=("question.classification_verification",), parsed_keys=("result",)),
+    _P("questions[].absence_class", "question_absence_class", True, False, "receipt", Strength.EXACT,
+       "docauth#351 부재 형태(닫힌 enum ABSENCE_CLASSES) — 있을 때만 ' · 부재 <class>' 접미와 처분 질문지 2행이 붙는다"
+       "(부재↔존재도 대조)",
+       covers=("question.absence_class",), parsed_keys=("absence_class",)),
+    _P("questions[].adjacent_anchors", "question_adjacent", True, False, "receipt", Strength.EXACT,
+       "인접 근거 앵커(폐쇄 문법 토큰, 순서·개수 일치) — 부재 질문에서만 렌더, 없으면 '없음'",
+       covers=("question.adjacent_anchors",), parsed_keys=("adjacent",)),
+    # ── docauth#369 판단 불가 절 ──
+    _P("findings[]/questions[].judgment_unavailable.reason", "ju_reason", True, True, "receipt",
+       Strength.EXACT,
+       "닫힌 enum(JUDGMENT_UNAVAILABLE_REASONS). 식별자라 감싸지 않고 렌더러·감사 문법이 "
+       "enum 밖 값을 거부한다(question_status와 같은 패턴)",
+       covers=("finding.judgment_unavailable", "question.judgment_unavailable"),
+       parsed_keys=("reason",)),
+    _P("findings[]/questions[].judgment_unavailable.needed_input", "ju_needed_input", True, False,
+       "receipt", Strength.DISPLAY_ENCODED_EXACT,
+       "사람이 채워야 할 입력 — 원문 파생 산문이라 코드 스팬으로 감싼다",
+       parsed_keys=("needed_input",)),
+    _P("findings[]/questions[].judgment_unavailable.attempts (수)", "ju_attempt_count", True, False,
+       "receipt / attempts에서 재계산", Strength.EXACT, "§6 인원(정확수)을 사람이 확인하는 자리",
+       parsed_keys=("attempt_count",)),
+    _P("findings[]/questions[].judgment_unavailable.attempts (result 분포)", "ju_result_dist", True, False,
+       "attempts에서 재계산", Strength.EXACT,
+       "고정 순서 pass → kill → unresolved, 0건은 생략. 선언을 믿지 않고 attempts에서 센다",
+       parsed_keys=("result_dist",)),
     _P("파생 건수(총 N건·(N건))", "counts", True, False, "행에서 재계산", Strength.EXACT,
        "렌더러가 만드는 파생값 — 선언을 믿지 않고 센다. 선언 건수는 파서가 즉시 "
        "ParseError로 거부하므로 leaf가 없다(STRUCTURAL_PROJECTIONS)"),
@@ -281,6 +325,10 @@ POLICY: tuple[FieldPolicy, ...] = (
     # r4-12: 옛 `paths` 한 행은 "인자에서 검증"이라고 선언했지만 실제로 대조되는
     # 것은 target basename뿐이었고 receipt 경로는 `audit()`에 전달조차 되지 않았다.
     # 두 자리는 검사 주체가 다르므로 행도 나눈다.
+    _P("decision_registry_state", "registry_state", True, False, "receipt", Strength.EXACT,
+       "docauth#352 §1 ② 3상태의 사람용 표식(머리 한 줄, REGISTRY_STATE_TOKENS 고정 문구). 미대조 실행이 "
+       "verified 지적을 최상단에 올린 사고(#352)의 표식 — 등급을 바꾸지 않고 표식만 더한다",
+       parsed_keys=("registry_state",)),
     _P("경로(target)", "paths_target", True, False, "--target-doc 인자", Strength.EXACT,
        "basename 약한 검사 — 내용 결속은 sha256이 한다",
        parsed_keys=("target_path",)),
@@ -308,6 +356,10 @@ POLICY: tuple[FieldPolicy, ...] = (
        Strength.NOT_PROJECTED, "기계 원장 필드. 드릴다운은 record_id로",
        covers=("question.public_record_digest", "question.dependent_atom_refs",
                "question.resolution_derived_atom_refs")),
+    _P("findings[]/questions[].judgment_unavailable.basis", None, False, False, "—", Strength.NOT_PROJECTED,
+       "§4.3 회부 기록의 산문(검증자가 쓴 경로별 자료) — 싣기 시작하면 '설명' 자리가 생긴다. "
+       "attempts[].verifier_id·evidence도 같은 이유로 싣지 않는다(공시: 사람은 receipt에서 본다)",
+       covers=("finding.judgment_unavailable", "question.judgment_unavailable")),
     _P("questions[].authority·scope·source", None, False, False, "—", Strength.NOT_PROJECTED,
        "선택 필드 — 있을 때만 싣는 조건부 렌더는 산출물 문법을 갈라 감사 대조를 "
        "어렵게 만든다(_render_questions_section docstring)",
@@ -346,6 +398,7 @@ STRUCTURAL_PROJECTIONS: frozenset[str] = frozenset({
 WRAPPED_PROJECTIONS: frozenset[str] = frozenset({
     "quote", "anchor_heading", "anchor_excerpt", "judgment_provenance", "residual_claim",
     "withdrawn_scope", "drift_detail", "drift_variants", "question_convention_slot",
+    "ju_needed_input",
 })
 
 

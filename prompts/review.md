@@ -80,7 +80,7 @@ switching it changes the count, not the convergence.
 ### 2) Invoke — run the reviewer command (you or the launcher run it)
 From the review folder:
 ```
-codex exec --skip-git-repo-check --sandbox read-only - > REVIEW_r<N>.md <<'PEER_REVIEW_PROMPT'
+codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="high" - > REVIEW_r<N>.md <<'PEER_REVIEW_PROMPT'
 Read REVIEW_BRIEF.md, then review the enclosed artifact against the brief's
 "what to look at". Prefix every finding with a finding_id — format `r<N>-<nn>`
 (N = this round number, nn = a 2-digit serial within this review, e.g. r1-01).
@@ -98,8 +98,11 @@ PEER_REVIEW_PROMPT
   file and pipe `... < prompt.txt`.
 - **Swap reviewers freely:** `gemini --skip-trust -p "<same instruction>" > REVIEW_r<N>.md`,
   or `claude -p`. As long as output lands in `REVIEW_r<N>.md`, the rest is identical.
-- **Single medium pass is the default.** Bump effort or add lenses only for large/
-  complex artifacts where a single pass starts missing things — and measure first.
+- **Single high-effort pass is the default.** Set the effort explicitly; do not rely on a
+  changing CLI default. Add lenses only when scope and observed misses justify them.
+- Record requested effort and `observed_reasoning_effort` per round from actual invocation
+  evidence. If unavailable, record `unknown`; a requested value is not an observed value.
+  Keep existing brief contents and append this record when upgrading an old review folder.
 - **Read-only:** pass `--sandbox read-only` explicitly and say "don't modify files".
 - If you can't/won't call the model, a human can run it and paste the result into
   `REVIEW_r<N>.md` — the loop continues unchanged (file handoff).

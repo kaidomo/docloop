@@ -1,0 +1,19 @@
+# dispositions.yaml 스키마 정본 — 부재 계열 question의 사람 처분 기록 (docauth#351, append-only)
+# 위치: 실행 폴더(run_root) 또는 대상 문서의 작업 폴더. 검증: skills/review-gate/scripts/validate_dispositions.py
+# 성질: **append-only** — 항목을 고치지 않고 새 항목을 덧붙인다. 같은 question의 마지막 항목이 현행 처분이다.
+# 처분 5종 중 `real_defect`만 다음 라운드의 finding 후보가 된다. `decided`는 결정 레지스트리(§1 ②) 시드 후보다 —
+# 등록은 사람이 승격 도구로 한다(에이전트 자동 등록 금지, #356).
+
+schema_version: 1
+target: <문자열, 필수>                 # 대상 문서 식별(receipt `target`과 같은 값)
+snapshot_id: <문자열, 필수>            # 처분이 붙는 receipt의 snapshot_id
+dispositions:                          # 0개 이상, 각 항목:
+  - question_record_id: <문자열, 필수> # 원장 questions[].record_id — `--ledger`를 주면 실재·absence_class 보유를 대조
+    disposition: <enum, 필수>          # decided | no_concept | parent_document | adjacent_evidence | real_defect
+                                       #   decided: 이미 정해진 사항(결정 이력) · no_concept: 그런 개념이 제품에 없음 ·
+                                       #   parent_document: 상위/부모 문서에 정의됨 · adjacent_evidence: 인접 문단이 덮음 ·
+                                       #   real_defect: 저자가 당연하게 여겼던 것 — 진짜 결함(다음 라운드 finding 후보)
+    by: <문자열, 필수>                 # 처분한 사람(저자·문서 주인)
+    date: "<YYYY-MM-DD, 필수 — 반드시 따옴표>"
+    note: <문자열, 필수>               # 한 줄 근거("이미 정한 사항", "부모 account 문서 §3" 등)
+    evidence_ref: <문자열, 선택>       # decided/parent_document/adjacent_evidence의 근거 위치(결정시트·문서 경로·앵커)

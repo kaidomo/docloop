@@ -173,3 +173,9 @@ docmodel-approvals 계약은 [review-gate 가이드](docs/review-gate.md)를 참
 ## 라이선스
 
 MIT — [LICENSE](LICENSE) 참고.
+
+### 추가 문서 작업
+
+- `docloop light-review`: [경량 독립 리뷰](docs/light-review.md). 외부 모델 호출과 실제 관측 기록이 필요합니다.
+- `docloop human-edit "input.md를 model.yaml에 맞춰 output.md로 정돈"`: 요구사항을 보존하며 로컬 사본을 편집합니다.
+- `docloop atb-import-review`: [검증된 리뷰 결과 가져오기](docs/review-import.md). 판단 대기와 사람 수정을 보존합니다.

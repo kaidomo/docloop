@@ -57,8 +57,11 @@ finding 부재 = 매달린 참조 포함)도 같은 exit 1. 전부 통과하면 
 
 import argparse
 import hashlib
+import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -66,12 +69,14 @@ import yaml
 try:  # Package import in tests; sibling import when executed as a script.
     from .validate_review_intermediate import (
         load_yaml_text,
+        load_run_registry,
         resolve_packet_file,
         validate_data as validate_intermediate_data,
     )
 except ImportError:  # pragma: no cover - exercised by CLI dispatch
     from validate_review_intermediate import (
         load_yaml_text,
+        load_run_registry,
         resolve_packet_file,
         validate_data as validate_intermediate_data,
     )
@@ -108,14 +113,32 @@ def promotion_re(id_pattern: str) -> re.Pattern:
     return re.compile(rf"(?:{id_pattern})\s*(?:으로|로)\s*(?:별도\s*)?승격")
 
 
+#: Codex 피어리뷰 r2-04(#349): 판정은 A 바이트로 하고 해시·trace는 나중에 **다시 읽은**
+#: B 바이트로 인증하면, 그 사이의 교체가 그대로 통과한다 — `_resolve_ledger`에서 닫은 것과
+#: 같은 TOCTOU가 생산자 쪽에 남는 것이다. 경로당 **한 번만** 읽어 캐시하고, 파싱·앵커
+#: 계산·출력 해시·trace 생성이 전부 그 같은 payload를 쓴다.
+_BYTES_CACHE: dict[str, bytes] = {}
+
+
+def _read_bytes_once(path: Path) -> bytes:
+    key = str(path)
+    if key not in _BYTES_CACHE:
+        try:
+            _BYTES_CACHE[key] = path.read_bytes()
+        except OSError as e:
+            print(f"ERROR: 파일을 읽을 수 없음: {path} ({e})", file=sys.stderr)
+            sys.exit(2)
+    return _BYTES_CACHE[key]
+
+
 def sha256_of(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_read_bytes_once(path)).hexdigest()
 
 
 def read(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError as e:
+        return _read_bytes_once(path).decode("utf-8")
+    except UnicodeDecodeError as e:
         print(f"ERROR: 파일을 읽을 수 없음: {path} ({e})", file=sys.stderr)
         sys.exit(2)
 
@@ -219,9 +242,154 @@ def check_promotions(
     return total, ok, no_anchor, violations, multi_lines
 
 
+#: docauth#349 ④: 이 실행이 **무엇을 대상으로 돌았고 무슨 판정을 냈는지**를 남기는
+#: 구조화된 trace. `front_gate_trace.json`·`verify_gate_trace.json`과 같은 규약이다 —
+#: receipt가 고를 수 없는 고정 파일명(#296)이고, run_root 안에 산다.
+#:
+#: 왜 필요한가: receipt가 대상 경로·해시만 선언하면 "합성본에 돌리고 전달본을 선언"하는
+#: 조합이 그대로 통과한다(선언과 실행이 결속되지 않는다). 이 파일은 도구 자신이 쓰므로,
+#: 선언된 대상의 바이트와 도구가 실제로 해시한 바이트가 같아야만 done이 성립한다.
+ANCHOR_GUARD_TRACE_CANONICAL_RELPATH = "anchor_guard_trace.json"
+
+
+def _find_repo_root(path: Path):
+    for parent in path.resolve().parents:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _repo_relative(path) -> str:
+    """저장소 루트 기준 상대 경로를 정본 표기로 쓴다 (Codex 피어리뷰 r3-02).
+
+    저장소 밖이면(임시 폴더 실행 등) 절대 경로로 떨어지되, 그런 실행은 receipt 결속
+    대상이 아니므로 done 시점 대조에서 자연히 걸린다.
+    """
+    resolved = Path(path).resolve()
+    root = _find_repo_root(resolved)
+    if root is None:
+        return str(resolved)
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return str(resolved)
+
+
+#: Codex 피어리뷰 r7-01: action이 **부작용까지** 즉시 실행하면 argparse의 최종 실행
+#: 의미보다 앞선다 — `--run-root A --run-root B`는 최종값이 B인데 A까지 회수했고,
+#: `--run-root A -h`는 exit 0 도움말인데 A를 회수했다. action은 **마지막으로 소비된
+#: 값을 기록만** 하고, 회수는 파싱 결과를 보고 한 번만 한다.
+_LAST_CONSUMED_RUN_ROOT: list = [None]
+
+
+class _RunRootAction(argparse.Action):
+    """`--run-root` 값을 기록하고 **빈 값을 거부**한다 (부작용은 유예).
+
+    회수 시점 규칙(r4-02 → r5-01 → r6-01 → r7-01):
+    - 파싱 성공 → **최종값 하나**만 회수한다.
+    - 파싱이 비-0으로 실패 → **마지막으로 소비된 값**을 회수한다(그 실행은 그 run root를
+      선언한 뒤 실패한 것이므로 옛 성공 trace가 남으면 안 된다).
+    - `-h`/`--help`로 **exit 0** → 비실행 명령이므로 아무것도 회수하지 않는다.
+    - `--run-root`를 소비하기도 전에 실패 → 선언에 이르지 못했으므로 회수하지 않는다.
+
+    r7-02: `--run-root=`(빈 문자열)는 argparse가 정상 소비하지만 이후 truthiness 검사들이
+    "옵션 부재"처럼 다뤄 **trace 없이 `ANCHOR-OK`가 나갔다**. 여기서 사용 오류로 닫는다.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if not str(values).strip():
+            parser.error(
+                "--run-root 는 비어 있을 수 없다 — 빈 값은 옵션 부재처럼 다뤄져 trace 없이 "
+                "통과한다"
+            )
+        setattr(namespace, self.dest, values)
+        _LAST_CONSUMED_RUN_ROOT[0] = values
+
+
+def _retract_stale_guard_trace(run_root, parser=None) -> None:
+    """이전 실행의 가드 trace를 **판정 전에** 회수한다 (Codex 피어리뷰 r2-03 → r3-03).
+
+    실패한 재실행이 옛 `ANCHOR-OK`를 남기면 "실패한 실행과 성공 실행을 구별한다"는
+    불변식이 거기서 깨진다. 다만 회수는 **실재하는 디렉터리**에만 한다 — 오타난
+    `--run-root`가 다른 실행 폴더의 정상 trace를 훼손하는 것이 더 나쁘므로, 존재하지
+    않거나 디렉터리가 아니면 아무것도 하지 않고 인자 검증에 맡긴다.
+    """
+    if not run_root:
+        return
+    root = Path(run_root)
+    if not root.is_dir():
+        return
+    try:
+        (root / ANCHOR_GUARD_TRACE_CANONICAL_RELPATH).unlink(missing_ok=True)
+    except OSError as exc:
+        # Codex 피어리뷰 r6-02: 경고로만 두면 fail-open이다 — 회수에 실패한 뒤 정규식·
+        # 원장·source 검증에서 조기 종료하면 새 trace는 안 써지고 **옛 `ANCHOR-OK`가
+        # 그대로 남는다.** "실패한 재실행은 이전 성공 trace를 먼저 회수한다"는 계약이
+        # 바로 거기서 깨진다.
+        message = (
+            f"이전 가드 trace를 회수할 수 없다: {exc}. 이 run root는 재사용할 수 없으니 "
+            "쓰기 가능한 새 run root를 쓰거나 그 파일을 직접 치워라."
+        )
+        if parser is not None:
+            parser.error(message)
+        print(f"ERROR: {message}", file=sys.stderr)
+        raise SystemExit(2)
+
+
+def _write_guard_trace(run_root, synth_path, ledger_path, sources, required, missing, result, packet_root=None) -> None:
+    """이번 호출이 **선언한 대상·원장과 낸 판정**을 run_root에 원자적으로 기록한다 (docauth#349 ④).
+
+    이것은 실행 사실의 증명이 아니다 — run 폴더에 쓸 수 있는 실행자는 정합적인 trace를
+    손으로 만들 수 있다(계약 §3의 위협모델 경계). 여기서 닫히는 것은 **부주의한 재선언**이다.
+
+    `--run-root`가 없으면 아무것도 쓰지 않는다 — 옛 호출·단발 점검은 그대로 돈다
+    (소급 무효화 없음). 실패 판정(`ANCHOR-FAIL`/`PROMO-FAIL`)도 **기록한다**: 실패를
+    안 남기면 실패한 실행과 안 돌린 실행이 폴더에서 구별되지 않는다.
+    """
+    if not run_root:
+        return
+    # Codex 피어리뷰 r3-02(#349): 호출자가 준 문자열을 그대로 적으면 **상대경로 호출**이
+    # 절대경로와 비교돼 정상 실행이 거부되고, 절대경로 호출은 작성자 로컬 경로를 산출물에
+    # 박아 다른 checkout·CI에서 반드시 실패한다. 저장소 상대 경로를 정본 표기로 쓴다.
+    def display(path):
+        return Path(path).absolute().relative_to(Path(packet_root).absolute()).as_posix() if packet_root else _repo_relative(path)
+    payload = {
+        "review_anchor_guard_trace": {
+            "synth": {"path": display(synth_path), "sha256": sha256_of(synth_path)},
+            "ledger": (
+                {"path": display(ledger_path), "sha256": sha256_of(ledger_path)}
+                if ledger_path
+                else None
+            ),
+            "sources": [
+                {"kind": kind, "path": display(path), "sha256": sha256_of(path)}
+                for kind, path, _ in sources
+            ],
+            "required_anchor_count": len(required),
+            "missing_anchor_count": len(missing),
+            "result": result,
+        }
+    }
+    target = Path(run_root) / ANCHOR_GUARD_TRACE_CANONICAL_RELPATH
+    data = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp_path, target)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="합성 앵커 계수 검산기",
+        # Codex 피어리뷰 r4-02(#349): pre-scan이 argparse와 **같은 문법**을 봐야 한다.
+        # 기본 argparse는 `--run-r` 같은 유일 축약을 인정하는데 pre-scan은 그러지 않아,
+        # 축약으로 준 재실행이 옛 trace를 회수하지 못했다. 축약 자체를 끈다.
+        allow_abbrev=False,
         epilog="SYNTH는 옵션보다 **앞**에 둔다 — --lens/--l2는 nargs='*'라 뒤따르는 "
                "positional을 인자로 삼킨다.",
     )
@@ -253,7 +421,45 @@ def main() -> int:
         "--id-re", default=DEFAULT_ID_RE,
         help=f"finding_id 문법 정규식(승계 검사용, 기본 {DEFAULT_ID_RE!r})",
     )
-    args = ap.parse_args()
+    ap.add_argument(
+        "--run-root",
+        action=_RunRootAction,
+        help=(
+            "실행 폴더. 주면 이 실행의 **구조화된 가드 trace**를 "
+            f"<run-root>/{ANCHOR_GUARD_TRACE_CANONICAL_RELPATH}에 원자적으로 쓴다 "
+            "(docauth#349 ④): 무엇을 대상으로 돌렸는지(경로+바이트 해시), 어떤 원장·"
+            "SRC 입력을 봤는지, 판정이 무엇이었는지. receipt의 `anchor_guard_ref`가 그 "
+            "trace에 결속되므로, '합성본에 돌리고 전달본을 선언하는' 경로가 닫힌다."
+        ),
+    )
+    # Codex 피어리뷰 r3-04: 캐시는 **실행 단위**다 — 같은 프로세스에서 main()을 다시
+    # 부르면 수정된 파일을 옛 payload로 읽는다.
+    _BYTES_CACHE.clear()
+    # Codex 피어리뷰 r3-03: `parse_args()`가 회수보다 먼저면, 유효한 `--run-root`와
+    # 미지원 옵션을 함께 준 재실행이 argparse 오류로 죽으면서 이전 `ANCHOR-OK`를 남긴다.
+    # run-root만 먼저 뽑아 회수한다.
+    _LAST_CONSUMED_RUN_ROOT[0] = None
+    try:
+        args = ap.parse_args()
+    except SystemExit as exc:
+        # 비-0 종료(인자 오류)면 마지막으로 소비된 run root를 회수한다 — 그 실행은
+        # 그 run root를 선언한 뒤 실패한 것이므로 옛 성공 trace가 남으면 안 된다.
+        if exc.code not in (0, None):
+            _retract_stale_guard_trace(_LAST_CONSUMED_RUN_ROOT[0])
+        raise
+    _retract_stale_guard_trace(args.run_root, parser=ap)
+
+    # Codex 피어리뷰 r2-03(#349): trace를 **판정이 끝난 뒤에만** 교체하면, 같은 run_root의
+    # 이전 성공 뒤 잘못된 정규식·invalid ledger·누락 source로 재실행이 조기 종료될 때
+    # 과거 `ANCHOR-OK` trace가 그대로 남는다 — "실패한 실행과 성공 실행을 구별한다"는
+    # 불변식이 거기서 깨진다. `review_front_gate.py`가 #299 r3-01에서 세운 것과 같은
+    # unlink-before-build 순서로 바꾼다: 이 실행이 끝까지 가서 trace를 다시 발행하거나,
+    # 아무것도 trace를 자처하지 않거나 — 제3의 상태를 만들지 않는다.
+    # Codex 피어리뷰 r4-04: 존재하지 않는 run-root는 나중에 `tempfile.mkstemp(dir=...)`가
+    # `FileNotFoundError` traceback으로 죽었다 — 판정을 다 출력한 뒤에. 인자 오류로 끝낸다.
+    if args.run_root and not Path(args.run_root).is_dir():
+        print(f"ERROR: --run-root 가 존재하는 디렉터리가 아니다: {args.run_root}", file=sys.stderr)
+        return 2
 
     if args.synth is None:
         # 삼킴 설명은 실제로 삼킬 수 있었을 때만 한다(Codex r2-01) — `--scan`만 준
@@ -312,7 +518,7 @@ def main() -> int:
                 print(f"ERROR: {error}", file=sys.stderr)
             return 2
         try:
-            loaded = load_yaml_text(ledger_path.read_text(encoding="utf-8"))
+            loaded = load_yaml_text(read(ledger_path))  # r2-04: 같은 payload를 쓴다
             envelope = loaded.get("review_intermediate") if isinstance(loaded, dict) else None
         except (OSError, yaml.YAMLError) as e:
             print(f"ERROR: LEDGER를 읽을 수 없음: {e}", file=sys.stderr)
@@ -320,7 +526,8 @@ def main() -> int:
         if not isinstance(envelope, dict):
             print("ERROR: LEDGER에 review_intermediate mapping이 없음", file=sys.stderr)
             return 2
-        ledger_errors = validate_intermediate_data(envelope, packet_root=packet_root)
+        registry, registry_error = load_run_registry(packet_root)
+        ledger_errors = [registry_error] if registry_error else validate_intermediate_data(envelope, packet_root=packet_root, registry=registry)
         if ledger_errors:
             print(
                 "결과: LEDGER-FAIL — intermediate ledger 구조가 유효하지 않음:",
@@ -424,16 +631,22 @@ def main() -> int:
             f"결함별 대응을 구분하지 못한다(과대 통과 가능)."
         )
 
+    guard_result = "ANCHOR-OK"
     failed = False
     if missing:
         print("결과: ANCHOR-FAIL — 누락 앵커(합성 미완성, 인용·억제·비승격 기록 중 하나로 처리 후 재제출):")
         print("  " + ", ".join(missing))
+        guard_result = "ANCHOR-FAIL"
         failed = True
     if promo_bad:
         print("결과: PROMO-FAIL — 승격 앵커 미승계(승격된 finding이 그 결함의 근거 앵커를 가져가야 함):")
         for v in promo_bad:
             print("  " + v)
+        guard_result = "PROMO-FAIL" if guard_result == "ANCHOR-OK" else guard_result
         failed = True
+    _write_guard_trace(
+        args.run_root, synth_path, ledger_path, sources, required, missing, guard_result, args.packet_root
+    )
     if failed:
         return 1
     sink = "atom-level terminal ledger" if ledger_path else "legacy 합성 산출물"

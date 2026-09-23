@@ -180,3 +180,9 @@ choices, artifacts, failure behavior, and manual completion contract.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Additional document workflows
+
+- `docloop light-review`: [staged independent lightweight review](docs/light-review.md), with explicit external model calls and observed provenance.
+- `docloop human-edit "Edit input.md using model.yaml; write output.md"`: preserve requirements while restructuring a local copy; no publication.
+- `docloop atb-import-review`: [import validated review evidence](docs/review-import.md) into the change-plan manifest, preserving pending judgments and human edits.

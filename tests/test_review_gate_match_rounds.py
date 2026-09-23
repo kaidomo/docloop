@@ -19,7 +19,7 @@ Every verdict this tool renders already says heuristic, not final.
 - Repeated ids: only the first occurrence is judged. Same -- pinned, not fixed.
 - Exact radius boundaries. The radii are pinned from both sides at ~90/150/200/250
   characters, not at exactly 120 and 200.
-- Empty documents, documents with no ids, duplicate ids and their ordering.
+- Duplicate ids and their ordering outside the pinned parity examples.
 - CLI failure contracts: a bad `--lang`, an unwritable `--out`, malformed round numbers,
   and their exit codes and stderr. Only the success paths and round adjacency are covered.
 - Upstream equivalence beyond the one frozen fixture: the fixture pins one input pair
@@ -83,7 +83,7 @@ class SignatureBinding(unittest.TestCase):
             out = Path(tmp) / "TABLE.md"
             prev, curr = Path(tmp) / "p.md", Path(tmp) / "c.md"
             prev.write_text("- r1-01 x\n", encoding="utf-8")
-            curr.write_text("- r1-01 remains open\n", encoding="utf-8")
+            curr.write_text("- r1-01 remains open\n- r2-01 current finding\n", encoding="utf-8")
             rc = mrr.main([str(prev), str(curr), "--prev-round", "1", "--curr-round", "2",
                            "--out", str(out)])
             self.assertEqual(rc, 0)
@@ -332,7 +332,7 @@ class ValidatorIntegration(unittest.TestCase):
     def _packet(self, tmp):
         prev, curr = Path(tmp) / "r1.md", Path(tmp) / "r2.md"
         prev.write_text("- r1-01 first\n- r1-02 second\n", encoding="utf-8")
-        curr.write_text("- r1-01 remains open\n- r1-02 resolved\n", encoding="utf-8")
+        curr.write_text("- r1-01 remains open\n- r1-02 resolved\n- r2-01 current finding\n", encoding="utf-8")
         out = Path(tmp) / "ROUND_COMPARISON.md"
         with contextlib.redirect_stdout(io.StringIO()):
             rc = mrr.main([str(prev), str(curr), "--prev-round", "1", "--curr-round", "2",
@@ -365,7 +365,7 @@ class ValidatorIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             prev, curr = Path(tmp) / "r1.md", Path(tmp) / "r2.md"
             prev.write_text("- r1-01 first\n", encoding="utf-8")
-            curr.write_text("- r1-01 remains open\n", encoding="utf-8")
+            curr.write_text("- r1-01 remains open\n- r2-01 current finding\n", encoding="utf-8")
             out = Path(tmp) / "T.md"
             with contextlib.redirect_stdout(io.StringIO()):
                 mrr.main([str(prev), str(curr), "--prev-round", "1", "--curr-round", "2",
@@ -503,7 +503,7 @@ class CliSurface(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             prev, curr = Path(tmp) / "p.md", Path(tmp) / "c.md"
             prev.write_text("- r1-01 x\n", encoding="utf-8")
-            curr.write_text("- r1-01 remains open\n", encoding="utf-8")
+            curr.write_text("- r1-01 remains open\n- r2-01 current finding\n", encoding="utf-8")
             proc = subprocess.run(
                 [str(ROOT / "bin" / "docloop"), "review-gate", "match-rounds",
                  str(prev), str(curr), "--prev-round", "1", "--curr-round", "2"],
@@ -516,7 +516,7 @@ class CliSurface(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             prev, curr = Path(tmp) / "p.md", Path(tmp) / "c.md"
             prev.write_text("- r1-01 x\n", encoding="utf-8")
-            curr.write_text("- r1-01 remains open\n", encoding="utf-8")
+            curr.write_text("- r1-01 remains open\n- r2-01 current finding\n", encoding="utf-8")
             proc = subprocess.run(
                 [str(ROOT / "bin" / "docloop"), "review-gate", "match-rounds",
                  str(prev), str(curr), "--prev-round", "1", "--curr-round", "2", "--lang", "en"],
@@ -532,6 +532,71 @@ class CliSurface(unittest.TestCase):
         proc = subprocess.run([str(ROOT / "bin" / "docloop"), "review-gate", "--help"],
                               capture_output=True, text=True)
         self.assertIn("match-rounds", proc.stdout)
+
+
+class EmptySideContract(unittest.TestCase):
+    """An empty round is an explicit caller declaration, never implicit success."""
+
+    def run_cli(self, root, prev, curr, *extra):
+        (root / "prev.md").write_text(prev, encoding="utf-8")
+        (root / "curr.md").write_text(curr, encoding="utf-8")
+        return subprocess.run(
+            [str(ROOT / "bin/docloop"), "review-gate", "match-rounds",
+             str(root / "prev.md"), str(root / "curr.md"),
+             "--prev-round", "1", "--curr-round", "2", *extra],
+            capture_output=True, text=True,
+        )
+
+    def assert_notrun(self, proc):
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertTrue(proc.stdout.startswith(mrr.NOTRUN_TABLE_HEADER), proc.stdout)
+        self.assertFalse(proc.stdout.startswith(COMPARISON_TABLE_SIGNATURE))
+        self.assertIn("MATCH-NOTRUN", proc.stderr)
+
+    def test_both_empty_never_count_as_performed_even_with_a_declaration(self):
+        for extra in ((), ("--allow-empty-side", "prev"), ("--allow-empty-side", "curr")):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as tmp:
+                self.assert_notrun(self.run_cli(Path(tmp), "No findings", "No findings", *extra))
+
+    def test_one_empty_side_requires_explicit_declaration_in_both_languages(self):
+        for lang in ("ko", "en"):
+            for prev, curr in (("No ids", "r2-01 current"), ("r1-01 previous", "r1-01 carried")):
+                with self.subTest(lang=lang, prev=prev), tempfile.TemporaryDirectory() as tmp:
+                    self.assert_notrun(self.run_cli(Path(tmp), prev, curr, "--lang", lang))
+
+    def test_matching_declaration_allows_each_empty_side_in_both_languages(self):
+        for lang in ("ko", "en"):
+            for side, prev, curr in (("prev", "No ids", "r2-01 current"),
+                                     ("curr", "r1-01 previous", "r1-01 carried")):
+                with self.subTest(lang=lang, side=side), tempfile.TemporaryDirectory() as tmp:
+                    proc = self.run_cli(Path(tmp), prev, curr, "--lang", lang,
+                                        "--allow-empty-side", side)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertTrue(proc.stdout.startswith(COMPARISON_TABLE_SIGNATURE))
+                    self.assertIn("mode: allow-empty-side", proc.stdout)
+                    self.assertIn(f"empty_side: `{side}`", proc.stdout)
+
+    def test_wrong_or_unneeded_declaration_is_notrun(self):
+        for prev, curr, side in (("No ids", "r2-01 current", "curr"),
+                                 ("r1-01 previous", "No ids", "prev"),
+                                 ("r1-01 previous", "r2-01 current", "prev"),
+                                 ("r1-01 previous", "r2-01 current", "curr")):
+            with self.subTest(side=side, prev=prev, curr=curr), tempfile.TemporaryDirectory() as tmp:
+                self.assert_notrun(self.run_cli(Path(tmp), prev, curr, "--allow-empty-side", side))
+
+    def test_notrun_written_file_cannot_validate_as_a_receipt_comparison(self):
+        for lang in ("ko", "en"):
+            with self.subTest(lang=lang), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                out = root / "NOTRUN.md"
+                proc = self.run_cli(root, "No ids", "No ids", "--lang", lang, "--out", str(out))
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertTrue(out.read_text().startswith(mrr.NOTRUN_TABLE_HEADER))
+                receipt = ValidatorIntegration()._receipt(out)
+                errors = []
+                vrr._validate_round_context(receipt, root, errors)
+                self.assertTrue(any("match_review_rounds.py output" in e for e in errors), errors)
+                self.assertFalse(any("sha256 does not match" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

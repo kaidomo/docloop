@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -20,7 +21,10 @@ try:  # Package import in tests; sibling import when executed as a script.
     from .validate_decisions import validate as validate_decisions
     from .validate_docmodel_approvals import validate as validate_docmodel_approvals
 except ImportError:  # pragma: no cover - exercised by CLI dispatch
-    from validate_decisions import validate as validate_decisions
+    try:
+        from .validate_decisions import validate as validate_decisions
+    except ImportError:
+        from validate_decisions import validate as validate_decisions
     from validate_docmodel_approvals import validate as validate_docmodel_approvals
 
 
@@ -58,10 +62,53 @@ def load_yaml_text(text: str | bytes) -> Any:
         text = text.decode("utf-8")
     return yaml.load(text, Loader=StrictLoader)
 OUTCOMES = {"finding", "question", "drift", "suppressed", "nonissue"}
-FINDING_STATUSES = {"discovered", "accepted", "rejected", "planned", "applied", "verified"}
+#: docauth#369 — 판단 불가는 열린 작업이 아니라 **종결된 리뷰 결론**이다. finding·question
+#: 상태 enum의 terminal 멤버로 두되(§8 r1-08 "enum 밖 종결 없음" — 밖이 아니라 확장),
+#: done(exit 0)의 조건은 종전 그대로 `rejected|verified` / `resolved`다. 이 상태는 §6
+#: 산출물이라 immutable projection에 들어가지 않는다(`status`와 같은 축).
+JUDGMENT_UNAVAILABLE = "judgment_unavailable"
+FINDING_STATUSES = {
+    "discovered", "accepted", "rejected", "planned", "applied", "verified", JUDGMENT_UNAVAILABLE,
+}
 DONE_FINDING_STATUSES = {"rejected", "verified"}
-QUESTION_STATUSES = {"open", "resolved"}
+#: docauth#369: 실행이 `complete`가 되기 위한 terminal 집합(done 집합 ⊂ terminal 집합).
+TERMINAL_FINDING_STATUSES = DONE_FINDING_STATUSES | {JUDGMENT_UNAVAILABLE}
+QUESTION_STATUSES = {"open", "resolved", JUDGMENT_UNAVAILABLE}
+DONE_QUESTION_STATUSES = {"resolved"}
+TERMINAL_QUESTION_STATUSES = DONE_QUESTION_STATUSES | {JUDGMENT_UNAVAILABLE}
 VERIFY_RESULTS = {"pass", "kill", "unresolved"}
+#: docauth#369 §1 하위 블록. `reason`은 발명하지 않는다 — CONTRACT §4.3이 이미 열거한
+#: `unresolved` 4경로(ⓐⓑⓒⓓ) + §6 3자 혼재 + 2값으로 닫힌다.
+JUDGMENT_UNAVAILABLE_FIELDS = {"reason", "attempts", "basis", "needed_input"}
+JUDGMENT_UNAVAILABLE_REASONS = {
+    "narrowing_budget_exhausted",   # §4.3 ⓐ 좁힘 반송 상한 초과
+    "verdict_branch_mismatch",      # §4.3 ⓑ 판정표 가지 이탈
+    "severity_verdict_split",       # §4.3 ⓒ 같은 근거에서 등급 판정이 갈림(§5)
+    "referral_record_rejected",     # §4.3 ⓓ 회부 기록 반려 상한 초과
+    "panel_split",                  # §6 3자 pass/kill 혼재(ⓒ와 다른 개념 — 설계 r2-03)
+    # 관측 노트(2026-09-08) 기준: `authority_absent` = 판정에 필요한 근거가 **대상 문서 밖**
+    # (제품 실재·상위 문서·소유자 결정)에 있어 리뷰 입력으로 확보 불가 · `evidence_insufficient`
+    # = 근거가 대상 문서 **안**에 있어야 하는데 없거나 모순돼 판정 불가. `needed_input`이 각각
+    # "누구/무엇에서 확인"과 "문서의 어느 절이 무엇을 말해야 하는가"를 가리킨다. 이 구분은
+    # 산문 기준이라 기계가 검사하지 않는다(알려진 한계).
+    "authority_absent",
+    "evidence_insufficient",
+}
+JUDGMENT_UNAVAILABLE_FINDING_ONLY_REASONS = {
+    "narrowing_budget_exhausted", "verdict_branch_mismatch", "severity_verdict_split", "panel_split",
+}
+JUDGMENT_UNAVAILABLE_NARROWING_REASONS = {"narrowing_budget_exhausted", "verdict_branch_mismatch"}
+ATTEMPT_FIELDS = {"verifier_id", "result", "snapshot_id", "evidence"}
+#: docauth#351 — 부재 계열 question. "있어야 할 것 같은데 없음"은 문서 위에서 전부 같아 보이지만 그 이유는
+#: 문서 **밖**에 있다(기결정·제품 실재·부모 문서·인접 근거·저자 암묵). 리뷰는 이 다섯을 가를 수 없고 사람은
+#: 초 단위로 가른다 — 그래서 severity finding이 아니라 **처분 질문**(question)으로 낸다. `absence_class`는
+#: 리뷰어가 관측한 부재의 형태(문서 안에서 확정할 수 있는 것)이고, 처분 5종은 사람이 dispositions.yaml에 남긴다.
+ABSENCE_CLASSES = {
+    "rule_absent",          # 규칙·기준이 문서에 없음(예: 재사용 금지 세대 수)
+    "concept_undefined",    # 문서가 전제하는 개념이 정의돼 있지 않음(예: SSO/API 계정)
+    "case_uncovered",       # 분기·경계 사례가 다뤄지지 않음(예: 설정일 NULL 계정)
+    "external_reference",   # 다른 문서·정본을 전제함(예: 특수문자 31자 — 부모 account 문서)
+}
 CO_REFERENCE_RESULTS = {"proven", "unknown", "not_coreferential"}
 SEMANTIC_VALUE_RESULTS = {"equal", "different", "unknown", "not_applicable"}
 PRESENTATION_RESULTS = {"not_violated", "binding_violated", "intentional_variant", "unknown", "not_applicable"}
@@ -96,16 +143,6 @@ RECORD_REQUIRED = {
         "evidence_anchors", "rationale", "public_record_digest",
     },
 }
-RECORD_OPTIONAL = {
-    # CONTRACT §4.3: 반대 인용으로 지적을 좁혔을 때의 재작성 기록(선택 필드).
-    # 쓰면 원 지적문·근거 앵커·철회 범위·남은 주장을 전부 요구해 좁힘이 finding을 비우는 데
-    # 쓰이지 못하게 한다. immutable projection에 들어가 종결 후 변조는 digest로 잡힌다.
-    "finding": {"narrowing"},
-    "question": {"authority", "scope", "source"},
-    "drift": {"comparison_ref"},
-    "suppressed": set(),
-    "nonissue": set(),
-}
 NARROWING_STRING_FIELDS = ("original_claim", "withdrawn_scope", "residual_claim")
 NARROWING_FIELDS = {"original_claim", "counter_quote_anchors", "withdrawn_scope", "residual_claim"}
 # docauth#225 — schema_version 2 only (§4.3 기계 하한 상향). schema_version 1 ledgers
@@ -118,6 +155,16 @@ COUNTER_EVIDENCE_RESOLUTIONS = {"partial", "full"}
 COUNTER_EVIDENCE_REQUIRED = {
     "record_id", "finding_record_id", "resolution", "anchors", "snapshot_id",
     "public_record_digest",
+}
+RECORD_OPTIONAL = {
+    # CONTRACT §4.3: 반대 인용으로 지적을 좁혔을 때의 재작성 기록(선택 필드).
+    # 쓰면 원 지적문·근거 앵커·철회 범위·남은 주장을 전부 요구해 좁힘이 finding을 비우는 데
+    # 쓰이지 못하게 한다. immutable projection에 들어가 종결 후 변조는 digest로 잡힌다.
+    "finding": {"narrowing", "judgment_unavailable"},
+    "question": {"authority", "scope", "source", "judgment_unavailable", "absence_class", "adjacent_anchors"},
+    "drift": {"comparison_ref"},
+    "suppressed": set(),
+    "nonissue": set(),
 }
 
 
@@ -251,11 +298,47 @@ def _expected_outcome(basis: Any) -> str | None:
     }.get(presentation_rule)
 
 
+#: docauth#356 §1-4: 게이트가 고정한 합집합(`validate_decisions.load_fixed_union`의 반환). None이면 현행 디스크
+#: 경로(실행과 연결되지 않은 레거시 검사) — 단 그 경로도 같은 적격 판정(`suppression_eligible`)을 쓰고
+#: includes를 가진 파일은 거부한다(공유 = 스냅샷+서명 필수). 빈 합집합(absent/unchecked 게이트)은 "authority
+#: 없음"이라 어떤 decision_registry 참조도 통과하지 않는다.
+FixedUnion = dict
+
+
+def load_run_registry(run_root: Path | None) -> tuple[FixedUnion | None, str | None]:
+    """run_root의 `front_gate_decisions_state.json`이 있으면 고정 합집합을 만든다 → (registry, error).
+    state 파일이 없으면 (None, None) — 호출자는 현행 디스크 경로로 간다(레거시)."""
+    if run_root is None:
+        return None, None
+    state_path = Path(run_root) / "front_gate_decisions_state.json"
+    if not state_path.is_file():
+        return None, None
+    # 구현 r1-03: 게이트 재실행이 실패하면 정본 trace는 회수되지만 state·아카이브는 남는다 — trace 없는 state는
+    # "게이트가 열리지 않은 실행"이라 authority가 없다(디스크 폴백으로 내려가지도 않는다).
+    if not (Path(run_root) / "deterministic/FRONT_GATE_TRACE.json").is_file():
+        return None, (
+            "gate-fixed decision registry state exists but the canonical front gate trace is missing -- "
+            "the last gate run did not complete; re-run the front gate (#356)"
+        )
+    try:
+        from .validate_decisions import load_fixed_union
+    except ImportError:
+        from validate_decisions import load_fixed_union
+
+    union, errors = load_fixed_union(state_path)
+    if union is None:
+        return None, "gate-fixed decision registry cannot be loaded: " + "; ".join(errors)
+    if errors:
+        return None, "gate-fixed decision registry does not validate: " + "; ".join(errors)
+    return union, None
+
+
 def _validate_authority_ref(
     value: Any,
     label: str,
     packet_root: Path | None,
     errors: list[str],
+    registry: FixedUnion | None = None,
 ) -> None:
     if not isinstance(value, dict) or set(value) not in (
         {"kind", "path", "sha256", "approval_id"},
@@ -282,6 +365,39 @@ def _validate_authority_ref(
         return
     authority_path = resolve_packet_file(packet_root, value.get("path"), f"{label}.path", errors)
     if authority_path is None:
+        return
+    raw_path = value["path"]
+    if kind == "decision_registry" and registry is not None:
+        # docauth#356 §1-4 (d2-01): 디스크를 읽지 않는다 — 게이트가 고정한 합집합과만 대조한다.
+        # ⓐ path ∈ files(정규화 절대 경로 동치) ⓑ sha 동일 ⓒ decision_id가 그 파일 소속이며 suppression_eligible.
+        try:
+            authority_path.relative_to(packet_root)
+        except ValueError:
+            errors.append(f"{label}.path must stay inside the repository root")
+            return
+        wanted = os.path.normpath(str(authority_path))
+        row = next((f for f in registry.get("files", []) if os.path.normpath(f["declared_path"]) == wanted), None)
+        if row is None:
+            errors.append(
+                f"{label} registry reference outside the gate-fixed union "
+                f"({'registry state ' + str(registry.get('authority_reason')) if not registry.get('files') else raw_path}) (#356)"
+            )
+            return
+        if row.get("sha256") != value["sha256"]:
+            errors.append(f"{label}.sha256 does not match the gate-fixed registry bytes for {raw_path} (#356)")
+            return
+        decision_id = value.get("decision_id")
+        if not _nonempty(decision_id):
+            errors.append(f"{label}.decision_id must be nonempty")
+            return
+        entry = registry.get("decisions", {}).get(decision_id)
+        if entry is None or os.path.normpath(str(entry.get("file"))) != wanted:
+            errors.append(f"{label}.decision_id must identify a decision of that file in the gate-fixed union (#356)")
+            return
+        if not entry.get("suppression_eligible"):
+            errors.append(
+                f"{label}.decision_id is not suppression-eligible in the gate-fixed union: {entry.get('reason')} (#356)"
+            )
         return
     try:
         payload = authority_path.read_bytes()
@@ -374,16 +490,32 @@ def _validate_authority_ref(
         if registry_errors:
             return
         decision_errors, _, _ = validate_decisions(authority_path, content=payload)
+        # docauth#356 (설계 r3-01): 레거시 디스크 경로도 **같은 적격 판정**을 쓴다 — 단일 파일 합집합의
+        # `suppression_eligible`. includes를 가진 파일은 이 경로에서 거부한다(공유 = 스냅샷+서명 필수).
+        try:
+            from .validate_decisions import validate_union
+        except ImportError:
+            from validate_decisions import validate_union
+
+        data = load_yaml_text(payload)
+        if isinstance(data, dict) and isinstance(data.get("meta"), dict) and data["meta"].get("includes") is not None:
+            errors.append(
+                f"{label} shared decision registry (meta.includes) needs a gate-fixed snapshot -- "
+                "run the front gate with --decisions and validate with --run-root (#356)"
+            )
+            return
+        decision_errors, _w, _i, union = validate_union(
+            str(authority_path), files={os.path.normpath(str(authority_path)): payload}
+        )
         if decision_errors:
             errors.append(f"{label} decision registry is not suppression-eligible: {'; '.join(decision_errors)}")
             return
-        data = load_yaml_text(payload)
-        match = next(
-            (item for item in data.get("decisions", []) if isinstance(item, dict) and item.get("id") == decision_id),
-            None,
-        )
-        if match is None or match.get("status") not in {"확정", "재론금지"} or match.get("superseded_by"):
-            errors.append(f"{label}.decision_id must identify a current confirmed decision")
+        entry = union["decisions"].get(decision_id)
+        if entry is None or not entry.get("suppression_eligible"):
+            errors.append(
+                f"{label}.decision_id must identify a current confirmed decision"
+                + (f" ({entry.get('reason')})" if entry else "")
+            )
 
 
 def immutable_projection(category: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -398,6 +530,8 @@ def immutable_projection(category: str, record: dict[str, Any]) -> dict[str, Any
             "record_id", "convention_slot", "dependent_atom_refs",
             "resolution_derived_atom_refs", "authority", "scope", "source",
             "snapshot_id", "evidence_anchors",
+            # docauth#351: §4 작성 시점 산출물(§6이 바꾸지 않는다) — projection에 넣어 종결 후 변조를 digest로 잡는다.
+            "absence_class", "adjacent_anchors",
         ),
         "drift": (
             "record_id", "candidate_atom_refs", "source_candidate_refs", "snapshot_id",
@@ -482,6 +616,153 @@ def _validate_narrowing(record: dict[str, Any], prefix: str, errors: list[str]) 
         errors.append(f"{prefix}.narrowing.counter_quote_anchors must be preserved in evidence_anchors")
 
 
+def required_verifier_count(category: str, record: dict[str, Any]) -> int:
+    """CONTRACT §6 결정론 인원: P1 finding 검증은 3자, 그 외는 1자."""
+    if category == "finding" and record.get("severity") == "P1":
+        return 3
+    return 1
+
+
+def aggregate_verifier_results(results: list[Any]) -> str:
+    """CONTRACT §6 3자 집계: 만장 pass → pass · 만장 kill → kill · 그 외(혼재·unresolved) → unresolved."""
+    distinct = set(results)
+    if distinct == {"pass"}:
+        return "pass"
+    if distinct == {"kill"}:
+        return "kill"
+    return "unresolved"
+
+
+def _validate_judgment_unavailable(
+    category: str, record: dict[str, Any], prefix: str, errors: list[str]
+) -> None:
+    """docauth#369 — `judgment_unavailable` 상태 ⇔ 하위 블록, 그리고 **시도 증명**.
+
+    AC5의 기계 강제: 이 블록은 "검증자가 판단할 수 없었다"를 증명하는 자리이지 "검증을
+    안 했다"를 숨기는 자리가 아니다. 그래서 (i) §6이 요구하는 **정확한 인원**의 검증자
+    결과가 같은 현재 snapshot에 대해 있어야 하고(부족·초과 모두 거부 — 추가 투표로 확정
+    가능한 판정을 판단 불가로 바꾸는 경로를 막는다, 설계 r1 d1-01), (ii) 그 집계가 §6
+    규칙으로 `unresolved`여야 하며(만장 pass·kill이면 판단이 *가능*했다), (iii) `reason`은
+    닫힌 enum이고 attempts 형태와 정합해야 한다. 비-JU 상태로의 사상(pass→accepted 등)은
+    §6·§8이 정하고 여기서는 규정하지 않는다(설계 r1 d1-02).
+    """
+    block = record.get("judgment_unavailable")
+    status = record.get("status")
+    if status != JUDGMENT_UNAVAILABLE:
+        if "judgment_unavailable" in record:
+            errors.append(
+                f"{prefix}.judgment_unavailable is only allowed when status is "
+                f"{JUDGMENT_UNAVAILABLE} (status is {status!r})"
+            )
+        return
+    if not isinstance(block, dict):
+        errors.append(
+            f"{prefix} status {JUDGMENT_UNAVAILABLE} requires a judgment_unavailable mapping "
+            "(reason, attempts, basis, needed_input) -- a terminal judgment needs its proof of attempt"
+        )
+        return
+    if set(block) != JUDGMENT_UNAVAILABLE_FIELDS:
+        errors.append(
+            f"{prefix}.judgment_unavailable must contain exactly "
+            f"{', '.join(sorted(JUDGMENT_UNAVAILABLE_FIELDS))}"
+        )
+        return
+    reason = block.get("reason")
+    if reason not in JUDGMENT_UNAVAILABLE_REASONS:
+        errors.append(
+            f"{prefix}.judgment_unavailable.reason must be one of "
+            f"{', '.join(sorted(JUDGMENT_UNAVAILABLE_REASONS))} (got {reason!r})"
+        )
+        reason = None
+    for field in ("basis", "needed_input"):
+        if not _nonempty(block.get(field)):
+            errors.append(f"{prefix}.judgment_unavailable.{field} must be nonempty prose")
+    if reason is not None:
+        if category == "question" and reason in JUDGMENT_UNAVAILABLE_FINDING_ONLY_REASONS:
+            errors.append(f"{prefix}.judgment_unavailable.reason {reason!r} applies to findings only")
+        if category == "finding" and reason in JUDGMENT_UNAVAILABLE_NARROWING_REASONS and "narrowing" not in record:
+            errors.append(
+                f"{prefix}.judgment_unavailable.reason {reason!r} requires a narrowing record on the "
+                "finding (§4.3 -- the path it names cannot have happened without one)"
+            )
+    attempts = block.get("attempts")
+    required = required_verifier_count(category, record)
+    if not isinstance(attempts, list) or not attempts:
+        errors.append(
+            f"{prefix}.judgment_unavailable.attempts must be a nonempty list -- verification incomplete, "
+            f"not {JUDGMENT_UNAVAILABLE}"
+        )
+        return
+    results: list[Any] = []
+    seen: set[str] = set()
+    well_formed = True
+    for index, attempt in enumerate(attempts):
+        aprefix = f"{prefix}.judgment_unavailable.attempts[{index}]"
+        if not isinstance(attempt, dict) or set(attempt) != ATTEMPT_FIELDS:
+            errors.append(f"{aprefix} must contain exactly verifier_id, result, snapshot_id, evidence")
+            well_formed = False
+            continue
+        verifier_id = attempt.get("verifier_id")
+        if not _nonempty(verifier_id):
+            errors.append(f"{aprefix}.verifier_id must be nonempty")
+        elif verifier_id in seen:
+            errors.append(f"{aprefix}.verifier_id duplicates another attempt ({verifier_id})")
+        else:
+            seen.add(verifier_id)
+        if attempt.get("result") not in VERIFY_RESULTS:
+            errors.append(f"{aprefix}.result must be pass, kill, or unresolved")
+            well_formed = False
+        if attempt.get("snapshot_id") != record.get("snapshot_id"):
+            errors.append(f"{aprefix}.snapshot_id must match the record snapshot_id (§0 same current snapshot)")
+        if not _nonempty(attempt.get("evidence")):
+            errors.append(f"{aprefix}.evidence must be nonempty")
+        results.append(attempt.get("result"))
+    if len(attempts) != required:
+        who = "P1 finding" if required == 3 else category
+        errors.append(
+            f"{prefix}.judgment_unavailable.attempts must hold exactly {required} verifier "
+            f"attempt(s) for a {who} (§6 panel size), have {len(attempts)} -- "
+            + ("verification incomplete, not judgment_unavailable" if len(attempts) < required
+               else "extra verifier attempts are not a §6 panel")
+        )
+        return
+    if not well_formed:
+        return
+    aggregate = aggregate_verifier_results(results)
+    if aggregate != "unresolved":
+        errors.append(
+            f"{prefix}.judgment_unavailable.attempts aggregate to {aggregate!r} under the §6 rule -- "
+            f"a judgment was available, so the record cannot be {JUDGMENT_UNAVAILABLE}"
+        )
+        return
+    mixed = {"pass", "kill"}.issubset(set(results))
+    if reason == "panel_split" and not mixed:
+        errors.append(
+            f"{prefix}.judgment_unavailable.reason panel_split requires both pass and kill among attempts"
+        )
+    elif reason is not None and reason != "panel_split" and mixed:
+        errors.append(
+            f"{prefix}.judgment_unavailable.attempts mix pass and kill -- that is panel_split, not {reason}"
+        )
+    elif reason is not None and reason != "panel_split" and "unresolved" not in results:
+        errors.append(
+            f"{prefix}.judgment_unavailable.reason {reason} requires at least one unresolved attempt"
+        )
+    if category == "question":
+        verification = record.get("classification_verification")
+        first = attempts[0]
+        if not isinstance(verification, dict) or verification.get("result") != "unresolved":
+            errors.append(
+                f"{prefix} {JUDGMENT_UNAVAILABLE} question must keep classification_verification.result "
+                "unresolved (pass/kill means a judgment was available)"
+            )
+        elif any(verification.get(k) != first.get(k) for k in ("verifier_id", "result", "evidence")):
+            errors.append(
+                f"{prefix}.judgment_unavailable.attempts[0] must equal classification_verification "
+                "(verifier_id, result, evidence) -- one verification fact, not two"
+            )
+
+
 def _validate_counter_evidence_record(
     record: Any,
     index: int,
@@ -546,6 +827,7 @@ def _validate_record(
     packet_root: Path | None,
     schema_version: Any,
     errors: list[str],
+    registry: FixedUnion | None = None,
 ) -> None:
     _validate_common_record(category, record, index, snapshot_id, errors)
     if not isinstance(record, dict):
@@ -557,10 +839,20 @@ def _validate_record(
     effective_required = RECORD_REQUIRED[category]
     if category == "finding" and schema_version == 2:
         effective_required = effective_required | {"counter_citation_verdict"}
-    missing = effective_required.difference(record)
-    extra = set(record).difference(effective_required | RECORD_OPTIONAL[category])
-    if missing:
-        errors.append(f"{prefix} missing fields: {', '.join(sorted(missing))}")
+    # Codex 피어리뷰 r6-03(#349): 판별자(`schema_version`)가 무효면 어느 형상을 기준으로
+    # 볼지가 정해지지 않았다 — 그 상태에서 missing/extra를 내면 정상 v2 record의
+    # `counter_citation_verdict`가 `unknown fields`로 **왜곡 보고**된다. 판별자가 확정된
+    # 경우에만 이 검사를 한다(무효 자체는 envelope 수준에서 이미 보고된다).
+    version_extras = {"counter_citation_verdict"} if category == "finding" else set()
+    record_missing = (
+        effective_required if schema_version is not None else RECORD_REQUIRED[category]
+    ).difference(record)
+    record_allowed = effective_required | RECORD_OPTIONAL[category] | (
+        set() if schema_version is not None else version_extras
+    )
+    extra = set(record).difference(record_allowed)
+    if record_missing:
+        errors.append(f"{prefix} missing fields: {', '.join(sorted(record_missing))}")
     if extra:
         errors.append(f"{prefix} unknown fields: {', '.join(sorted(extra))}")
     atom_field = "dependent_atom_refs" if category == "question" else "candidate_atom_refs"
@@ -581,13 +873,31 @@ def _validate_record(
             errors.append(f"{prefix}.status must be a legal finding lifecycle state; unresolved is verifier-only")
         if not _nonempty(record.get("judgment_provenance")):
             errors.append(f"{prefix}.judgment_provenance must be nonempty")
-        if schema_version == 2 and record.get("counter_citation_verdict") not in COUNTER_CITATION_VERDICTS:
+        if (
+            schema_version == 2
+            or (schema_version is None and "counter_citation_verdict" in record)
+        ) and record.get("counter_citation_verdict") not in COUNTER_CITATION_VERDICTS:
             errors.append(f"{prefix}.counter_citation_verdict must be none, partial, or full")
         if "narrowing" in record:
             _validate_narrowing(record, prefix, errors)
+        _validate_judgment_unavailable(category, record, prefix, errors)
     elif category == "question":
         if record.get("status") not in QUESTION_STATUSES:
-            errors.append(f"{prefix}.status must be open or resolved")
+            errors.append(f"{prefix}.status must be open, resolved, or judgment_unavailable")
+        _validate_judgment_unavailable(category, record, prefix, errors)
+        # docauth#351: 부재 계열 표기 — 형태는 닫힌 enum, 인접 근거 앵커는 evidence_anchors의 부분집합.
+        if "absence_class" in record and record.get("absence_class") not in ABSENCE_CLASSES:
+            errors.append(
+                f"{prefix}.absence_class must be one of {', '.join(sorted(ABSENCE_CLASSES))} (#351)"
+            )
+        if "adjacent_anchors" in record:
+            if "absence_class" not in record:
+                errors.append(f"{prefix}.adjacent_anchors requires absence_class (#351)")
+            adjacent = record.get("adjacent_anchors")
+            if not _string_list(adjacent, nonempty=False):
+                errors.append(f"{prefix}.adjacent_anchors must be a unique string list")
+            elif not set(adjacent).issubset(set(record.get("evidence_anchors") or [])):
+                errors.append(f"{prefix}.adjacent_anchors must be preserved in evidence_anchors (§3 앵커 합집합)")
         if not _nonempty(record.get("convention_slot")):
             errors.append(f"{prefix}.convention_slot must be nonempty")
         verification = record.get("classification_verification")
@@ -599,18 +909,40 @@ def _validate_record(
         if not _string_list(derived, nonempty=False) or not set(derived).issubset(atom_ids):
             errors.append(f"{prefix}.resolution_derived_atom_refs must reference candidate atoms")
         if record.get("status") == "resolved":
+            if not derived:
+                errors.append(f"{prefix}.resolution_derived_atom_refs must be nonempty when resolved")
             if not _nonempty(record.get("authority")):
                 errors.append(f"{prefix}.authority is required when resolved")
             if record.get("scope") not in {"document", "template"}:
                 errors.append(f"{prefix}.scope must be document or template when resolved")
-            _validate_authority_ref(record.get("source"), f"{prefix}.source", packet_root, errors)
-            if not derived:
-                errors.append(f"{prefix}.resolution_derived_atom_refs must be nonempty when resolved")
+            _validate_authority_ref(record.get("source"), f"{prefix}.source", packet_root, errors, registry)
             if verification and verification.get("result") == "unresolved":
                 errors.append(f"{prefix} resolved question cannot retain unresolved verification")
         else:
+            # `open`과 `judgment_unavailable`(docauth#369)은 둘 다 **해소되지 않은** 질문이다 —
+            # 해소 필드·파생 atom은 `resolved`에서만 생긴다.
+            unresolved_label = "open" if record.get("status") == "open" else JUDGMENT_UNAVAILABLE
             if derived:
-                errors.append(f"{prefix} open question cannot have resolution-derived atoms")
+                errors.append(f"{prefix} {unresolved_label} question cannot have resolution-derived atoms")
+            # docauth#348 (Codex 피어리뷰 r6-02): `open`인데 verdict가 terminal인 혼합
+            # 상태를 막는다. 그 상태를 허용하면 §6 진입 게이트가 "아직 해소 안 됨"으로
+            # 보고 해소 필드(authority·scope·source)를 결속에서 빼는데, 정작 판정은 이미
+            # 나 있어 done에서 그 필드들을 다른 유효값으로 갈아끼울 수 있다.
+            if (
+                record.get("status") == "open"
+                and isinstance(verification, dict)
+                and verification.get("result") in {"pass", "kill"}
+            ):
+                errors.append(
+                    f"{prefix} open question cannot already carry a terminal verification "
+                    "result (open means §6 has not disposed of it yet)"
+                )
+            for _field in ("authority", "scope", "source"):
+                if _field in record:
+                    errors.append(
+                        f"{prefix} {unresolved_label} question cannot carry {_field} -- resolution fields "
+                        "are produced when the question is resolved"
+                    )
     elif category == "drift":
         forbidden = {"severity", "status", "blocking"}.intersection(record)
         if forbidden:
@@ -642,7 +974,7 @@ def _validate_record(
         if category == "suppressed" and not isinstance(record.get("authority_ref"), dict):
             errors.append(f"{prefix}.authority_ref must be present")
         if category == "suppressed":
-            _validate_authority_ref(record.get("authority_ref"), f"{prefix}.authority_ref", packet_root, errors)
+            _validate_authority_ref(record.get("authority_ref"), f"{prefix}.authority_ref", packet_root, errors, registry)
 
 
 def validate_data(
@@ -650,9 +982,21 @@ def validate_data(
     *,
     require_closed: bool = False,
     packet_root: Path | None = None,
+    registry: FixedUnion | None = None,
 ) -> list[str]:
     errors: list[str] = []
     schema_version = envelope.get("schema_version")
+    # docauth#349 r4-03 → r5-03: `True == 1`·`2.0 == 2`라 bool·float가 정수처럼
+    # **버전 분기까지 타고 들어가** 부수 오류를 왜곡했다. 판정을 **분기보다 앞에** 둔다.
+    version_known = type(schema_version) is int and schema_version in (1, 2)
+    if not version_known:
+        errors.append("schema_version must be the integer 1 or 2")
+        # Codex 피어리뷰 r6-03: 여기서 `None`으로 두면 required 집합이 사실상 v1 형상이
+        # 되어, 정상적인 v2 원장의 `counter_evidence`가 `unknown fields`로, finding의
+        # `counter_citation_verdict`가 unknown으로 **왜곡 보고**된다. 판별자가 무효일
+        # 때는 version 전용 missing/extra 검사를 하지 않는다(무엇을 기준으로 볼지가
+        # 정해지지 않았으므로).
+        schema_version = None
     required = {
         "schema_version", "snapshot_id", "target", "state", "source_candidate_inventory",
         "candidate_atoms", "findings", "questions", "drifts", "suppressed", "nonissues",
@@ -662,10 +1006,16 @@ def validate_data(
     # 하한). schema_version 1 envelopes must NOT carry this key — the boundary is a
     # closed schema switch, not an optional extension, so an old ledger with a stray
     # `counter_evidence` key fails exactly like any other unknown field would.
+    COMMON_ENVELOPE_REQUIRED = required
     if schema_version == 2:
         required = required | {"counter_evidence"}
-    missing = required.difference(envelope)
-    extra = set(envelope).difference(required)
+    # Codex 피어리뷰 r6-03 → r7-03: 판별자가 무효일 때 **모든** 형태 검사를 생략하면
+    # 진짜 오타(`mystery_envelope_field`)까지 숨겨 수정 반복을 만든다. 공통 필수 필드는
+    # 그대로 검사하고, 허용 필드만 두 스키마의 **합집합**으로 계산한다 — 그러면 정상 v2
+    # 형상은 버전 오류 한 줄만 남고, 진짜 unknown field·공통 누락은 계속 보고된다.
+    allowed = required if version_known else (required | {"counter_evidence"})
+    missing = (required if version_known else COMMON_ENVELOPE_REQUIRED).difference(envelope)
+    extra = set(envelope).difference(allowed)
     if missing:
         errors.append(f"missing fields: {', '.join(sorted(missing))}")
     if extra:
@@ -794,7 +1144,7 @@ def validate_data(
         for index, record in enumerate(collection):
             _validate_record(
                 category, record, index, snapshot_id, atom_ids, source_ids, packet_root,
-                schema_version, errors,
+                schema_version, errors, registry,
             )
             if not isinstance(record, dict) or not _nonempty(record.get("record_id")):
                 continue
@@ -837,7 +1187,10 @@ def validate_data(
     # counter-citation was even found, so "found it, narrowed silently without recording
     # `narrowing`" was structurally invisible (§4.3 알려진 한계 ⓐ, before this PR).
     counter_evidence_by_finding: dict[str, list[dict[str, Any]]] = {}
-    if schema_version == 2:
+    # Codex 피어리뷰 r8-01(#349): 판별자가 무효라고 **존재하는 v2 전용 필드의 내용 검증까지**
+    # 건너뛰면, `counter_evidence: "bogus"` 같은 것이 버전 오류 한 줄 뒤에 숨는다 —
+    # r7-03이 막으려던 수정 반복이 그대로 남는다. 존재를 **요구하지는 않되**, 있으면 검사한다.
+    if schema_version == 2 or (schema_version is None and "counter_evidence" in envelope):
         counter_evidence_rows = envelope.get("counter_evidence")
         if not isinstance(counter_evidence_rows, list):
             errors.append("counter_evidence must be a list")
@@ -1017,12 +1370,20 @@ def validate(
     *,
     require_closed: bool = False,
     packet_root: Path | None = None,
+    run_root: Path | None = None,
 ) -> list[str]:
     try:
         envelope = _load(path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         return [str(exc)]
-    return validate_data(envelope, require_closed=require_closed, packet_root=packet_root)
+    # docauth#356 §1-4: 게이트 실행에 속한 원장은 `--run-root`로 고정 합집합을 받는다(생략 = 실행과
+    # 연결되지 않은 레거시 검사 — 디스크 경로. 게이트 실행 원장에는 필수, SKILL 진입점).
+    if run_root is not None and packet_root is not None and run_root.resolve() != packet_root.resolve():
+        return ["run_root must be the selected packet root"]
+    registry, registry_error = load_run_registry(packet_root if packet_root is not None else run_root)
+    if registry_error is not None:
+        return [registry_error]
+    return validate_data(envelope, require_closed=require_closed, packet_root=packet_root, registry=registry)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1030,13 +1391,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("packet_root", type=Path)
     parser.add_argument("ledger", help="normalized packet-relative ledger path")
     parser.add_argument("--closed", action="store_true", help="require state: closed")
+    parser.add_argument(
+        "--run-root", type=Path, default=None,
+        help="compatibility alias for packet_root; another run cannot supply authority",
+    )
     args = parser.parse_args(argv)
     path_errors: list[str] = []
     ledger_path = resolve_packet_file(args.packet_root, args.ledger, "ledger", path_errors)
     errors = path_errors
     if ledger_path is not None:
         errors.extend(
-            validate(ledger_path, require_closed=args.closed, packet_root=args.packet_root)
+            validate(ledger_path, require_closed=args.closed, packet_root=args.packet_root, run_root=args.run_root)
         )
     if errors:
         for error in errors:

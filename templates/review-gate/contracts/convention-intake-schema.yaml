@@ -12,6 +12,13 @@ profile_applicability:              # optional; omitted means applicable
   reason: <why this profile is not for the target's template>
   observed_sections: [<section id observed in the target>, ...]
 
+docmodel_selection:                  # optional (docauth#315); valid only when
+                                      # profile_applicability.result is inapplicable
+  approval: unanswered               # unanswered | skipped | answered
+  response: <repo-root-relative docmodel path, e.g.
+             playbooks/review-gate/contracts/docmodel.기획서.yaml> # required
+             # iff approval is answered; omitted otherwise
+
 target_snapshot: <sha256:64hex | commit:7~64hex | export:stable-id>
 target_document: <document id or path, optional>
 recorded_at: <YYYY-MM-DD>
@@ -47,6 +54,25 @@ records:                            # exactly one record per profile question
 #   reason and the sections actually observed in the target, and it is refused when
 #   template_id equals the profile's own template_id, or when any profile question's
 #   all_sections_present is satisfied by observed_sections. records must be empty.
-# - A non-applicable intake admits lens execution but yields no convention authority:
-#   the front gate publishes structure_axis: undetermined and docmodel
-#   materialization is refused. The structure axis (CONTRACT §1 ⑤) is not judged.
+# - A non-applicable intake admits lens execution but yields no convention authority
+#   from the interview path (#193) itself. The structure axis (CONTRACT §1 ⑤) is a
+#   SEPARATE, independent input: as of docauth#315, the front gate also checks
+#   whether an already-approved docmodel.<template>.yaml structurally matches
+#   observed_sections (live repo scan, docmodel_match.py -- never inside this
+#   validator). Exactly one approved match judges the structure axis; zero, or
+#   multiple unresolved by docmodel_selection, still publishes structure_axis:
+#   undetermined and refuses docmodel materialization (unchanged from pre-#315
+#   behavior in those cases).
+#
+# docmodel_selection (#315):
+# - Only meaningful when profile_applicability.result is inapplicable; rejected
+#   otherwise. Answers the "which approved docmodel applies?" question that arises
+#   when the structural match above finds MORE than one approved candidate --
+#   auto-selection is refused (fail-closed), so a human must pick one explicitly.
+# - Reuses the records[].approval three-state model (unanswered/skipped/answered)
+#   rather than inventing new vocabulary. unanswered/skipped both fall back to
+#   structure_axis: undetermined, same as the zero-match case.
+# - response must name one of the CURRENTLY-matching approved candidates (re-scanned
+#   at run time, not pinned to whatever candidates existed when this intake was
+#   authored) -- a stale response naming a candidate that no longer matches or is no
+#   longer approved falls back to undetermined rather than erroring.

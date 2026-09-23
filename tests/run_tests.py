@@ -2838,6 +2838,12 @@ if review_gate_suite.stderr:
 check("review-gate focused suite", review_gate_suite.returncode == 0)
 
 for suite_name, suite_file in (
+        ("source quote parser suite", "test_audit_quotes.py"),
+        ("light-review suite", "test_light_review.py"),
+        ("light-review observation suite", "test_light_review_observation.py"),
+        ("port authoring suite", "test_port_authoring.py"),
+        ("modern packet port suite", "test_review_gate_port_core.py"),
+        ("receipt import suite", "test_import_review_receipt.py"),
         ("release/version contract suite", "test_release.py"),
         ("review-gate convention suite", "test_review_gate_convention.py"),
         ("review-gate intermediate contract suite", "test_review_gate_intermediate_contract.py"),

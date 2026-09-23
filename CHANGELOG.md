@@ -4,6 +4,44 @@ All notable changes to docloop are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). Releases are explicit: a matching annotated
 `vX.Y.Z` tag is created from a tested commit already merged to `main`.
 
+## [0.16.0] — 2026-09-23
+### Added
+- **경량 리뷰 / Lightweight review:** `docloop light-review` provides staged preparation,
+  independent discovery and falsification inputs, result rendering, and event/feedback
+  timelines. External model calls and observed call provenance are required.
+- **사람용 문서 편집 / Human-facing editing:** `docloop human-edit` restructures an explicit
+  local document copy while preserving requirements and reporting preservation gaps.
+- **리뷰 결과 가져오기 / Review receipt import:** `docloop atb-import-review` imports
+  validated findings into change-plan observations, retains pending judgments and human
+  edits, and checks current-source freshness. Dry runs write neither output.
+- **검증·전달 감사 / Verification and delivery audit:** new `review-gate verify-gate` and
+  `audit-delivery` commands preserve entry evidence, independent verification units,
+  final findings and ledger provenance in separate result attempts.
+
+### Changed
+- **입력과 근거 결속 / Input and evidence binding:** new packets use RUN schema 2 and
+  replay archived front-gate inputs, explicitly approved document-model candidates and
+  frozen shared/local decision registries. Final claims, counter-evidence and nonpublic
+  dispositions must match verification inputs; legitimate status changes remain allowed.
+- **판단 상태 / Judgment status:** completed reviews with unavailable judgments return
+  exit 5, distinct from done and deferred exit 3. Summaries preserve these distinctions.
+- **작성·피어리뷰 / Authoring and peer review:** preserve source tone and full-versus-partial
+  replacement scope; request high reasoning effort while separately recording actual
+  observed effort, with safe quoting for staged review paths.
+- Synchronize applicable ports and provenance with docauth 0.23.1 (`93b256ac`).
+
+### Fixed
+- Empty round comparisons return `MATCH-NOTRUN`/exit 3 unless the single intentional
+  empty side is explicitly declared.
+- Prevent receipt import from overwriting protected inputs, accepting unsupported
+  receipt versions, mixing verified and imported bytes, or withdrawing other ID namespaces.
+
+### Compatibility and limitations
+- Genuine RUN schema 1 packets retain their existing receipt contract. New packets do
+  not fall back to legacy validation when required fields or archives are missing.
+- Deterministic tests validate contracts and evidence continuity, not actual model
+  independence or semantic editing quality. No automatic approval or publication is added.
+
 ## [0.15.0] — 2026-09-07
 ### Added
 - **Round comparison table generator / §13 라운드 대조표 생성기.** The receipt validator has

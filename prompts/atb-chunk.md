@@ -36,3 +36,17 @@ the as-is/to-be body here — you produce `chunks[]`.
 - Sequencing rules come from `policy.yaml`. Never hardcode the direction.
 
 Write the manifest to the work-folder root. Return the ordered summary as your final message.
+
+## Imported review evidence
+
+`docloop atb-import-review <packet> <receipt-relative> --manifest manifest.yaml
+(--live <current-full-text> | --no-live)` validates the packet and receipt before import.
+Verified findings become `observations`; unavailable judgments/questions remain
+`pending_issues` for human disposition, never automatic defects, approvals or to-be.
+`needs_revalidation: true` or `thin_source: true` blocks authoring until sources are
+reread and the claim revalidated. Do not clear these flags merely to pass a gate.
+Keep pending IDs and evidence visible in the handoff; they are not chunk members.
+`kind_confidence: low` is a provisional mapping for a human to correct, not certainty.
+Preserve `review_ref`, human overrides and withdrawn markers. Reimport cannot silently
+restore authority withdrawn by a human. Capture/Audit must report remaining unsafe
+observations and pending issues; Chunk/Author must exclude them from executable changes.
