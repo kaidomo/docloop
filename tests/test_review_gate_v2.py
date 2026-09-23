@@ -138,9 +138,11 @@ def _write_assured_inputs(review: Path) -> None:
     )
 
 
-def _prepare_assured(root: Path) -> Path:
+def _prepare_assured(root: Path, *, target_text: str | None = None) -> Path:
     review = root / "review"
     _write_assured_inputs(review)
+    if target_text is not None:
+        (review / "draft.md").write_text(target_text, encoding="utf-8")
     proc = subprocess.run(
         [
             str(BIN), "review-gate", "prepare", str(review), "assured-registry", "draft.md",
@@ -232,6 +234,7 @@ def _packet(root: Path, *, extra_input_gate: dict | None = None) -> tuple[dict, 
     (root / "RUN.yaml").write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "run_id": binding["run_id"],
                 "target": {"source": target_source, "sha256": target_sha},
             },
@@ -249,7 +252,9 @@ def _packet(root: Path, *, extra_input_gate: dict | None = None) -> tuple[dict, 
 class ReviewGateV2Tests(unittest.TestCase):
     def test_runner_prepared_decision_registry_can_resolve_and_suppress(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            run = _prepare_assured(Path(td))
+            # These source anchors are consumed by the actual verification CLI.
+            run = _prepare_assured(Path(td), target_text="".join(
+                f"Synthetic requirement line {i}.\n" for i in range(1, 61)))
             run_meta = yaml.safe_load((run / "RUN.yaml").read_text(encoding="utf-8"))
             snapshot = "sha256:" + run_meta["target"]["sha256"]
             target_source = run_meta["target"]["source"]
@@ -305,6 +310,22 @@ class ReviewGateV2Tests(unittest.TestCase):
                 yaml.safe_dump({intermediate.ROOT_KEY: envelope}, allow_unicode=True, sort_keys=False),
                 encoding="utf-8",
             )
+            entry = copy.deepcopy(envelope)
+            entry["state"] = "open"
+            for finding in entry["findings"]:
+                finding["status"] = "discovered"
+            (run / "results/ENTRY.yaml").write_text(yaml.safe_dump(
+                {intermediate.ROOT_KEY: entry}, allow_unicode=True, sort_keys=False))
+            checked = subprocess.run([str(BIN), "review-gate", "verify-gate", str(run),
+                "verify", "results/ENTRY.yaml"], capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            findings_text = "# Synthetic delivered findings\n\nL10 L20 L30 L40 L50\n"
+            (run / "results/FINDINGS.md").write_text(findings_text)
+            (run / "results/LENS.md").write_text(findings_text)
+            checked = subprocess.run([str(BIN), "review-gate", "audit-delivery", str(run),
+                "delivery", "results/INTERMEDIATE.yaml", "results/FINDINGS.md", "--lens", "results/LENS.md"],
+                capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             receipt = _receipt_fixture()
             receipt["snapshot_id"] = snapshot
             receipt["target"] = target_source
@@ -314,6 +335,7 @@ class ReviewGateV2Tests(unittest.TestCase):
                 "path": "results/INTERMEDIATE.yaml",
                 "sha256": hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
                 "snapshot_id": snapshot,
+                "schema_version": envelope["schema_version"],
             }
             receipt["findings"] = copy.deepcopy(envelope["findings"])
             receipt["questions"] = copy.deepcopy(envelope["questions"])
@@ -324,11 +346,20 @@ class ReviewGateV2Tests(unittest.TestCase):
                 (run / "deterministic" / "RECEIPT_SCAFFOLD.json").read_text(encoding="utf-8")
             )
             receipt.update(scaffold)
+            receipt["execution_status"] = "complete"
+            receipt["document_clearance"] = "findings_present"
+            receipt["verify_gate_ref"] = {"path": "results/verify/verify_gate_trace.json",
+                "sha256": hashlib.sha256((run / "results/verify/verify_gate_trace.json").read_bytes()).hexdigest()}
+            receipt["anchor_guard_ref"] = {"path": "results/FINDINGS.md",
+                "sha256": hashlib.sha256((run / "results/FINDINGS.md").read_bytes()).hexdigest(),
+                "trace_path": "results/delivery/anchor_guard_trace.json",
+                "trace_sha256": hashlib.sha256((run / "results/delivery/anchor_guard_trace.json").read_bytes()).hexdigest()}
+
             receipt["structure_axis"] = "undetermined"
             receipt["structure_axis_reason"] = "no real convention profile supplied for this fixture packet"
             receipt["execution"] = {"run_ids": [], "lens_rounds": 1, "lens_rounds_reason": "single-round fixture run"}
             receipt["scale_disclosure"] = {
-                "target_volume": {"lines": 1, "snapshot_id": snapshot},
+                "target_volume": {"lines": 60, "snapshot_id": snapshot},
                 "planned_lens_rounds": 1,
                 "configuration": [{"name": "fixture", "count": 1}],
                 "derived_total_agents": 1,

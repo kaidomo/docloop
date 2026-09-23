@@ -39,6 +39,11 @@ SCHEMA_VERSION = 1
 APPROVAL_STATES = {"unanswered", "inapplicable", "unapproved", "approved_to_draft"}
 APPLICABILITY_RESULTS = {"applicable", "inapplicable"}
 PROFILE_APPLICABILITY_RESULTS = {"applicable", "inapplicable"}
+# docauth#315 (PLAN §3.2, decision 3): the docmodel_selection state model reuses the
+# same three-state shape convention-profile answers already use (unanswered/skipped/
+# answered) rather than inventing a new vocabulary -- CONTRACT.md:107's "미답 시 처리"
+# rule (unanswered/skipped both fall back to undetermined) applies identically here.
+DOCMODEL_SELECTION_APPROVAL_STATES = {"unanswered", "skipped", "answered"}
 # r2-01 again: these are compared and carried as identities too, and `$` also matches
 # before a trailing newline — so they are matched in full, never partially.
 SNAPSHOT_ID = re.compile(r"(?:sha256:[0-9a-f]{64}|commit:[0-9a-f]{7,64}|export:[^\s]+)")
@@ -122,6 +127,32 @@ def _validate_profile_applicability(declaration: Any, data: Any, profile: Any) -
     return errors
 
 
+def _validate_docmodel_selection(selection: Any, *, not_applicable: bool) -> list[str]:
+    """docauth#315 (PLAN §3.2): the human's answer to "여러 표준 목차 후보 중 어느
+    것입니까?" when input⑤ direct-lookup matching (docmodel_match.py) finds more
+    than one approved structural match. Only meaningful when the profile is declared
+    inapplicable -- direct lookup is scoped to that branch alone (PLAN §3, out of
+    scope for the applicable-profile path).
+    """
+    if not not_applicable:
+        return ["docmodel_selection is only valid when profile_applicability.result is inapplicable"]
+    errors = _exact_keys(selection, {"approval"}, {"response"}, "docmodel_selection")
+    if not isinstance(selection, dict):
+        return errors
+    approval = selection.get("approval")
+    if approval not in DOCMODEL_SELECTION_APPROVAL_STATES:
+        errors.append(
+            f"docmodel_selection.approval must be one of {sorted(DOCMODEL_SELECTION_APPROVAL_STATES)}"
+        )
+        return errors
+    if approval == "answered":
+        if not _nonempty(selection.get("response")):
+            errors.append("docmodel_selection.response must be nonempty when approval is answered")
+    elif "response" in selection:
+        errors.append("docmodel_selection.response must be omitted unless approval is answered")
+    return errors
+
+
 def validate_data(data: Any, profile: Any) -> list[str]:
     errors = validate_profile_data(profile)
     if errors:
@@ -132,7 +163,7 @@ def validate_data(data: Any, profile: Any) -> list[str]:
             "schema_version", "phase", "profile_id", "template_id", "target_snapshot",
             "recorded_at", "records",
         },
-        {"target_document", "profile_applicability"},
+        {"target_document", "profile_applicability", "docmodel_selection"},
         "intake",
     )
     if not isinstance(data, dict):
@@ -157,6 +188,8 @@ def validate_data(data: Any, profile: Any) -> list[str]:
         errors.extend(_validate_profile_applicability(
             data["profile_applicability"], data, profile
         ))
+    if "docmodel_selection" in data:
+        errors.extend(_validate_docmodel_selection(data["docmodel_selection"], not_applicable=not_applicable))
     if not not_applicable and not same_identity(
         data.get("template_id"), profile.get("template_id")
     ):

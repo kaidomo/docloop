@@ -410,3 +410,11 @@ docmodel-approvals 레지스트리 계약은 지원된다. 템플릿별 docmodel
 넘어서는 템플릿 전용 구조 선언 패키지)는 여전히 유보 상태다 —
 `docs/PORTS-gaps-2026-08-20.md`를 참고. §13 round-comparison 생성기는 2026-09-07에
 포팅돼 유보가 아니다. 이식 가능성, 완전성, 모델 독립성에 대한 어떤 보장도 함의되지 않는다.
+
+## 신규 패킷 계약
+
+새 실행은 RUN schema 2이며 동결된 전면 입력·결정 레지스트리를 재검산합니다.
+진입 원장으로 `verify-gate`를 실행한 후 최종 원장·본문에 `audit-delivery`를 실행합니다.
+판단 불가 종결은 exit 5이며 완료 승인과 구별됩니다. 기존 RUN schema 1은 기존 계약을 유지합니다.
+후보 docmodel 선택, 명령 예제, 필수 receipt 필드와 종료 코드는
+[새 패킷 사용 안내](review-gate.md#schema-2-packets-and-staged-result-production)를 따릅니다.

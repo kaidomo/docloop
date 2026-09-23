@@ -72,6 +72,14 @@ completion gate (log the collation results into `reports/_ground_report.md`):
    - a full re-read is conditional on long / high-risk work; a short propagation check (by
      decision-id / key-phrase search) is the default.
 
+## Replacement-scope audit
+For both human and agent consumers, compare the declared scope with the original.
+A full replacement must reproduce retained requirements and complete text, without ellipses.
+A partial replacement must pair an exact source quote and replacement, explicitly preserving
+the surrounding content. An insertion must retain the original beside the addition.
+Check source terminology, sentence endings, density, and formatting as well as meaning.
+Report any omitted retained requirement or ambiguous replacement boundary before handoff.
+
 ## Output
 Run the report script (it lives in the docloop install, NOT in the work folder — use the lib
 path from this prompt's "Run context", e.g. `python3 <docloop-lib>/ground_audit.py manifest.yaml`).
@@ -94,3 +102,17 @@ findings)" or an anchor match alone — the human (document owner) must confirm 
 direction/priority and sign off. On sign-off, flip the chunk's `status` to `approved` (or log the
 sign-off in `_ground_report.md`) to release the draft. Keep verification scaffolding minimal and
 spend that time reading the source instead.
+
+## Imported review evidence
+
+`docloop atb-import-review <packet> <receipt-relative> --manifest manifest.yaml
+(--live <current-full-text> | --no-live)` validates the packet and receipt before import.
+Verified findings become `observations`; unavailable judgments/questions remain
+`pending_issues` for human disposition, never automatic defects, approvals or to-be.
+`needs_revalidation: true` or `thin_source: true` blocks authoring until sources are
+reread and the claim revalidated. Do not clear these flags merely to pass a gate.
+Keep pending IDs and evidence visible in the handoff; they are not chunk members.
+`kind_confidence: low` is a provisional mapping for a human to correct, not certainty.
+Preserve `review_ref`, human overrides and withdrawn markers. Reimport cannot silently
+restore authority withdrawn by a human. Capture/Audit must report remaining unsafe
+observations and pending issues; Chunk/Author must exclude them from executable changes.

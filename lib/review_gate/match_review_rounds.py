@@ -244,7 +244,10 @@ LABELS = {
 LANGUAGES = tuple(VERDICTS)
 
 
-def render_table(rows, curr_ids, new_ids, prev_round, curr_round, lang="ko"):
+NOTRUN_TABLE_HEADER = "# 라운드 대조 미수행(MATCH-NOTRUN)"
+
+
+def render_table(rows, curr_ids, new_ids, prev_round, curr_round, lang="ko", *, notrun_reason=None, empty_side_declared=None):
     """Render the table. `lang` selects the human-readable wording only.
 
     The header line is identical in every language on purpose: it is the byte signature
@@ -253,10 +256,38 @@ def render_table(rows, curr_ids, new_ids, prev_round, curr_round, lang="ko"):
     """
     if lang not in VERDICTS:
         raise ValueError(f"unknown lang {lang!r} (expected one of {', '.join(LANGUAGES)})")
+    if notrun_reason is not None:
+        if lang == "en":
+            return "\n".join([
+                f"{NOTRUN_TABLE_HEADER} — r{prev_round} → r{curr_round}", "",
+                f"**Comparison not performed.** {notrun_reason}", "",
+                "An empty table does not prove that no items remain open.",
+                "Do not bind it as round_context.comparison_ref; check both rounds' ID notation.", "",
+                f"- r{prev_round} IDs: {len(rows)}", f"- r{curr_round} IDs: {len(curr_ids)}", "",
+            ])
+        return "\n".join([
+            f"{NOTRUN_TABLE_HEADER} — r{prev_round} → r{curr_round}",
+            "",
+            f"**이 표는 대조 결과가 아니다.** {notrun_reason}",
+            "",
+            "빈 표는 \"열린 항목이 없다\"가 아니라 **\"아무것도 보지 않았다\"**이며,",
+            "`round_context.comparison_ref`로 receipt에 결속할 수 없다(docauth#347).",
+            "두 산출물의 id 표기를 확인하고 다시 돌린다.",
+            "",
+            f"- r{prev_round} id: {len(rows)}건",
+            f"- r{curr_round} id: {len(curr_ids)}건",
+            "",
+        ])
     verdicts, labels = VERDICTS[lang], LABELS[lang]
     lines = [
         f"# 라운드 대조 — r{prev_round} → r{curr_round}",
         "",
+        *([
+            f"> **mode: allow-empty-side** · empty_side: `{empty_side_declared}`", ">",
+            (f"> r{prev_round if empty_side_declared == 'prev' else curr_round} 쪽 id가 0건인 것을 "
+             "실행자가 **의도된 상태로 선언**했다. 이 표는 그 선언 위에서만 대조 수행으로 읽힌다.")
+            if lang == "ko" else "> The caller explicitly declared this side intentionally empty.", "",
+        ] if empty_side_declared is not None else []),
         *labels["preamble"],
         "",
         labels["prev_heading"].format(prev=prev_round, n=len(rows)),
@@ -297,6 +328,7 @@ def main(argv=None):
         action="store_true",
         help="proceed even when curr-round != prev-round + 1 (warns instead of failing).",
     )
+    parser.add_argument("--allow-empty-side", choices=("prev", "curr"), help="explicitly declare which single round is intentionally empty")
     args = parser.parse_args(argv)
 
     if args.curr_round != args.prev_round + 1:
@@ -325,13 +357,51 @@ def main(argv=None):
         return 1
 
     rows, curr_ids, new_ids = build_table(prev_text, curr_text, args.prev_round, args.curr_round)
-    table = render_table(rows, curr_ids, new_ids, args.prev_round, args.curr_round, args.lang)
+    notrun_reason = None
+    observed_empty = "prev" if not rows else ("curr" if not curr_ids else None)
+    if not rows and not curr_ids:
+        notrun_reason = (
+            f"r{args.prev_round}·r{args.curr_round} 양쪽에서 id를 0건 찾았다."
+        )
+    elif observed_empty is not None and args.allow_empty_side is None:
+        empty = f"r{args.prev_round}" if observed_empty == "prev" else f"r{args.curr_round}"
+        notrun_reason = (
+            f"{empty} 쪽에서 id를 0건 찾았다. 정당하게 빈 라운드라면 "
+            f"`--allow-empty-side {observed_empty}`로 선언하라."
+        )
+    elif args.allow_empty_side is not None and args.allow_empty_side != observed_empty:
+        # Codex 피어리뷰 r3-02: 선언한 방향과 실제 빈 방향이 다르면, 그 선언은 이 실행이
+        # 아니라 다른 상태를 두고 한 것이다 — 통과시키면 id 문법 오류가 "의도된 공백"으로
+        # 위장된다.
+        notrun_reason = (
+            f"`--allow-empty-side {args.allow_empty_side}`로 선언했으나 실제로 비어 있는 쪽은 "
+            + (f"{observed_empty}다" if observed_empty else "없다")
+            + ". 선언 방향과 관측이 어긋난다."
+        )
+    empty_side_declared = (
+        args.allow_empty_side
+        if notrun_reason is None and args.allow_empty_side is not None
+        else None
+    )
+    table = render_table(
+        rows, curr_ids, new_ids, args.prev_round, args.curr_round,
+        lang=args.lang, notrun_reason=notrun_reason, empty_side_declared=empty_side_declared,
+    )
+
+
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(table + "\n")
     else:
         print(table)
+    if notrun_reason is not None:
+        print(f"MATCH-NOTRUN: {notrun_reason}", file=sys.stderr)
+        return 3
+    print(f"MATCH-OK: compared {len(rows)} previous IDs, {len(curr_ids)} current IDs, "
+          f"{len(new_ids)} new candidates" +
+          (f"; mode: allow-empty-side; empty_side: {empty_side_declared}" if empty_side_declared else ""),
+          file=sys.stderr)
     return 0
 
 

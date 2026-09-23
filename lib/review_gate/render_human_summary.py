@@ -41,86 +41,13 @@ from typing import Any
 
 import yaml
 
-# Everything the projection already decided is imported, never re-derived here:
-# the renderer's job is to lay out a projection, not to interpret a receipt a second time.
-try:  # Package import in tests; sibling import when executed as a script.
-    from .summary_projection import (
-        ALL_TAGS,
-        ANCHOR_BLANK_LINE,
-        ANCHOR_UNRESOLVED,
-        CONTROLLED_VOCAB,
-        FALLBACK_TAG,
-        MATCH_STRENGTHS,
-        NO_ANCHORS,
-        POLICY,
-        QUESTION_STATUSES,
-        RENDERED_BY_NOTICE,
-        SEVERITY_ORDER,
-        VERIFY_RESULTS,
-        WRAPPED_PROJECTIONS,
-        ContainerError,
-        FieldPolicy,
-        Strength,
-        StructuralError,
-        TargetDoc,
-        UsageError,
-        _display_or_none,
-        _finding_anchors,
-        _list_field,
-        _normalize_ws,
-        _require_str,
-        _SAFE_ID_RE,
-        anchor_list,
-        bind_target_to_receipt,
-        display_text,
-        load_receipt,
-        load_receipt_from_bytes,
-        read_source_bytes,
-        receipt_target_bindings,
-        excerpt,
-        unwrap,
-        validate_anchor_token,
-        wrap,
-    )
-except ImportError:  # pragma: no cover - exercised by CLI dispatch
-    from summary_projection import (
-        ALL_TAGS,
-        ANCHOR_BLANK_LINE,
-        ANCHOR_UNRESOLVED,
-        CONTROLLED_VOCAB,
-        FALLBACK_TAG,
-        MATCH_STRENGTHS,
-        NO_ANCHORS,
-        POLICY,
-        QUESTION_STATUSES,
-        RENDERED_BY_NOTICE,
-        SEVERITY_ORDER,
-        VERIFY_RESULTS,
-        WRAPPED_PROJECTIONS,
-        ContainerError,
-        FieldPolicy,
-        Strength,
-        StructuralError,
-        TargetDoc,
-        UsageError,
-        _display_or_none,
-        _finding_anchors,
-        _list_field,
-        _normalize_ws,
-        _require_str,
-        _SAFE_ID_RE,
-        anchor_list,
-        bind_target_to_receipt,
-        display_text,
-        load_receipt,
-        load_receipt_from_bytes,
-        read_source_bytes,
-        receipt_target_bindings,
-        excerpt,
-        unwrap,
-        validate_anchor_token,
-        wrap,
-    )
+# 앵커 해석은 audit_quotes.py가 이미 정의한 의미론을 그대로 쓴다(#207 2안: `A<hash>`
+# 안정 식별자 + 레거시 `L<n>`). 여기서 다시 구현하면 두 도구가 같은 앵커를 다르게
+# 읽는 순간 사람 요약과 인용 검산기가 서로 다른 원문을 가리키게 된다.
+try:
+    from .summary_projection import (ALL_TAGS, ANCHOR_BLANK_LINE, ANCHOR_UNRESOLVED, CONTROLLED_VOCAB, FALLBACK_TAG, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, JU_RESULT_ORDER, MATCH_STRENGTHS, NO_ANCHORS, REGISTRY_STATE_TOKENS, POLICY, QUESTION_STATUSES, ABSENCE_CLASSES, ABSENCE_PROMPT, RENDERED_BY_NOTICE, SEVERITY_ORDER, VERIFY_RESULTS, WRAPPED_PROJECTIONS, ContainerError, FieldPolicy, Strength, StructuralError, TargetDoc, UsageError, _display_or_none, _finding_anchors, _list_field, _normalize_ws, _require_str, _SAFE_ID_RE, anchor_list, bind_target_to_receipt, display_text, load_receipt, load_receipt_from_bytes, read_source_bytes, receipt_target_bindings, excerpt, unwrap, validate_anchor_token, wrap)
+except ImportError:
+    from summary_projection import (ALL_TAGS, ANCHOR_BLANK_LINE, ANCHOR_UNRESOLVED, CONTROLLED_VOCAB, FALLBACK_TAG, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, JU_RESULT_ORDER, MATCH_STRENGTHS, NO_ANCHORS, REGISTRY_STATE_TOKENS, POLICY, QUESTION_STATUSES, ABSENCE_CLASSES, ABSENCE_PROMPT, RENDERED_BY_NOTICE, SEVERITY_ORDER, VERIFY_RESULTS, WRAPPED_PROJECTIONS, ContainerError, FieldPolicy, Strength, StructuralError, TargetDoc, UsageError, _display_or_none, _finding_anchors, _list_field, _normalize_ws, _require_str, _SAFE_ID_RE, anchor_list, bind_target_to_receipt, display_text, load_receipt, load_receipt_from_bytes, read_source_bytes, receipt_target_bindings, excerpt, unwrap, validate_anchor_token, wrap)
 
 #: 설계 §5 Q2 — 사람이 실사용에서 검증한 9종 카테고리를 v1 vocab으로 채택.
 #: 렌더러의 고정 테이블로만 존재한다(§4 의무 필드가 아니다).
@@ -340,6 +267,67 @@ def _render_rejected_section(rows: list[dict[str, Any]], target: TargetDoc) -> s
     return "\n".join(lines)
 
 
+def _ju_row(record: dict[str, Any], kind: str) -> dict[str, Any]:
+    """docauth#369 — 판단 불가 항목의 투영(finding·question 공통).
+
+    싣는 것: id · 종류(finding P[123] / question) · reason(enum) · needed_input(산문, 감쌈) ·
+    attempts 수·result 분포(**attempts에서 재계산**). 싣지 않는 것: basis·verifier_id·
+    evidence(검증자 산문 — POLICY 미투영 행, 사람은 receipt에서 본다).
+    """
+    if kind == "finding":
+        record_id = _require_str(record.get("finding_id"), "judgment_unavailable finding.finding_id")
+        anchors = _finding_anchors(record)
+        severity = record.get("severity")
+        if severity not in SEVERITY_ORDER:
+            raise StructuralError(f"{record_id}: severity {severity!r} is not P1/P2/P3")
+    else:
+        record_id = _require_str(record.get("record_id"), "judgment_unavailable question.record_id")
+        anchors = anchor_list(record, "evidence_anchors", record_id)
+        severity = None
+    if not _SAFE_ID_RE.match(record_id):
+        raise StructuralError(f"judgment_unavailable id {record_id!r} does not match {_SAFE_ID_RE.pattern}")
+    block = record.get("judgment_unavailable")
+    if not isinstance(block, dict):
+        raise StructuralError(f"{record_id}: status judgment_unavailable requires a judgment_unavailable mapping")
+    reason = _require_enum(block.get("reason"), JUDGMENT_UNAVAILABLE_REASONS, f"{record_id}.judgment_unavailable.reason")
+    needed_input = _require_str(block.get("needed_input"), f"{record_id}.judgment_unavailable.needed_input")
+    attempts = block.get("attempts")
+    if not isinstance(attempts, list) or not attempts:
+        raise StructuralError(f"{record_id}: judgment_unavailable.attempts must be a nonempty list")
+    counts: dict[str, int] = {}
+    for attempt in attempts:
+        result = attempt.get("result") if isinstance(attempt, dict) else None
+        if result not in JU_RESULT_ORDER:
+            raise StructuralError(f"{record_id}: judgment_unavailable attempt result {result!r} is not pass/kill/unresolved")
+        counts[result] = counts.get(result, 0) + 1
+    return {
+        "id": record_id,
+        "kind": kind,
+        "severity": severity,
+        "reason": reason,
+        "needed_input": display_text(_normalize_ws(needed_input)),
+        "attempt_count": len(attempts),
+        "result_dist": " · ".join(f"{r} {counts[r]}" for r in JU_RESULT_ORDER if counts.get(r)),
+        "evidence_anchors": list(anchors),
+    }
+
+
+def _render_ju_section(rows: list[dict[str, Any]], target: TargetDoc) -> str:
+    if not rows:
+        return "판단 불가 항목 없음.\n"
+    n_f = sum(1 for r in rows if r["kind"] == "finding")
+    n_q = len(rows) - n_f
+    lines = [f"총 {len(rows)}건 (finding {n_f} · question {n_q}) — 종결된 리뷰 결론이지만 승인·억제의 근거로 쓸 수 없다\n"]
+    for row in rows:
+        kind_label = f"finding {row['severity']}" if row["kind"] == "finding" else "question"
+        lines.append(f"- **{row['id']}** ({kind_label} · {row['reason']})")
+        lines.append(f"  - 필요 입력: {wrap(row['needed_input'])}")
+        lines.append(f"  - 시도: {row['attempt_count']}자 ({row['result_dist']})")
+        lines.extend(_render_locator_lines(row["evidence_anchors"], target))
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _render_drift_section(drifts: list[dict[str, Any]], target: TargetDoc) -> str:
     if not drifts:
         return "표기·용어 드리프트 없음.\n"
@@ -431,14 +419,39 @@ def _render_questions_section(questions: list[dict[str, Any]], target: TargetDoc
             verification.get("result"), VERIFY_RESULTS,
             f"{record_id}.classification_verification.result",
         )
+        # docauth#351: 부재 계열 question은 판정문이 아니라 **처분 질문지**로 — 저자가 ○/×만 찍는다.
+        absence = question.get("absence_class")
+        suffix = ""
+        if absence is not None:
+            absence = _require_enum(absence, ABSENCE_CLASSES, f"{record_id}.absence_class")
+            suffix = f" · 부재 {absence}"
         lines.append(
-            f"- **{record_id}** ({wrap(display_text(_normalize_ws(slot)))} · {status} · 검증 {result})"
+            f"- **{record_id}** ({wrap(display_text(_normalize_ws(slot)))} · {status} · 검증 {result}{suffix})"
         )
+        if absence is not None:
+            # 구현 r1-01: 인접 앵커도 폐쇄 문법(anchor_list) + evidence_anchors 부분집합 — 표시 필드에
+            # Markdown 링크 등이 새지 않게(finding 앵커와 같은 규칙).
+            evidence = anchor_list(question, "evidence_anchors", record_id)
+            adjacent = anchor_list(question, "adjacent_anchors", record_id) if "adjacent_anchors" in question else []
+            if not set(adjacent).issubset(set(evidence)):
+                raise StructuralError(f"{record_id}.adjacent_anchors must be a subset of evidence_anchors")
+            rendered = ", ".join(adjacent) or "없음"
+            lines.append(f"  - 인접: {rendered}")
+            lines.append(f"  - 처분 ○/×: {ABSENCE_PROMPT}")
         lines.extend(
             _render_locator_lines(anchor_list(question, "evidence_anchors", record_id), target)
         )
         lines.append("")
     return "\n".join(lines)
+
+
+def _registry_token(receipt: dict[str, Any]) -> str:
+    state = receipt.get("decision_registry_state")
+    if state is not None and state not in REGISTRY_STATE_TOKENS:
+        raise StructuralError(
+            f"decision_registry_state {state!r} is not checked/absent_unassured/present_unchecked (#352)"
+        )
+    return REGISTRY_STATE_TOKENS[state]
 
 
 def _render_manifest(
@@ -448,6 +461,7 @@ def _render_manifest(
     rejected_rows: list[dict[str, Any]],
     rerun: bool,
     agent_invoked: bool,
+    ju_rows: list[dict[str, Any]] | None = None,
 ) -> str:
     # 설계 §5 Q3의 opt-in disclosure 계약 shape를 그대로 따른다 — Codex impl-r1-08:
     # source_receipt는 rendered_by 아래 nested, agent_count는 태깅 에이전트가 실제로
@@ -478,6 +492,15 @@ def _render_manifest(
                 "counter_citation_verdict": r["counter_citation_verdict"],
             }
             for r in rejected_rows
+        ]
+        # docauth#369: 판단 불가 항목 — finding은 finding_id·severity, question은 record_id(severity 없음).
+        + [
+            (
+                {"finding_id": j["id"], "severity": j["severity"], "status": JUDGMENT_UNAVAILABLE, "reason": j["reason"]}
+                if j["kind"] == "finding"
+                else {"record_id": j["id"], "status": JUDGMENT_UNAVAILABLE, "reason": j["reason"]}
+            )
+            for j in (ju_rows or [])
         ],
     }
     dumped = yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False)
@@ -499,12 +522,14 @@ def render(
     findings = receipt["findings"]
     verified = [f for f in findings if f.get("status") == "verified"]
     rejected = [f for f in findings if f.get("status") == "rejected"]
-    unknown = [f for f in findings if f.get("status") not in ("verified", "rejected")]
+    # docauth#369: 판단 불가는 terminal 결론이다(exit 5 receipt) — 별도 절에 싣는다.
+    unavailable = [f for f in findings if f.get("status") == JUDGMENT_UNAVAILABLE]
+    unknown = [f for f in findings if f.get("status") not in ("verified", "rejected", JUDGMENT_UNAVAILABLE)]
     if unknown:
         raise StructuralError(
-            "findings with status outside {verified, rejected} found: "
-            f"{[f.get('finding_id') for f in unknown]} — receipt is not done "
-            "(CONTRACT §0 requires every finding to be verified or rejected)"
+            "findings with status outside {verified, rejected, judgment_unavailable} found: "
+            f"{[f.get('finding_id') for f in unknown]} — receipt is not terminal "
+            "(CONTRACT §0·docauth#369: every finding must be verified, rejected, or judgment_unavailable)"
         )
 
     for f in findings:
@@ -518,6 +543,11 @@ def render(
 
     cards = [_verified_card(f, tags.get(f.get("finding_id"))) for f in verified]
     rejected_rows = [_rejected_row(f) for f in rejected]
+    questions = list(_list_field(receipt.get("questions"), "receipt.questions"))
+    ju_rows = [_ju_row(f, "finding") for f in unavailable] + [
+        _ju_row(q, "question") for q in questions
+        if isinstance(q, dict) and q.get("status") == JUDGMENT_UNAVAILABLE
+    ]
 
     parts = [
         "# 사람이 읽는 요약\n",
@@ -526,32 +556,36 @@ def render(
         # #314 항목 2: 인용문이 어느 판본의 원문에서 나왔는지 결속한다 — 이 줄이
         # 없으면 인용은 검산할 수 없는 문자열일 뿐이다.
         f"대상 문서: `{target.path}` (sha256:{target.sha256})\n",
+        # docauth#352: 레지스트리 상태 표식 — receipt 선언에서 파생(감사기가 대조).
+        f"레지스트리: {_registry_token(receipt)}\n",
         "\n## 검증된 지적\n",
         _render_verified_section(cards, target),
         "\n## 반증된 지적\n",
         _render_rejected_section(rejected_rows, target),
+        "\n## 판단 불가\n",
+        _render_ju_section(ju_rows, target),
         "\n## 표기·용어 드리프트\n",
         _render_drift_section(list(_list_field(receipt.get("drifts"), "receipt.drifts")), target),
         "\n## 미확정 규약에 걸린 미결\n",
-        _render_questions_section(list(_list_field(receipt.get("questions"), "receipt.questions")), target),
+        _render_questions_section(questions, target),
         "\n---\n",
-        _render_manifest(receipt_path, receipt_sha256, cards, rejected_rows, rerun, agent_invoked),
+        _render_manifest(receipt_path, receipt_sha256, cards, rejected_rows, rerun, agent_invoked, ju_rows),
     ]
     return "\n".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("review", type=Path, help="the done receipt to render (review.md)")
-    parser.add_argument("--output", type=Path, required=True, help="where to write summary.md")
-    parser.add_argument("--tags", type=Path, default=None, help="tag file from the tagging step (optional; everything renders as 미분류 without it)")
+    parser.add_argument("review", type=Path, help="입력 receipt (review.md)")
+    parser.add_argument("--output", type=Path, required=True, help="출력 summary.md 경로")
+    parser.add_argument("--tags", type=Path, default=None, help="태깅 에이전트 중간 산출물(선택)")
     parser.add_argument(
         "--target-doc",
         type=Path,
         required=True,
-        help="the full review target document -- the source evidence_anchors are resolved against",
+        help="리뷰 대상 문서 전문 — evidence_anchors를 실제 인용문으로 푸는 원천(#314 항목 2)",
     )
-    parser.add_argument("--force", action="store_true", help="re-render over an existing output (refused without it; a re-render says so in the output)")
+    parser.add_argument("--force", action="store_true", help="출력 파일이 이미 있어도 덮어쓴다")
     args = parser.parse_args(argv)
 
     rerun = args.output.exists()

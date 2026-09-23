@@ -192,7 +192,7 @@ uses the equivalent two-digit-minimum anchors in `TERM_SCAN.md` for synthesis/au
 `FrontGateTrace` object — the same ordering guard upstream calls `review_front_gate.py`,
 except docloop never exposes it as a separate command; it only runs inside `prepare`.
 The resulting event sequence (`convention_intake_validated` or
-`convention_profile_not_applicable`, then `input_gate_recorded`, then three
+`convention_profile_not_applicable`, then `input_gate_recorded`, `decision_registry_recorded`, then three
 `lens_started` events) is frozen to `deterministic/FRONT_GATE_TRACE.json` and hash-bound.
 A done receipt's `front_gate_ref` must name this exact file by path and sha256 — a
 receipt cannot independently redeclare `editing_state`/`target_maturity` as something
@@ -429,3 +429,83 @@ generalization (a template-specific structure-declaration package, beyond the ge
 schema) remains deferred — see `docs/PORTS-gaps-2026-08-20.md`. The §13 round-comparison
 generator was ported on 2026-09-07 and is no longer deferred. No transferability,
 completeness, or model-independence guarantee is implied.
+
+## Schema 2 packets and staged result production
+
+New `prepare` runs use **RUN schema 2**, receipt `schema_version: 2` and
+`docloop_contract_version: 2`. Genuine RUN schema 1 packets retain their old v2
+receipt contract. Unknown/missing versions fail; removing a new archive cannot
+select legacy behavior. `--legacy` is historical field inspection only (exit 4),
+and refuses a new packet. Do not rewrite or reseal old prepared packets to migrate;
+prepare a new run from explicitly selected inputs.
+
+Profile, intake and input-gate inputs are archived at packet root as
+`front_gate_profile.yaml`, `front_gate_intake.yaml`, `front_gate_input_gate.yaml`.
+`front_gate_decisions_state.json` records frozen registry state; checked registries
+include the full transitive includes/provenance/signoff union. Source files changed
+after preparation do not change that run. Final validation replays the frozen inputs.
+
+`--decisions-unchecked FILE` explicitly captures an unreviewed registry as
+`present_unchecked`; it provides no suppression authority. `--unassured` records
+`absent_unassured`; validated `--decisions FILE` records `checked`.
+
+For explicit candidate selection, replace `--docmodel`/`--no-docmodel` with repeated
+`--docmodel-candidate FILE` plus `--docmodel-approvals FILE` and a real convention
+profile/intake pair declaring the profile inapplicable. Candidate paths are review-folder
+relative. A single approved heading match, or a valid explicit intake selection, is
+frozen into L3 and the structure trace. Zero/ambiguous matches stay undetermined;
+invalid explicit selections fail. No ambient filesystem discovery is performed.
+
+After the lenses and synthesis produce an entry ledger:
+
+```bash
+# All these relative paths belong to PACKET; each attempt ID must be new.
+docloop review-gate verify-gate PACKET verify-01 results/ENTRY.yaml
+# Give each independent verifier its verify_units input. Preserve ENTRY.yaml.
+# Write a separate final ledger and actual findings after verification.
+docloop review-gate audit-delivery PACKET delivery-01 \
+  results/FINAL.yaml results/FINDINGS.md --lens results/L1.md results/L3.md \
+  --l2 results/L2.md
+```
+
+When used, `--scan deterministic/TERM_SCAN.md` binds the prepared scan. Other supplied
+lens/scan/findings files and both ledgers must be packet-relative `results/` files.
+Attempts live under `results/<attempt-id>/`, are never reused, and become consumable
+only after their `COMPLETE.json`. Failed attempts remain diagnostic evidence.
+
+Copy the scaffold fields into the receipt, then add `verify_gate_ref` with the trace's
+packet-relative `path` and byte `sha256`. `classification_ledger_ref` must also declare
+the final ledger's integer `schema_version`. `anchor_guard_ref` names the real findings
+with `path`/`sha256` and the separate delivery trace with `trace_path`/`trace_sha256`.
+The entry ledger, source quotes and verification units are recomputed; the anchor
+trace must bind the final ledger, findings and all supplied lens/scan sources.
+`review-gate check` still proves preparation only.
+
+Initial finding/question verification may end in `judgment_unavailable` after the
+required independent attempts, with reason, basis and needed input. This is terminal
+but **not document clearance**. Record `execution_status` and `document_clearance`
+from the final public records. Unresolved delta verification after an applied change
+remains blocking. Absence questions retain `absence_class` and `adjacent_anchors`;
+people may use the shipped dispositions schema to record a decision, never automatic
+promotion to a defect or authority.
+
+| validate-result exit | Meaning |
+| --- | --- |
+| 0 | Done; all required gates passed |
+| 1 | Invalid/incomplete result |
+| 3 | Verification deferred, not done |
+| 4 | Legacy fields inspected, not a done verdict |
+| 5 | Complete-indeterminate; judgments remain unavailable |
+
+Summary rendering/auditing preserves registry state, absence questions and unavailable
+judgments. A rendered summary cannot upgrade exit 5 to done.
+
+Round comparison returns exit 3 with `MATCH-NOTRUN` for an empty side unless the
+single intentional empty side is declared by `--allow-empty-side prev|curr`.
+Both sides empty, a wrong-side declaration or unnecessary declaration still fail.
+A NOTRUN table cannot satisfy a done receipt's comparison requirement.
+
+For a prepared input gate that defers verification, `verify-gate` refuses to open.
+`audit-delivery` may audit its open intermediate ledger; a matching receipt omits
+`verify_gate_ref` and returns exit 3. For frozen inputs, the delivery ledger must
+still be closed. Receipt declarations cannot relax this prepared-state boundary.

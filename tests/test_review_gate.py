@@ -350,7 +350,7 @@ with tempfile.TemporaryDirectory() as td:
     check(
         "front-gate/happy path records input gate then starts all three lenses",
         r.returncode == 0
-        and events == ["convention_profile_not_applicable", "input_gate_recorded", "lens_started", "lens_started", "lens_started"]
+        and events == ["convention_profile_not_applicable", "input_gate_recorded", "decision_registry_recorded", "lens_started", "lens_started", "lens_started"]
         and input_gate_event is not None
         and input_gate_event.get("editing_state") == "frozen"
         and input_gate_event.get("source_copy_verified") is True

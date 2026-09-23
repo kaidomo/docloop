@@ -1,0 +1,28 @@
+# review-gate receipt → asistobe-auth 관찰 변환 계약 (docauth#354, 결정 A5)
+#
+# 정본은 이 파일이다. 프로젝트가 다른 매핑을 쓰려면 이 파일을 복사해
+# `import_review_receipt.py --contract <경로>`로 넘긴다(policy 층 — 스킬 코드에 하드코딩 금지).
+#
+# 매핑의 **입력은 receipt에 실재하는 필드**만이다. #354 표의 "유형(누락·모호·충돌)"은
+# review-gate receipt·§4 의무 6필드에 없는 값(렌즈 산문에만 있음)이라 입력으로 쓰지 않는다 —
+# 대신 §4 판정표의 심각도 경로(P1 동작 갈림 / P2 데이터·정합 오류 / P3 문구·표기)를 쓴다.
+# 사람이 manifest에서 kind를 고치면 그 값이 이긴다(재실행이 덮어쓰지 않도록 `review_ref`가
+# 있는 관찰만 어댑터 소유 필드를 갱신한다 — 상세는 스크립트 docstring).
+schema_version: 1
+
+# review-gate finding.severity → asistobe observation.kind
+# (asistobe 기본 택소노미: bug | intent_gap | improvement | new — validate_manifest.KIND_DEFAULT)
+kind_by_severity:
+  P1: intent_gap      # 동작이 갈린다 = 의도와 구현/서술의 차이
+  P2: bug             # 데이터·정합 오류
+  P3: improvement     # 문구·표기
+
+# 반대 인용이 지적을 **일부** 해소한 finding(§4.3 좁힘, counter_citation_verdict: partial)은
+# kind 판정의 확신도를 낮춘다. none → high, partial → low. (full은 verified와 양립 불가.)
+kind_confidence_by_counter_citation_verdict:
+  none: high
+  partial: low
+
+# 관찰 id 접두. 같은 receipt를 재실행해도 같은 id가 나와 upsert가 멱등이다.
+observation_id_prefix: "RG-"
+pending_issue_id_prefix: "RGQ-"

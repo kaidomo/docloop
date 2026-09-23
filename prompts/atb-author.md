@@ -39,6 +39,18 @@ human reads and applies by hand — not an agent handoff.
 - To-be is normative, not implementation-following. Forbidden words come from the change-plan policy.
 - Idempotent: re-running re-authors only chunks whose status/evidence changed.
 
+
+## Source style and replacement scope (every consumer)
+Preserve the source document's terminology, sentence endings, density, and formatting.
+This applies to both `consumer: human` and `consumer: agent`, including design prose.
+Declare each edit as a full replacement, a partial replacement, or an insertion:
+- Full replacement: supply the complete replacement block, including all retained content.
+  No ellipsis or “unchanged” placeholder may stand in for text inside that block.
+- Partial replacement: pair an exact, uniquely located source quote with its exact replacement;
+  explicitly leave the rest unchanged. Do not present a partial quote as a whole-section replacement.
+- Insertion: show the preserved original together with the addition and the exact insertion point.
+Account for every retained requirement in the replacement scope before delivery.
+
 ## Executable apply-instruction contract (execution-oriented output only)
 "Summarizing into" and "transcribing for paste" are different jobs easily done with the same
 hand. When the output is an instruction a human or agent executes verbatim — an apply-instruction,
@@ -60,3 +72,17 @@ text". Per item:
   rows); for a non-table worklist, by item count / dependency-pair count or whatever unit fits.
 
 Write the body to `project.ssot`, fill each authored chunk's `asis`/`tobe` and set its `status` to `draft`, and return a summary as your final message.
+
+## Imported review evidence
+
+`docloop atb-import-review <packet> <receipt-relative> --manifest manifest.yaml
+(--live <current-full-text> | --no-live)` validates the packet and receipt before import.
+Verified findings become `observations`; unavailable judgments/questions remain
+`pending_issues` for human disposition, never automatic defects, approvals or to-be.
+`needs_revalidation: true` or `thin_source: true` blocks authoring until sources are
+reread and the claim revalidated. Do not clear these flags merely to pass a gate.
+Keep pending IDs and evidence visible in the handoff; they are not chunk members.
+`kind_confidence: low` is a provisional mapping for a human to correct, not certainty.
+Preserve `review_ref`, human overrides and withdrawn markers. Reimport cannot silently
+restore authority withdrawn by a human. Capture/Audit must report remaining unsafe
+observations and pending issues; Chunk/Author must exclude them from executable changes.

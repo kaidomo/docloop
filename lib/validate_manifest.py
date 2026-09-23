@@ -23,6 +23,9 @@ def _str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+KIND_CONFIDENCE = {"high", "low"}
+PENDING_KINDS = {"judgment_unavailable", "open_question"}
+
 def validate(m):
     """Returns (errors, warnings). If there are errors, execution must abort."""
     E, W = [], []
@@ -227,9 +230,44 @@ def validate(m):
                 E.append(f"{tag}: sources must be a list of strings ({s!r})")
             if o.get("verified") is True and not o.get("sources"):
                 W.append(f"{tag}: verified=true but sources is empty (a confirmed claim with no evidence location — as-is grounding gate risk)")
+            # docauth#354: 어댑터 필드 형식 + 모순 차단(신선도 미확인·얇은 원천인데 verified=true는 근거 게이트 위반)
+            for flag in ("needs_revalidation", "thin_source"):
+                fv = o.get(flag)
+                if fv is not None and not isinstance(fv, bool):
+                    E.append(f"{tag}: {flag}는 bool이어야 함 ({fv!r})")
+                elif fv is True and o.get("verified") is True:
+                    E.append(f"{tag}: {flag}=true인데 verified=true(재판정·재독 전에는 근거 확정이 아님 — 어댑터 규칙)")
+            kc = o.get("kind_confidence")
+            if kc is not None and (not isinstance(kc, str) or kc not in KIND_CONFIDENCE):
+                E.append(f"{tag}: kind_confidence '{kc}' 무효(허용 {KIND_CONFIDENCE})")
+            rr = o.get("review_ref")
+            if rr is not None:
+                if not isinstance(rr, dict) or not rr.get("receipt") or not rr.get("record_id"):
+                    E.append(f"{tag}: review_ref는 receipt·record_id를 가진 매핑이어야 함 ({rr!r})")
         for oid, c in dup_o.items():
             if c > 1:
                 E.append(f"duplicate observation id: '{oid}' ×{c}")
+
+    # ── pending_issues (docauth#354 — 어댑터가 옮긴 미결: 관찰이 아니라 청크 issues 후보) ──
+    pend = m.get("pending_issues")
+    if pend is not None:
+        if not isinstance(pend, list):
+            E.append("pending_issues가 리스트가 아님")
+        else:
+            seen_p = {}
+            for i, pi in enumerate(pend):
+                tag = f"pending_issues[{i}]"
+                if not isinstance(pi, dict) or not isinstance(pi.get("id"), str) or not pi.get("id"):
+                    E.append(f"{tag}: id 누락/형식오류"); continue
+                seen_p[pi["id"]] = seen_p.get(pi["id"], 0) + 1
+                pk = pi.get("kind")
+                if not isinstance(pk, str) or pk not in PENDING_KINDS:
+                    E.append(f"pending_issue '{pi['id']}': kind '{pk}' 무효(허용 {PENDING_KINDS})")
+                if pi["id"] in obs_ids:
+                    E.append(f"pending_issue '{pi['id']}': observations[]와 id 충돌(미결은 관찰이 아니다)")
+            for pid, c in seen_p.items():
+                if c > 1:
+                    E.append(f"pending_issue id 중복: '{pid}' ×{c}")
 
     chunks = m.get("chunks")
     if chunks is not None:

@@ -39,60 +39,19 @@ from typing import Any
 
 import yaml
 
-try:  # Package import in tests; sibling import when executed as a script.
-    from .validate_convention_profile import DuplicateKeyError, StrictLoader
-    from .summary_projection import (
-        ALL_TAGS,
-        ANCHOR_BLANK_LINE,
-        ANCHOR_UNRESOLVED,
-        FALLBACK_TAG,
-        MATCH_STRENGTHS,
-        NO_ANCHORS,
-        QUESTION_STATUSES,
-        RENDERED_BY_NOTICE,
-        SEVERITY_ORDER,
-        VERIFY_RESULTS,
-        ContainerError,
-        StructuralError as RenderStructuralError,
-        TargetDoc,
-        _display_or_none,
-        _list_field,
-        anchor_list,
-        bind_target_to_receipt,
-        display_text,
-        excerpt,
-        load_receipt_from_bytes,
-        read_source_bytes,
-        unwrap,
-        validate_anchor_token,
-    )
-except ImportError:  # pragma: no cover - exercised by CLI dispatch
-    from validate_convention_profile import DuplicateKeyError, StrictLoader
-    from summary_projection import (
-        ALL_TAGS,
-        ANCHOR_BLANK_LINE,
-        ANCHOR_UNRESOLVED,
-        FALLBACK_TAG,
-        MATCH_STRENGTHS,
-        NO_ANCHORS,
-        QUESTION_STATUSES,
-        RENDERED_BY_NOTICE,
-        SEVERITY_ORDER,
-        VERIFY_RESULTS,
-        ContainerError,
-        StructuralError as RenderStructuralError,
-        TargetDoc,
-        _display_or_none,
-        _list_field,
-        anchor_list,
-        bind_target_to_receipt,
-        display_text,
-        excerpt,
-        load_receipt_from_bytes,
-        read_source_bytes,
-        unwrap,
-        validate_anchor_token,
-    )
+try:
+    from .validate_convention_profile import (DuplicateKeyError, StrictLoader)
+except ImportError:
+    from validate_convention_profile import (DuplicateKeyError, StrictLoader)
+
+# **감사기는 렌더러를 import하지 않는다**(재설계 S2, 설계 §8). 두 소비자가 공유하는
+# 것은 경계 모듈 하나뿐이며, 렌더된 본문의 파싱과 대조는 여기서 독립 구현한다 —
+# 감사기가 렌더러의 산출 함수를 재사용하면 "재실행 후 비교"가 되어 2차 방어선의
+# 의미가 사라진다. 이 규칙은 tests/test_summary_policy.py의 T8이 강제한다.
+try:
+    from .summary_projection import (ALL_TAGS, ANCHOR_BLANK_LINE, ANCHOR_UNRESOLVED, FALLBACK_TAG, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, JU_RESULT_ORDER, MATCH_STRENGTHS, NO_ANCHORS, REGISTRY_STATE_TOKENS, QUESTION_STATUSES, ABSENCE_CLASSES, ABSENCE_PROMPT, RENDERED_BY_NOTICE, SEVERITY_ORDER, VERIFY_RESULTS, ContainerError, StructuralError as RenderStructuralError, TargetDoc, _display_or_none, _list_field, anchor_list, bind_target_to_receipt, display_text, excerpt, load_receipt_from_bytes, read_source_bytes, unwrap, validate_anchor_token)
+except ImportError:
+    from summary_projection import (ALL_TAGS, ANCHOR_BLANK_LINE, ANCHOR_UNRESOLVED, FALLBACK_TAG, JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE_REASONS, JU_RESULT_ORDER, MATCH_STRENGTHS, NO_ANCHORS, REGISTRY_STATE_TOKENS, QUESTION_STATUSES, ABSENCE_CLASSES, ABSENCE_PROMPT, RENDERED_BY_NOTICE, SEVERITY_ORDER, VERIFY_RESULTS, ContainerError, StructuralError as RenderStructuralError, TargetDoc, _display_or_none, _list_field, anchor_list, bind_target_to_receipt, display_text, excerpt, load_receipt_from_bytes, read_source_bytes, unwrap, validate_anchor_token)
 
 _ID = r"[A-Za-z0-9][A-Za-z0-9_.\-]*"
 
@@ -111,6 +70,7 @@ _SOURCE_BINDING_RE = re.compile(r"^정본: `(?P<path>.+?)` \(sha256:(?P<sha256>[
 _TOP_SECTION_HEADERS = (
     "## 검증된 지적",
     "## 반증된 지적",
+    "## 판단 불가",          # docauth#369
     "## 표기·용어 드리프트",
     "## 미확정 규약에 걸린 미결",
 )
@@ -154,6 +114,8 @@ _LOCATOR_MARKER_RE = re.compile(
     + re.escape(ANCHOR_UNRESOLVED) + r"|" + re.escape(ANCHOR_BLANK_LINE) + r")$"
 )
 _LOCATOR_NONE_RE = re.compile(r"^  - 위치 " + re.escape(NO_ANCHORS) + r"$")
+_REGISTRY_TOKEN_ALT = "|".join(re.escape(t) for t in REGISTRY_STATE_TOKENS.values())
+_REGISTRY_LINE_RE = re.compile(rf"^레지스트리: (?P<registry_state>{_REGISTRY_TOKEN_ALT})$")
 _TARGET_BINDING_RE = re.compile(
     r"^대상 문서: `(?P<path>.+?)` \(sha256:(?P<sha256>[0-9a-f]{64})\)$"
 )
@@ -170,6 +132,20 @@ _DRIFT_SUMMARY_RE = re.compile(r"^총 (?P<count>\d+)건 \(drift count = len\(dri
 _DRIFT_ITEM_RE = re.compile(r"^- (?P<detail>.+) \(앵커: (?P<anchors>.*)\)$")
 _DRIFT_VARIANT_RE = re.compile(r"^  - (?P<notation>.+) — (?P<anchors>.*)$")
 
+#: docauth#369 판단 불가 절. reason·kind는 원천 파생 문자열이지만 enum/닫힌 문법이라
+#: 감싸지 않고 문법 자체로 좁힌다(question_status와 같은 패턴). needed_input은 산문이라 감싼다.
+_JU_EMPTY_RE = re.compile(r"^판단 불가 항목 없음\.$")
+_JU_SUMMARY_RE = re.compile(
+    r"^총 (?P<count>\d+)건 \(finding (?P<nf>\d+) · question (?P<nq>\d+)\) — "
+    r"종결된 리뷰 결론이지만 승인·억제의 근거로 쓸 수 없다$"
+)
+_JU_REASON_ALT = "|".join(sorted(JUDGMENT_UNAVAILABLE_REASONS))
+_JU_ITEM_RE = re.compile(
+    rf"^- \*\*(?P<id>{_ID})\*\* \((?P<kind>finding P[123]|question) · (?P<reason>{_JU_REASON_ALT})\)$"
+)
+_JU_NEEDED_RE = re.compile(r"^  - 필요 입력: (?P<text>.+)$")
+_JU_ATTEMPTS_RE = re.compile(r"^  - 시도: (?P<count>\d+)자 \((?P<dist>.+)\)$")
+
 _QUESTIONS_EMPTY_RE = re.compile(r"^미확정 규약에 걸린 미결 없음\.$")
 _QUESTIONS_SUMMARY_RE = re.compile(r"^총 (?P<count>\d+)건 \(severity 없음 — CONTRACT §3\)$")
 #: S3: v2 question 레코드의 **필수 필드**만 싣는 새 형식.
@@ -179,10 +155,16 @@ _QUESTIONS_SUMMARY_RE = re.compile(r"^총 (?P<count>\d+)건 \(severity 없음 �
 #: `_require_enum`과 **대칭**이다 — 한쪽만 고치면 손편집이 다시 통과한다.
 _Q_STATUS_ALT = "|".join(sorted(QUESTION_STATUSES))
 _Q_RESULT_ALT = "|".join(sorted(VERIFY_RESULTS))
+_Q_ABSENCE_ALT = "|".join(sorted(ABSENCE_CLASSES))
 _QUESTIONS_ID_RE = re.compile(
     rf"^- \*\*(?P<qid>{_ID})\*\* \((?P<slot>.+) · (?P<status>{_Q_STATUS_ALT})"
-    rf" · 검증 (?P<result>{_Q_RESULT_ALT})\)$"
+    rf" · 검증 (?P<result>{_Q_RESULT_ALT})(?: · 부재 (?P<absence_class>{_Q_ABSENCE_ALT}))?\)$"
 )
+#: docauth#351 처분 질문지 2행 — absence_class가 있을 때만, 이 순서로.
+_QUESTIONS_ADJACENT_RE = re.compile(r"^  - 인접: (?P<adjacent>없음|[A-Za-z0-9]+(?:, [A-Za-z0-9]+)*)$")
+#: 구현 r1-01: 인접 앵커 토큰 폐쇄 문법(`A<hash>` 또는 레거시 `L<n>`) — 렌더러 `validate_anchor_token`과 대칭.
+_ANCHOR_TOKEN_RE = re.compile(r"^(?:A[0-9a-f]{12}|L\d+)$")
+_QUESTIONS_PROMPT_RE = re.compile(r"^  - 처분 ○/×: " + re.escape(ABSENCE_PROMPT) + r"$")
 _QUESTIONS_UNKNOWN_RE = re.compile(r"^  \(알려지지 않은 필드 형태 — 원본 그대로\) `(?P<payload>.+)`$")
 
 
@@ -263,12 +245,14 @@ def parse_preamble(cur: Cursor) -> dict[str, str]:
     target = cur.expect(
         _TARGET_BINDING_RE, "'대상 문서: `<path>` (sha256:<64hex>)' binding line (#314 item 2)"
     )
+    registry = cur.expect(_REGISTRY_LINE_RE, "'레지스트리: <상태 표식>' line (#352)")
     return {
         "notice": notice_line,
         "path": binding.group("path"),
         "sha256": binding.group("sha256"),
         "target_path": target.group("path"),
         "target_sha256": target.group("sha256"),
+        "registry_state": registry.group("registry_state"),
     }
 
 
@@ -443,6 +427,40 @@ def parse_rejected_section(cur: Cursor) -> tuple[list[dict[str, Any]], str | Non
     return rows, declared_dist
 
 
+def parse_ju_section(cur: Cursor) -> list[dict[str, Any]]:
+    """docauth#369 — `## 판단 불가` 절. 문법이 조금이라도 다르면 ParseError."""
+    if cur.take(_JU_EMPTY_RE):
+        return []
+    summary_m = cur.expect(_JU_SUMMARY_RE, "'총 N건 (finding a · question b) — …' summary line or empty marker")
+    declared = int(summary_m.group("count"))
+    if declared < 1:
+        raise ParseError("판단 불가 header declares 0건 — the renderer emits the empty marker instead")
+    if int(summary_m.group("nf")) + int(summary_m.group("nq")) != declared:
+        raise ParseError("판단 불가 header finding/question split does not add up to the declared total")
+    items: list[dict[str, Any]] = []
+    for _ in range(declared):
+        m = cur.expect(_JU_ITEM_RE, "a judgment_unavailable line '- **id** (finding Pn|question · reason)'")
+        needed = cur.expect(_JU_NEEDED_RE, "the '필요 입력:' line")
+        attempts = cur.expect(_JU_ATTEMPTS_RE, "the '시도: N자 (…)' line")
+        kind = m.group("kind")
+        items.append(
+            {
+                "id": m.group("id"),
+                "kind": "finding" if kind.startswith("finding") else "question",
+                "severity": kind.split(" ")[1] if kind.startswith("finding") else None,
+                "reason": m.group("reason"),
+                "needed_input": _unwrap_or_fail(needed.group("text"), "judgment_unavailable needed_input"),
+                "attempt_count": int(attempts.group("count")),
+                "result_dist": attempts.group("dist"),
+                "locators": parse_anchor_lines(cur, f"judgment_unavailable {m.group('id')}"),
+            }
+        )
+    nf = sum(1 for item in items if item["kind"] == "finding")
+    if nf != int(summary_m.group("nf")):
+        raise ParseError("판단 불가 header finding count does not match the items that follow")
+    return items
+
+
 def parse_drift_section(cur: Cursor) -> list[dict[str, Any]]:
     if cur.take(_DRIFT_EMPTY_RE):
         return []
@@ -497,13 +515,20 @@ def parse_questions_section(cur: Cursor) -> list[dict[str, Any]]:
         raise ParseError("questions header declares 0건 — the renderer emits the empty marker instead")
     items: list[dict[str, Any]] = []
     for _ in range(declared):
-        m = cur.expect(_QUESTIONS_ID_RE, "a question line '- **id** (`slot` · status · 검증 result)'")
+        m = cur.expect(_QUESTIONS_ID_RE, "a question line '- **id** (`slot` · status · 검증 result[ · 부재 class])'")
+        absence = m.group("absence_class")
+        adjacent = None
+        if absence is not None:
+            adjacent = cur.expect(_QUESTIONS_ADJACENT_RE, "the '인접:' line of an absence question").group("adjacent")
+            cur.expect(_QUESTIONS_PROMPT_RE, "the fixed '처분 ○/×:' prompt line of an absence question")
         items.append(
             {
                 "record_id": m.group("qid"),
                 "convention_slot": _unwrap_or_fail(m.group("slot"), "question convention_slot"),
                 "status": m.group("status"),
                 "result": m.group("result"),
+                "absence_class": absence,
+                "adjacent": adjacent,
                 "locators": parse_anchor_lines(cur, f"question {m.group('qid')}"),
             }
         )
@@ -526,8 +551,10 @@ def parse_body(body_text: str) -> dict[str, Any]:
     cur.expect(re.compile(r"^" + re.escape(_TOP_SECTION_HEADERS[1]) + r"$"), f"'{_TOP_SECTION_HEADERS[1]}' header")
     rejected_rows, rejected_declared_dist = parse_rejected_section(cur)
     cur.expect(re.compile(r"^" + re.escape(_TOP_SECTION_HEADERS[2]) + r"$"), f"'{_TOP_SECTION_HEADERS[2]}' header")
-    drift_items = parse_drift_section(cur)
+    ju_items = parse_ju_section(cur)
     cur.expect(re.compile(r"^" + re.escape(_TOP_SECTION_HEADERS[3]) + r"$"), f"'{_TOP_SECTION_HEADERS[3]}' header")
+    drift_items = parse_drift_section(cur)
+    cur.expect(re.compile(r"^" + re.escape(_TOP_SECTION_HEADERS[4]) + r"$"), f"'{_TOP_SECTION_HEADERS[4]}' header")
     question_items = parse_questions_section(cur)
     if not cur.at_end():
         raise ParseError(f"unexpected trailing content at line {cur.pos + 1}: {cur.peek_raw()!r}")
@@ -536,6 +563,7 @@ def parse_body(body_text: str) -> dict[str, Any]:
         "verified_cards": verified_cards,
         "rejected_rows": rejected_rows,
         "rejected_declared_dist": rejected_declared_dist,
+        "ju_items": ju_items,
         "drift_items": drift_items,
         "question_items": question_items,
     }
@@ -654,6 +682,17 @@ def audit(
     # 헤더에 적힌 대상 문서 이름과 실제로 감사에 넘긴 파일 이름이 다르면 알린다.
     # **약한 검사**다(내용 결속은 위 sha256이 한다) — 파일을 옮기거나 이름을 바꿔
     # 감사하면 걸리지만, 그 경우 요약을 다시 렌더하는 것이 정상 경로다.
+    # docauth#352: 레지스트리 표식은 receipt `decision_registry_state`의 파생값 — 문구가 다르면 조작이다.
+    expected_registry = REGISTRY_STATE_TOKENS.get(receipt.get("decision_registry_state"))
+    if expected_registry is None:
+        errors.append(
+            f"(g) review.md decision_registry_state {receipt.get('decision_registry_state')!r} is not a known state (#352)"
+        )
+    elif preamble["registry_state"] != expected_registry:
+        errors.append(
+            f"(g) preamble registry marker {preamble['registry_state']!r} != review.md decision_registry_state "
+            f"{receipt.get('decision_registry_state')!r} → {expected_registry!r}"
+        )
     if os.path.basename(preamble["target_path"]) != os.path.basename(str(target.path)):
         errors.append(
             f"(i) preamble names target document {preamble['target_path']!r} but this audit was given "
@@ -756,13 +795,20 @@ def audit(
 
     verified_cards = parsed["verified_cards"]
     rejected_rows = parsed["rejected_rows"]
+    ju_items = parsed["ju_items"]
+    ju_finding_items = [item for item in ju_items if item["kind"] == "finding"]
+    ju_question_items = [item for item in ju_items if item["kind"] == "question"]
     drift_items = parsed["drift_items"]
     question_items = parsed["question_items"]
 
     # (a) finding_id 실재성 — review.md의 findings[] 전체와 정확히 일치해야 한다
     # (누락·추가 둘 다 잡는다). 문법 파서는 중복 finding_id 자체를 막지 않으므로
     # (같은 id로 두 번 카드를 만드는 것도 문법상 유효한 반복) 여기서 별도 확인한다.
-    all_ids = [c["finding_id"] for c in verified_cards] + [r["finding_id"] for r in rejected_rows]
+    all_ids = (
+        [c["finding_id"] for c in verified_cards]
+        + [r["finding_id"] for r in rejected_rows]
+        + [j["id"] for j in ju_finding_items]  # docauth#369
+    )
     duplicates = sorted({fid for fid in all_ids if all_ids.count(fid) > 1})
     if duplicates:
         errors.append(f"(a) finding_id(s) rendered more than once in the visible body: {duplicates}")
@@ -995,7 +1041,94 @@ def audit(
                 f"(h) question {qid}: rendered verification result {item['result']!r} != review.md "
                 f"{expected_result!r}"
             )
+        # docauth#351: 부재 형태·인접 근거 대조(부재↔존재 포함).
+        expected_absence = source_q.get("absence_class")
+        if item["absence_class"] != expected_absence:
+            errors.append(
+                f"(h) question {qid}: rendered absence_class {item['absence_class']!r} != review.md {expected_absence!r}"
+            )
+        elif expected_absence is not None:
+            src_adjacent = source_q.get("adjacent_anchors") or []
+            src_evidence = source_q.get("evidence_anchors") or []
+            # 구현 r1-01: 원본·요약이 함께 잘못된 경우 — 인접 앵커는 폐쇄 문법 토큰이고 evidence의 부분집합이어야 한다.
+            bad = [a for a in src_adjacent if not isinstance(a, str) or not _ANCHOR_TOKEN_RE.match(_normalize_ws(a))]
+            if not isinstance(src_adjacent, list) or bad or not set(map(str, src_adjacent)).issubset(set(map(str, src_evidence))):
+                errors.append(
+                    f"(h) question {qid}: review.md adjacent_anchors {src_adjacent!r} are not closed-grammar anchors "
+                    "within evidence_anchors — the source is not a renderable receipt"
+                )
+            expected_adjacent = ", ".join(_normalize_ws(str(a)) for a in src_adjacent) or "없음"
+            if item["adjacent"] != expected_adjacent:
+                errors.append(
+                    f"(h) question {qid}: rendered adjacent anchors {item['adjacent']!r} != review.md {expected_adjacent!r}"
+                )
         check_anchor_rows(f"question {qid}", item["locators"], source_q)
+
+    # docauth#369 — 판단 불가 절: receipt의 JU finding(순서대로) + JU question(순서대로)과 위치별 1:1 대조.
+    source_ju: list[tuple[str, str, dict[str, Any]]] = [
+        ("finding", str(f.get("finding_id")), f) for f in receipt["findings"]
+        if isinstance(f, dict) and f.get("status") == JUDGMENT_UNAVAILABLE
+    ] + [
+        ("question", str(q.get("record_id")), q) for q in source_questions
+        if isinstance(q, dict) and q.get("status") == JUDGMENT_UNAVAILABLE
+    ]
+    if len(ju_items) != len(source_ju):
+        errors.append(
+            f"(h) 판단 불가 section renders {len(ju_items)} item(s) but review.md has {len(source_ju)} "
+            "judgment_unavailable record(s)"
+        )
+    for idx, item in enumerate(ju_items):
+        if idx >= len(source_ju):
+            continue
+        kind, sid, source = source_ju[idx]
+        label = f"judgment_unavailable {item['id']}"
+        if item["id"] != sid or item["kind"] != kind:
+            errors.append(
+                f"(h) 판단 불가 item at position {idx}: rendered {item['kind']} {item['id']!r} != review.md "
+                f"{kind} {sid!r} — id/content pair may have been swapped"
+            )
+            continue
+        if kind == "finding" and item["severity"] != source.get("severity"):
+            errors.append(f"(h) {label}: rendered severity {item['severity']!r} != review.md {source.get('severity')!r}")
+        block = source.get("judgment_unavailable") if isinstance(source.get("judgment_unavailable"), dict) else {}
+        if item["reason"] != block.get("reason"):
+            errors.append(f"(h) {label}: rendered reason {item['reason']!r} != review.md {block.get('reason')!r}")
+        expected_needed = display_text(_normalize_ws(str(block.get("needed_input"))))
+        if item["needed_input"] != expected_needed:
+            errors.append(f"(h) {label}: rendered needed_input {item['needed_input']!r} != review.md {expected_needed!r}")
+        attempts = block.get("attempts") if isinstance(block.get("attempts"), list) else []
+        # Codex 구현 r1-03: 인원은 전부 세면서 분포는 아는 result만 골라 세면, 알 수 없는 result의
+        # attempt가 분모에만 들어가 "2자 (unresolved 1)"이 거짓 OK가 된다 — 형태를 먼저 본다.
+        bad_attempts = [
+            a for a in attempts if not isinstance(a, dict) or a.get("result") not in JU_RESULT_ORDER
+        ]
+        if bad_attempts:
+            errors.append(
+                f"(h) {label}: review.md carries {len(bad_attempts)} attempt(s) that are not a mapping with "
+                "result pass/kill/unresolved — the source is not a renderable receipt"
+            )
+            continue
+        if item["attempt_count"] != len(attempts):
+            errors.append(f"(h) {label}: rendered attempt count {item['attempt_count']} != review.md {len(attempts)}")
+        counts: dict[str, int] = {}
+        for attempt in attempts:
+            result = attempt.get("result")
+            counts[str(result)] = counts.get(str(result), 0) + 1
+        expected_dist = " · ".join(f"{r} {counts[r]}" for r in JU_RESULT_ORDER if counts.get(r))
+        if item["result_dist"] != expected_dist:
+            errors.append(
+                f"(h) {label}: rendered result distribution {item['result_dist']!r} != recomputed from "
+                f"review.md attempts {expected_dist!r}"
+            )
+        check_anchor_rows(label, item["locators"], source)
+    # JU question은 판단 불가 절과 questions 절 **양쪽**에 실린다 — 두 절의 id 집합이 receipt와 같은지.
+    ju_question_ids = {item["id"] for item in ju_question_items}
+    rendered_ju_status_ids = {item["record_id"] for item in question_items if item["status"] == JUDGMENT_UNAVAILABLE}
+    if ju_question_ids != rendered_ju_status_ids:
+        errors.append(
+            "(h) judgment_unavailable question ids differ between the 판단 불가 section "
+            f"({sorted(ju_question_ids)}) and the questions section ({sorted(rendered_ju_status_ids)})"
+        )
 
     trailing = _trailing_content_after_manifest(summary_text)
     if trailing:
@@ -1068,8 +1201,12 @@ def audit(
 
     by_body_status = {c["finding_id"]: "verified" for c in verified_cards}
     by_body_status.update({r["finding_id"]: "rejected" for r in rejected_rows})
+    by_body_status.update({j["id"]: JUDGMENT_UNAVAILABLE for j in ju_finding_items})  # docauth#369
     by_body: dict[str, dict[str, Any]] = {c["finding_id"]: c for c in verified_cards}
     by_body.update({r["finding_id"]: r for r in rejected_rows})
+    by_body.update({j["id"]: {**j, "finding_id": j["id"]} for j in ju_finding_items})
+    # docauth#369: JU question manifest 항목은 finding_id가 아니라 record_id로 결속된다.
+    by_body_ju_question = {j["id"]: j for j in ju_question_items}
     # v2r2-03: render_human_summary.py의 _render_manifest는 verified item에
     # finding_id/severity/status/tag/quote를, rejected item에
     # finding_id/severity/status/counter_citation_verdict를 예외 없이 전부 채워
@@ -1090,10 +1227,35 @@ def audit(
     _MANIFEST_ITEM_KEYS = {
         "verified": {"finding_id", "severity", "status", "tag", "quote"},
         "rejected": {"finding_id", "severity", "status", "counter_citation_verdict"},
+        JUDGMENT_UNAVAILABLE: {"finding_id", "severity", "status", "reason"},
     }
+    _MANIFEST_JU_QUESTION_KEYS = {"record_id", "status", "reason"}
+    manifest_ju_question_ids: set[str] = set()
     for item in (manifest.get("items") if isinstance(manifest.get("items"), list) else []):
         if not isinstance(item, dict):
             errors.append("(f) render-manifest item is not a mapping")
+            continue
+        if item.get("status") == JUDGMENT_UNAVAILABLE and "finding_id" not in item:
+            # docauth#369: JU question 항목 — record_id로 결속, severity 없음.
+            qid = item.get("record_id")
+            if set(item.keys()) != _MANIFEST_JU_QUESTION_KEYS:
+                errors.append(
+                    f"(f) {qid}: render-manifest judgment_unavailable question item keys are "
+                    f"{sorted(item.keys())}, expected {sorted(_MANIFEST_JU_QUESTION_KEYS)}"
+                )
+                continue
+            body_q = by_body_ju_question.get(qid)
+            if body_q is None:
+                errors.append(f"(f) {qid}: present in render-manifest but not found in the visible 판단 불가 section")
+                continue
+            if qid in manifest_ju_question_ids:
+                errors.append(f"(f) record_id duplicated in render-manifest items[]: {qid}")
+            manifest_ju_question_ids.add(qid)
+            if item.get("reason") != body_q.get("reason"):
+                errors.append(
+                    f"(f) {qid}: manifest reason {item.get('reason')!r} != visible body reason "
+                    f"{body_q.get('reason')!r} — body/manifest inconsistency"
+                )
             continue
         fid = item.get("finding_id")
         body_item = by_body.get(fid)
@@ -1137,6 +1299,17 @@ def audit(
                     f"(f) {fid}: manifest counter_citation_verdict {item.get('counter_citation_verdict')!r} != "
                     f"visible body value {body_item.get('counter_citation_verdict')!r} — body/manifest inconsistency"
                 )
+        if status == JUDGMENT_UNAVAILABLE and item.get("reason") != body_item.get("reason"):
+            errors.append(
+                f"(f) {fid}: manifest reason {item.get('reason')!r} != visible body reason "
+                f"{body_item.get('reason')!r} — body/manifest inconsistency"
+            )
+    missing_ju_questions = sorted(set(by_body_ju_question) - manifest_ju_question_ids)
+    if missing_ju_questions:
+        errors.append(
+            f"(f) judgment_unavailable question(s) present in visible body but missing from render-manifest "
+            f"items[]: {missing_ju_questions}"
+        )
 
     # v2-01: manifest items[]가 body의 모든 finding_id를 커버하는지도 강제한다 —
     # 위 루프는 manifest에 있는 항목만 순회하므로, manifest에서 통째로 빠진
@@ -1159,14 +1332,13 @@ def audit(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("summary", type=Path, help="the rendered summary to re-verify")
-    parser.add_argument("--source", type=Path, required=True, help="the canonical receipt the summary claims to derive from")
+    parser.add_argument("summary", type=Path, help="검증 대상 summary.md")
+    parser.add_argument("--source", type=Path, required=True, help="정본 receipt (review.md)")
     parser.add_argument(
         "--target-doc",
         type=Path,
         required=True,
-        help="the full review target document -- rendered source quotations are pulled out of it "
-             "again and compared, independently of the renderer",
+        help="리뷰 대상 문서 전문 — 렌더된 인용문을 독립적으로 다시 뽑아 대조한다(#314 항목 2)",
     )
     args = parser.parse_args(argv)
 

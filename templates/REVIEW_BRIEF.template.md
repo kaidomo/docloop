@@ -21,6 +21,11 @@
 - ssot_ref: <the input-SSOT version/commit this review stands on — e.g. repo commit sha, doc vN. In git: `git rev-parse --short HEAD`>
 - policy_ref.policy_version: <the policy version this loop checked against; n/a if none>
 
+## Reviewer invocation
+- requested_reasoning_effort: high
+- observed_reasoning_effort: <actual invocation evidence, or unknown>
+- invocation_evidence: <command/log reference; do not infer observation from the request>
+
 ## Caveats / constraints
 - <dependencies / known limits / copy location (apply fixes to the original)>
 

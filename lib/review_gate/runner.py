@@ -35,11 +35,11 @@ except ImportError:  # pragma: no cover - exercised by CLI dispatch
     import validate_input_gate
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TOOL_VERSION = "0.13.0"
-UPSTREAM_REPOSITORY = "kaidomo/docuauthring"
-UPSTREAM_COMMIT = "44604347e95067fe93a9b62280b76d16f516d5b4"
-UPSTREAM_CONTRACT_VERSION = "0.12"
+UPSTREAM_REPOSITORY = "kaidomo/docauth"
+UPSTREAM_COMMIT = "93b256ac1922bc3bdecd3982466b7d4758b226c4"
+UPSTREAM_CONTRACT_VERSION = "0.31"
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_TARGET_BYTES = 10 * 1024 * 1024
@@ -386,24 +386,51 @@ def _freeze_ref(
 
 
 def _freeze_decisions(review_fd: int, rel: PurePosixPath) -> tuple[bytes, list[dict[str, Any]], dict[str, bytes]]:
-    raw = _read_relative(review_fd, rel, "decisions", MAX_SIDECAR_BYTES)
-    data = _load_strict(raw, "decisions")
-    if not isinstance(data, dict):
-        raise GateError("decisions: top level must be a mapping")
-    frozen = copy.deepcopy(data)
+    """Freeze explicit transitive registries and every provenance/signoff reference."""
     provenance: dict[str, bytes] = {}
     rows: list[dict[str, Any]] = []
-    meta = frozen.get("meta")
-    if isinstance(meta, dict):
-        _freeze_ref(review_fd, rel, meta, "source_ref", "source_version_hash", "decisions", "meta", 1, provenance, rows)
-    decisions = frozen.get("decisions")
-    if isinstance(decisions, list):
-        pidx = 2
-        for i, item in enumerate(decisions):
-            if isinstance(item, dict) and ("source_ref" in item or "source_hash" in item):
-                _freeze_ref(review_fd, rel, item, "source_ref", "source_hash", "decisions", f"item-{i+1}", pidx, provenance, rows)
-                pidx += 1
-    return _yaml_bytes(frozen), rows, provenance
+    seen: set[str] = set()
+
+    def capture(current: PurePosixPath, depth: int) -> tuple[str, bytes]:
+        if current.as_posix() in seen or depth > 8:
+            raise GateError("decision includes cycle/duplicate or depth limit")
+        seen.add(current.as_posix())
+        index = len(seen)
+        name = f"registry-{index}.yaml"
+        raw = _read_relative(review_fd, current, "decisions", MAX_SIDECAR_BYTES)
+        data = _load_strict(raw, "decisions")
+        if not isinstance(data, dict):
+            raise GateError("decisions: top level must be a mapping")
+        frozen = copy.deepcopy(data)
+        meta = frozen.get("meta")
+        if isinstance(meta, dict):
+            _freeze_ref(review_fd, current, meta, "source_ref", "source_version_hash", f"decisions-{index}", "meta", 1, provenance, rows)
+            if "includes" in meta:
+                if not isinstance(meta["includes"], list) or not all(isinstance(x, str) for x in meta["includes"]):
+                    raise GateError("decision includes must be paths")
+                included = []
+                for ref in meta["includes"]:
+                    child = _resolve_ref(current, ref, "decision include")
+                    child_name, child_raw = capture(child, depth + 1)
+                    provenance[child_name] = child_raw
+                    included.append(("provenance/" if depth == 0 else "") + child_name)
+                meta["includes"] = included
+        for i, item in enumerate(frozen.get("decisions", [])):
+            if not isinstance(item, dict):
+                continue
+            _freeze_ref(review_fd, current, item, "source_ref", "source_hash", f"decisions-{index}", f"item-{i+1}", i + 2, provenance, rows)
+            signoff = item.get("signoff")
+            if isinstance(signoff, dict):
+                _freeze_ref(review_fd, current, signoff, "ref", "sha256", f"decisions-{index}", f"signoff-{i+1}", i + 2, provenance, rows)
+        if depth:
+            # Child registries already live in frozen/provenance/.
+            for obj, key in [(meta, "source_ref")] + [(item, "source_ref") for item in frozen.get("decisions", []) if isinstance(item, dict)] + [(item.get("signoff"), "ref") for item in frozen.get("decisions", []) if isinstance(item, dict)]:
+                if isinstance(obj, dict) and isinstance(obj.get(key), str) and obj[key].startswith("provenance/"):
+                    obj[key] = obj[key][len("provenance/"):]
+        return name, _yaml_bytes(frozen)
+
+    _, root_raw = capture(rel, 0)
+    return root_raw, rows, provenance
 
 
 def _freeze_terms(review_fd: int, rel: PurePosixPath) -> tuple[bytes, list[dict[str, Any]], dict[str, bytes]]:
@@ -520,13 +547,13 @@ Save the auditable candidate inventory and terminal dispositions as
 docloop review-gate validate-intermediate . results/INTERMEDIATE.yaml --closed
 ```
 
-Save synthesis as `results/SYNTHESIS.md`, then run:
+After independent verification, save the final findings as `results/SYNTHESIS.md`
+and the closed ledger as `results/INTERMEDIATE.yaml`, then run:
 
 ```text
-docloop review-gate audit-anchors results/SYNTHESIS.md \\
+docloop review-gate audit-delivery . delivery-01 results/INTERMEDIATE.yaml results/SYNTHESIS.md \\
   --lens results/L1.md results/L3.md --l2 results/L2.md \\
-  [--scan deterministic/TERM_SCAN.md] [--extra-re '<document-id-regex>'] \
-  --ledger results/INTERMEDIATE.yaml --packet-root .
+  [--scan deterministic/TERM_SCAN.md]
 ```
 
 ANCHOR-FAIL or PROMO-FAIL means incomplete synthesis. Repair at most twice, preserving
@@ -538,13 +565,19 @@ checker.
 def _verification_guide() -> bytes:
     return """# Independent verification handoff — manual step
 
+First preserve the entry ledger under results/ and run:
+`docloop review-gate verify-gate . verify-01 results/ENTRY.yaml`.
+Give each fresh verifier its generated verify_units input. Preserve the entry ledger
+and use a separate final ledger after verification; never overwrite an attempt.
+
 Exclude the writing/synthesis context. Give each verifier the frozen target and one
 finding, with the mandate: try to kill this finding by locating contrary evidence.
 
 - Result values are `pass | kill | unresolved`, separate from finding state.
 - P1 findings require three fresh reviewers; other findings require one.
 - Three-reviewer aggregation is unanimity only: all pass -> pass, all kill -> rejected,
-  any mixture -> blocking unresolved. No majority vote.
+  any mixture -> unresolved. An initial judgment may close as judgment_unavailable
+  only with the required attempts, basis, reason and needed_input evidence. No majority vote.
 - Individual kill is a normal successful refutation and transitions to `rejected`.
 - Before declaring done, three fresh reviewers try to kill the whole review conclusion.
   Any kill/unresolved returns to synthesis as a new or reopened finding.
@@ -567,7 +600,8 @@ Do not edit this immutable guidance file. Create `results/HUMAN_DECISION.md`; ap
 the evidence, verification result, and state transition for each finding. The accepted
 path is `discovered -> accepted -> planned -> applied -> verified`; the refuted path is
 `discovered -> rejected`. `rejected` and `verified` are terminal. Human resolution of an unresolved item must end in accepted or
-rejected; do not invent a terminal enum.
+rejected. Initial findings/questions may instead end in judgment_unavailable with
+the required attempt evidence; unresolved delta verification still blocks.
 
 The review is not done unless every candidate atom has exactly one terminal disposition,
 every finding is verified or rejected, no verification is missing/unresolved, the
@@ -575,7 +609,11 @@ three-reviewer done-preflight is pass, and the unassured-mode acceptance (if app
 is explicit. Record the final v2 receipt as `results/DONE.md`, bound to this packet's
 run ID, target, snapshot, prepared-payload digest, and ledger. Then run
 `docloop review-gate validate-result . results/DONE.md`. This file records a human
-judgment; it does not turn model output into ground truth.
+judgment; it does not turn model output into ground truth. A fully executed review
+with judgment_unavailable returns exit 5 COMPLETE-INDETERMINATE, not done/clear.
+Include execution_status and document_clearance computed from the final ledger,
+verify_gate_ref to the verification attempt, and anchor_guard_ref to the separate
+delivery audit (path/sha256 plus trace_path/trace_sha256).
 """.encode("utf-8")
 
 
@@ -701,6 +739,12 @@ def _validate_prepared_packet(run_folder: str | Path) -> tuple[Path, dict[str, A
         _validate_results_tree(run_path)
     finally:
         os.close(run_fd)
+    if type(run.get("schema_version")) is not int or run["schema_version"] not in (1, 2):
+        raise GateError("RUN schema_version must be integer 1 or 2")
+    if run["schema_version"] == 2:
+        required = {"front_gate_profile.yaml", "front_gate_intake.yaml", "front_gate_input_gate.yaml", "front_gate_decisions_state.json"}
+        if not required.issubset({row["path"] for row in complete["payload_files"]}):
+            raise GateError("new packet requires immutable front-gate archives")
     return run_path, run, complete
 
 
@@ -783,12 +827,17 @@ def _validate_convention_pair(
 def _prepare(args: argparse.Namespace) -> int:
     if not RUN_ID_RE.fullmatch(args.run_id):
         raise GateError("run-id must match [a-z0-9][a-z0-9-]{0,63}")
-    if bool(args.decisions) == bool(args.unassured):
+    if bool(args.decisions or args.decisions_unchecked) == bool(args.unassured):
         raise GateError("choose exactly one of --decisions or --unassured")
     if bool(args.terms) == bool(args.no_terms):
         raise GateError("choose exactly one of --terms or --no-terms")
-    if bool(args.docmodel) == bool(args.no_docmodel):
-        raise GateError("choose exactly one of --docmodel or --no-docmodel")
+    candidate_mode = bool(args.docmodel_candidate)
+    if sum((bool(args.docmodel), bool(args.no_docmodel), candidate_mode)) != 1:
+        raise GateError("choose exactly one of --docmodel, --no-docmodel or --docmodel-candidate")
+    if candidate_mode != bool(args.docmodel_approvals):
+        raise GateError("candidates require --docmodel-approvals and vice versa")
+    if candidate_mode and not (args.convention_profile and args.convention_intake):
+        raise GateError("candidate mode requires an actual convention profile/intake pair")
     if bool(args.convention_profile) != bool(args.convention_intake):
         raise GateError("--convention-profile and --convention-intake must be supplied together")
     if bool(args.prior_round_output) != (args.prior_round_no is not None):
@@ -801,8 +850,10 @@ def _prepare(args: argparse.Namespace) -> int:
             "(§1 ⑦ — a draft or unknown-maturity target must supply its registered open items)"
         )
 
+    if args.decisions_unchecked:
+        args.unassured = True
     target_rel = _normalize_rel(args.target, "target")
-    decisions_rel = _normalize_rel(args.decisions, "decisions") if args.decisions else None
+    decisions_rel = _normalize_rel(args.decisions or args.decisions_unchecked, "decisions") if (args.decisions or args.decisions_unchecked) else None
     axes_rel = _normalize_rel(args.axes, "axes") if args.axes else None
     terms_rel = _normalize_rel(args.terms, "terms") if args.terms else None
     docmodel_rel = _normalize_rel(args.docmodel, "docmodel") if args.docmodel else None
@@ -868,8 +919,11 @@ def _prepare(args: argparse.Namespace) -> int:
         provenance_rows: list[dict[str, Any]] = []
         decisions_raw = None
         if decisions_rel:
-            decisions_raw, rows, files = _freeze_decisions(review_fd, decisions_rel)
-            provenance_rows.extend(rows); provenance.update(files)
+            if args.decisions_unchecked:
+                decisions_raw = _read_relative(review_fd, decisions_rel, "unchecked decisions", MAX_SIDECAR_BYTES)
+            else:
+                decisions_raw, rows, files = _freeze_decisions(review_fd, decisions_rel)
+                provenance_rows.extend(rows); provenance.update(files)
         terms_raw = None
         if terms_rel:
             terms_raw, rows, files = _freeze_terms(review_fd, terms_rel)
@@ -878,6 +932,28 @@ def _prepare(args: argparse.Namespace) -> int:
         if docmodel_rel:
             docmodel_raw, rows, files = _freeze_docmodel(review_fd, docmodel_rel)
             provenance_rows.extend(rows); provenance.update(files)
+
+        candidate_files = {}
+        selected_candidate = None
+        if candidate_mode:
+            try:
+                from .docmodel_match import select_candidate
+            except ImportError:
+                from docmodel_match import select_candidate
+            approvals_rel = _normalize_rel(args.docmodel_approvals, "docmodel approvals")
+            approvals_raw = _read_relative(review_fd, approvals_rel, "docmodel approvals", MAX_SIDECAR_BYTES)
+            for candidate in args.docmodel_candidate:
+                crel = _normalize_rel(candidate, "docmodel candidate")
+                if crel.as_posix() in candidate_files:
+                    raise GateError("duplicate docmodel candidate")
+                candidate_files[crel.as_posix()] = _read_relative(review_fd, crel, "docmodel candidate", MAX_SIDECAR_BYTES)
+            try:
+                selected_candidate = select_candidate(_load_strict(convention_intake_raw, "intake"), candidate_files, approvals_raw)
+            except ValueError as exc:
+                raise GateError(str(exc)) from exc
+            if selected_candidate is not None:
+                docmodel_raw = candidate_files[selected_candidate]
+                docmodel_rel = PurePosixPath(selected_candidate)
 
         open_items_raw = None
         if open_items_ledger_rel:
@@ -900,7 +976,7 @@ def _prepare(args: argparse.Namespace) -> int:
             convention_intake_raw or b"",
             open_items_raw or b"",
             prior_round_output_raw or b"",
-        )) + sum(map(len, provenance.values()))
+        )) + sum(map(len, provenance.values())) + sum(map(len, candidate_files.values())) + (len(approvals_raw) if candidate_mode else 0)
         if captured_total > MAX_CAPTURE_BYTES:
             raise GateError(f"capture byte cap exceeded ({captured_total} > {MAX_CAPTURE_BYTES})")
 
@@ -933,10 +1009,18 @@ def _prepare(args: argparse.Namespace) -> int:
                 _write_relative(run_fd, PurePosixPath("frozen/prior-round-output.md"), prior_round_output_raw)
             for name, raw in provenance.items():
                 _write_relative(run_fd, PurePosixPath(f"frozen/provenance/{name}"), raw)
+            if candidate_mode:
+                _write_relative(run_fd, PurePosixPath("frozen/docmodel-approvals.yaml"), approvals_raw)
+                candidate_index = []
+                for i, (name, raw) in enumerate(candidate_files.items()):
+                    frozen_name = f"frozen/docmodel-candidates/{i}.yaml"
+                    _write_relative(run_fd, PurePosixPath(frozen_name), raw)
+                    candidate_index.append({"source": name, "frozen": frozen_name, "sha256": _sha(raw)})
+                _write_relative(run_fd, PurePosixPath("frozen/docmodel-candidates.json"), _json_bytes(candidate_index))
             _phase("freeze")
 
             decisions_audit = None
-            if decisions_raw is not None:
+            if decisions_raw is not None and not args.decisions_unchecked:
                 decisions_audit = _run_tool(TOOL_DIR / "validate_decisions.py", [str(run_path / "frozen" / "decisions.yaml")], "decision registry")
                 _write_relative(run_fd, PurePosixPath("deterministic/DECISIONS_VALIDATION.txt"), decisions_audit)
             term_audit = None
@@ -986,21 +1070,55 @@ def _prepare(args: argparse.Namespace) -> int:
                 }
             try:
                 trace = front_gate.FrontGateTrace()
-                trace.preflight(preflight_intake, preflight_profile)
+                trace.preflight(preflight_intake, preflight_profile,
+                                docmodel_path=(run_path / "frozen/docmodel.yaml") if selected_candidate else None,
+                                docmodel_bytes=docmodel_raw if selected_candidate else None)
                 trace.record_input_gate(
                     input_gate, run_path, target_snapshot=f"sha256:{target_sha}"
                 )
+                try:
+                    from .validate_decisions import collect_union_files
+                except ImportError:
+                    from validate_decisions import collect_union_files
+                registry_state = "unchecked" if args.decisions_unchecked else ("checked" if decisions_raw is not None else "absent")
+                registry_path = run_path / "frozen/decisions.yaml" if decisions_raw is not None else None
+                registry_files = None
+                entries = []
+                if registry_path is not None and registry_state == "checked":
+                    entries, registry_errors = collect_union_files(registry_path)
+                    if registry_errors:
+                        raise ValueError("; ".join(registry_errors))
+                    registry_files = {entry["abs"]: entry["bytes"] for entry in entries}
+                trace.record_decision_registry(registry_state, path=registry_path, content=decisions_raw, files=registry_files)
                 for lens_id in front_gate.LENSES:
                     trace.start_lens(lens_id)
             except (RuntimeError, ValueError) as exc:
                 raise GateError(f"input gate: {exc}") from exc
+            _write_relative(run_fd, PurePosixPath("front_gate_profile.yaml"), convention_profile_raw if convention_profile_raw is not None else _yaml_bytes(preflight_profile))
+            _write_relative(run_fd, PurePosixPath("front_gate_intake.yaml"), convention_intake_raw if convention_intake_raw is not None else _yaml_bytes(preflight_intake))
+            _write_relative(run_fd, PurePosixPath("front_gate_input_gate.yaml"), _yaml_bytes(input_gate))
+            if selected_candidate:
+                _write_relative(run_fd, PurePosixPath("front_gate_docmodel.yaml"), docmodel_raw)
+            declaration = {"state": registry_state, "path": str(registry_path) if registry_path else None}
+            if decisions_raw is not None:
+                _write_relative(run_fd, PurePosixPath("front_gate_decisions.yaml"), decisions_raw)
+                if registry_state == "checked":
+                    declaration["files"] = []
+                for i, entry in enumerate(entries):
+                    archive = f"front_gate_decisions/{i}.yaml"
+                    _write_relative(run_fd, PurePosixPath(archive), entry["bytes"])
+                    declaration["files"].append({"declared_path": entry["abs"], "archive": archive, "sha256": _sha(entry["bytes"])})
+                reg_event = next(e for e in trace.events if e["event"] == "decision_registry_recorded")
+                if registry_state == "checked":
+                    declaration["union_sha256"] = reg_event.get("union_sha256")
+            _write_relative(run_fd, PurePosixPath("front_gate_decisions_state.json"), _json_bytes(declaration))
             front_gate_trace_raw = _json_bytes({"review_front_gate_trace": trace.events})
             _write_relative(run_fd, PurePosixPath("deterministic/FRONT_GATE_TRACE.json"), front_gate_trace_raw)
             _phase("validate")
 
             _write_relative(run_fd, PurePosixPath("lens/L1/PROMPT.md"), _prompt_l1(target_sha))
             _write_relative(run_fd, PurePosixPath("lens/L1/TARGET.md"), target_numbered)
-            _write_relative(run_fd, PurePosixPath("lens/L2/PROMPT.md"), _prompt_l2(target_sha, decisions_raw is not None))
+            _write_relative(run_fd, PurePosixPath("lens/L2/PROMPT.md"), _prompt_l2(target_sha, bool(args.decisions)))
             _write_relative(run_fd, PurePosixPath("lens/L2/TARGET.md"), target_numbered)
             if decisions_raw is not None:
                 _write_relative(run_fd, PurePosixPath("lens/L2/DECISIONS.yaml"), decisions_raw)
@@ -1059,11 +1177,17 @@ def _prepare(args: argparse.Namespace) -> int:
             # docloop, run_root is always the packet root itself, hence ".".
             receipt_input_gate = {k: v for k, v in input_gate.items() if k != "schema_version"}
             receipt_input_gate["run_root"] = "."
+            structure_event = next((e for e in trace.events if e.get("event") == "structure_axis_judged_via_direct_docmodel"), None)
             receipt_scaffold = {
+                "docloop_contract_version": 2,
+                "decision_registry_state": "present_unchecked" if args.decisions_unchecked else ("checked" if decisions_raw is not None else "absent_unassured"),
+                "structure_axis": "judged" if structure_event or not front_gate.declares_profile_not_applicable(preflight_intake) else "undetermined",
                 "input_gate": receipt_input_gate,
                 "front_gate_ref": front_gate_ref,
                 "round_context": round_context,
             }
+            if structure_event:
+                receipt_scaffold["structure_axis_docmodel_ref"] = structure_event["structure_axis_docmodel_ref"]
             _write_relative(
                 run_fd, PurePosixPath("deterministic/RECEIPT_SCAFFOLD.json"), _json_bytes(receipt_scaffold)
             )
@@ -1120,6 +1244,7 @@ def _prepare_parser() -> argparse.ArgumentParser:
     ap.add_argument("target", help="one UTF-8 file, relative to review-folder")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--decisions")
+    g.add_argument("--decisions-unchecked", help="freeze an existing registry without granting suppression authority")
     g.add_argument("--unassured", action="store_true")
     ap.add_argument("--axes")
     g = ap.add_mutually_exclusive_group(required=True)
@@ -1128,6 +1253,8 @@ def _prepare_parser() -> argparse.ArgumentParser:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--docmodel")
     g.add_argument("--no-docmodel", action="store_true")
+    g.add_argument("--docmodel-candidate", action="append", default=[])
+    ap.add_argument("--docmodel-approvals")
     ap.add_argument("--convention-profile")
     ap.add_argument("--convention-intake")
     ap.add_argument(
@@ -1158,6 +1285,11 @@ def usage() -> str:
       [--open-items-ledger FILE]   # required when --target-maturity is draft or unknown
       [--prior-round-output FILE --prior-round-no N]
       [--convention-profile FILE --convention-intake FILE]
+      # alternative docmodel mode: --docmodel-candidate FILE (repeat) --docmodel-approvals FILE
+      # alternative decisions mode: --decisions-unchecked FILE (unassured)
+  docloop review-gate verify-gate <packet> <attempt-id> <entry-ledger-relative>
+  docloop review-gate audit-delivery <packet> <attempt-id> <final-ledger-relative> <findings-relative>
+      [--lens FILE ...] [--l2 FILE ...] [--scan FILE]  # at least one required
   docloop review-gate check <review-gate-run-folder>
   docloop review-gate validate-decisions <decisions.yaml> [--skip-hash]
   docloop review-gate validate-intermediate <run-folder> <ledger-relative-path> [--closed]
@@ -1168,7 +1300,7 @@ def usage() -> str:
   docloop review-gate scan-terms <terms.yaml> <target>
   docloop review-gate audit-anchors <synthesis> [upstream-compatible options]
   docloop review-gate match-rounds <prev-round-output> <curr-round-output>
-      --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md]
+      --prev-round N-1 --curr-round N [--lang ko|en] [--out TABLE.md] [--allow-empty-side prev|curr]
   docloop review-gate render-summary <done review.md> --target-doc <target document>
       --output <summary.md> [--tags <tags.yaml>] [--force]
       (opt-in: renders a human-readable summary from a done receipt. review.md stays
@@ -1189,12 +1321,121 @@ input_gate/front_gate_ref/round_context fields ready to copy into DONE.md.
 """
 
 
+def _result_input(fd: int, value: str, label: str) -> tuple[PurePosixPath, bytes]:
+    rel = _normalize_rel(value, label)
+    if rel.parts[0] != "results" or len(rel.parts) < 2:
+        raise GateError(f"{label}: must be a packet-relative results file")
+    return rel, _read_relative(fd, rel, label, MAX_CAPTURE_BYTES)
+
+
+def _produce_result(command: str, argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog=f"docloop review-gate {command}")
+    ap.add_argument("packet")
+    ap.add_argument("attempt")
+    ap.add_argument("ledger")
+    if command == "audit-delivery":
+        ap.add_argument("findings")
+        ap.add_argument("--lens", nargs="+", default=[])
+        ap.add_argument("--l2", nargs="+", default=[])
+        ap.add_argument("--scan")
+    args = ap.parse_args(argv)
+    root, run, _ = _validate_prepared_packet(args.packet)
+    if run["schema_version"] != 2:
+        raise GateError("new result producers require a schema-2 prepared packet")
+    if not RUN_ID_RE.fullmatch(args.attempt):
+        raise GateError("invalid result attempt id")
+    fd = _open_directory(root, "packet")
+    try:
+        ledger_rel, ledger_raw = _result_input(fd, args.ledger, "entry/final ledger")
+        try:
+            from . import validate_review_intermediate as intermediate
+            from . import review_verify_gate as verify
+        except ImportError:
+            import validate_review_intermediate as intermediate
+            import review_verify_gate as verify
+        ledger = _load_strict(ledger_raw, "ledger")
+        if not isinstance(ledger, dict) or set(ledger) != {intermediate.ROOT_KEY}:
+            raise GateError("ledger must contain exactly review_intermediate")
+        registry, registry_error = intermediate.load_run_registry(root)
+        try:
+            from .validate_input_gate import defers_verification
+        except ImportError:
+            from validate_input_gate import defers_verification
+        prepared_gate = _load_strict(_read_relative(fd, PurePosixPath("front_gate_input_gate.yaml"), "prepared gate", MAX_CAPTURE_BYTES), "prepared gate")
+        deferred = defers_verification(prepared_gate)
+        if command == "verify-gate" and deferred:
+            raise GateError("prepared input gate defers verification; no verification attempt may open")
+        errors = intermediate.validate_data(ledger[intermediate.ROOT_KEY], require_closed=command == "audit-delivery" and not deferred, packet_root=root, registry=registry)
+        if registry_error:
+            errors.append(registry_error)
+        body = ledger[intermediate.ROOT_KEY]
+        if body.get("snapshot_id") != "sha256:" + run["target"]["sha256"] or body.get("target") != run["target"]["source"]:
+            errors.append("ledger target/snapshot differs from prepared target")
+        if errors:
+            raise GateError("result ledger: " + "; ".join(errors))
+        input_bytes = {ledger_rel.as_posix(): ledger_raw}
+        if command == "audit-delivery":
+            if not (args.lens or args.l2 or args.scan):
+                raise GateError("audit-delivery requires at least one lens/l2/scan input")
+            for value in [args.findings, *args.lens, *args.l2]:
+                rel, raw = _result_input(fd, value, "delivery input")
+                input_bytes[rel.as_posix()] = raw
+            if args.scan:
+                scan_rel = _normalize_rel(args.scan, "scan")
+                if scan_rel.as_posix() == "deterministic/TERM_SCAN.md":
+                    scan_raw = _read_relative(fd, scan_rel, "frozen term scan", MAX_CAPTURE_BYTES)
+                else:
+                    scan_rel, scan_raw = _result_input(fd, args.scan, "scan")
+                input_bytes[scan_rel.as_posix()] = scan_raw
+        result_fd = _mkdir_open(fd, "results", False)
+        try:
+            attempt_fd = _mkdir_open(result_fd, args.attempt, True)
+        finally:
+            os.close(result_fd)
+        attempt = root / "results" / args.attempt
+        try:
+            if command == "verify-gate":
+                source = _read_relative(fd, PurePosixPath("frozen/target.txt"), "frozen source", MAX_TARGET_BYTES)
+                events = verify.build_verify_trace(ledger, source_snapshot=source)
+                units = verify.build_verification_units(ledger, source_snapshot=source)
+                if not units:
+                    raise GateError("verification requires at least one unit")
+                for name, content in units:
+                    _write_relative(attempt_fd, PurePosixPath("verify_units") / name, content.encode("utf-8"))
+                _write_relative(attempt_fd, PurePosixPath("verify_gate_ledger.yaml"), ledger_raw)
+                _write_relative(attempt_fd, PurePosixPath("verify_gate_source.md"), source)
+                artifact = "verify_gate_trace.json"
+                _write_relative(attempt_fd, PurePosixPath(artifact), _json_bytes({"review_verify_gate_trace": events}))
+            else:
+                tool_args = [str(root / args.findings), "--packet-root", str(root), "--ledger", ledger_rel.as_posix(), "--run-root", str(attempt)]
+                if args.lens: tool_args += ["--lens", *[str(root / x) for x in args.lens]]
+                if args.l2: tool_args += ["--l2", *[str(root / x) for x in args.l2]]
+                if args.scan: tool_args += ["--scan", str(root / args.scan)]
+                output = _run_tool(TOOL_DIR / "audit_anchors.py", tool_args, "delivery anchor audit")
+                _write_relative(attempt_fd, PurePosixPath("AUDIT.txt"), output)
+                artifact = "anchor_guard_trace.json"
+            for name, raw in input_bytes.items():
+                if _read_relative(fd, PurePosixPath(name), "result input recheck", MAX_CAPTURE_BYTES) != raw:
+                    raise GateError("result input changed while producing attempt")
+            _write_relative(attempt_fd, PurePosixPath("COMPLETE.json"), _json_bytes({"state": "complete", "artifact": artifact}))
+            os.fsync(attempt_fd)
+        finally:
+            os.close(attempt_fd)
+    finally:
+        os.close(fd)
+    _validate_prepared_packet(root)
+    print(f"{command}: results/{args.attempt}/{artifact}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in {"-h", "--help", "help"}:
         print(usage(), end="")
         return 0
     command, rest = args[0], args[1:]
+    if command in {"verify-gate", "audit-delivery"}:
+        return _produce_result(command, rest)
     if command == "prepare":
         return _prepare(_prepare_parser().parse_args(rest))
     if command == "check":

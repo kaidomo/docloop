@@ -6,6 +6,8 @@
 
 대상 문서: `tests/fixtures/review-gate/human-summary/target.md` (sha256:9025ed2a9434bda84896b73dee2cd5f35508815403529f6926aa97a6aab880c4)
 
+레지스트리: 미기재(0.32 이전 receipt)
+
 
 ## 검증된 지적
 
@@ -20,6 +22,11 @@
 ## 반증된 지적
 
 반증(rejected)된 항목 없음.
+
+
+## 판단 불가
+
+판단 불가 항목 없음.
 
 
 ## 표기·용어 드리프트
